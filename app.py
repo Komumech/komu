@@ -8,20 +8,25 @@ from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- 0. SECRETS & CONFIG ---
-if "GEMINI_KEY" in st.secrets:
-    GEMINI_KEY = st.secrets["GEMINI_KEY"]
-    PINECONE_KEY = st.secrets["PINECONE_KEY"]
-    HF_TOKEN = st.secrets["HF_TOKEN"]
-else:
+# --- 0. SECRETS & CONFIG (Dual-Config System) ---
+def load_secrets():
+    """Checks Streamlit Secrets (Cloud) first, then falls back to config.py (Local)."""
+    # 1. Try Streamlit Secrets
+    if "GEMINI_KEY" in st.secrets:
+        return st.secrets["GEMINI_KEY"], st.secrets["PINECONE_KEY"], st.secrets["HF_TOKEN"]
+    
+    # 2. Try Local config.py
     try:
-        from config import GEMINI_KEY, PINECONE_KEY, HF_TOKEN
-    except (ImportError, ModuleNotFoundError):
-        st.error("Config file not found and Secrets not set. Please check your setup.")
+        import config
+        return config.GEMINI_KEY, config.PINECONE_KEY, config.HF_TOKEN
+    except (ImportError, AttributeError):
+        st.error("Missing Credentials: Set 'secrets.toml' in Streamlit or create 'config.py' locally.")
         st.stop()
 
-# RELIABLE ROUTER ENDPOINT (Llama-3.1-8B)
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/meta-llama/Llama-3.1-8B-Instruct"
+GEMINI_KEY, PINECONE_KEY, HF_TOKEN = load_secrets()
+
+# RELIABLE MISTRAL ENDPOINT (Fewer 403/404 errors than Llama)
+HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
 RESULTS_PER_PAGE = 8
@@ -79,20 +84,22 @@ def fetch_content(url):
         return ""
 
 def query_hf_model(prompt):
-    """Calls the Hugging Face Router API with Llama-3 formatting."""
+    """Calls Mistral-7B with optimized formatting and auto-retry for loading."""
+    formatted_prompt = f"<s>[INST] {prompt} [/INST]"
+    
     payload = {
-        "inputs": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
-        "parameters": {"max_new_tokens": 600, "temperature": 0.6, "return_full_text": False}
+        "inputs": formatted_prompt,
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False},
+        "options": {"wait_for_model": True} # Critical to avoid 503 errors
     }
-    response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=15)
+    
+    response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=20)
     
     if response.status_code == 200:
         res_json = response.json()
         if isinstance(res_json, list):
             return res_json[0]['generated_text']
         return res_json.get('generated_text', "Error parsing response.")
-    elif response.status_code == 503:
-        raise Exception("Model is starting up. Please wait a moment and search again.")
     else:
         raise Exception(f"HF Error {response.status_code}: {response.text}")
 
@@ -198,9 +205,9 @@ if is_results_page:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # AI RESEARCH TRIGGER
+            # AI RESEARCH TRIGGER (Runs automatically if summary is missing)
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
-                with st.status("🧠 Thinking with Llama...", expanded=False) as status:
+                with st.status("🧠 Generating AI Overview...", expanded=False) as status:
                     try:
                         with ThreadPoolExecutor(max_workers=4) as exec:
                             full_txts = list(exec.map(fetch_content, st.session_state.top_urls))
