@@ -8,14 +8,11 @@ from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- 0. SECRETS & CONFIG (Dual-Config System) ---
+# --- 0. SECRETS & CONFIG ---
 def load_secrets():
     """Checks Streamlit Secrets (Cloud) first, then falls back to config.py (Local)."""
-    # 1. Try Streamlit Secrets
     if "GEMINI_KEY" in st.secrets:
         return st.secrets["GEMINI_KEY"], st.secrets["PINECONE_KEY"], st.secrets["HF_TOKEN"]
-    
-    # 2. Try Local config.py
     try:
         import config
         return config.GEMINI_KEY, config.PINECONE_KEY, config.HF_TOKEN
@@ -25,9 +22,9 @@ def load_secrets():
 
 GEMINI_KEY, PINECONE_KEY, HF_TOKEN = load_secrets()
 
-# RELIABLE MISTRAL ENDPOINT (Fewer 403/404 errors than Llama)
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
-HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
+# UPDATED: Using the new Router endpoint to fix HF Error 410
+HF_ROUTER_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.3"
+HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
 
 RESULTS_PER_PAGE = 8
 SEARCH_CONCURRENCY = 12 
@@ -44,8 +41,8 @@ st.markdown("""
     .image-card { border-radius: 12px; overflow: hidden; background: #f8f9fa; border: 1px solid #dadce0; transition: transform 0.2s; }
     .image-card img { width: 100%; height: 160px; object-fit: cover; display: block; }
     .image-caption { padding: 10px; font-size: 13px; color: #3c4043; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .komu-logo-large { font-family: 'Product Sans', sans-serif; font-size: 90px; font-weight: 700; text-align: center; margin-top: 15vh; margin-bottom: 30px; letter-spacing: -2px; }
-    .komu-logo-small { font-family: 'Product Sans', sans-serif; font-size: 32px; font-weight: 700; margin-top: -0.7rem; letter-spacing: -1px; }
+    .komu-logo-large { font-family: 'Product Sans', sans-serif; font-size: 90px; font-weight: 700; text-align: center; margin-top: 15vh; margin-bottom: 30px; letter-spacing: -2px; color: #4285f4; }
+    .komu-logo-small { font-family: 'Product Sans', sans-serif; font-size: 32px; font-weight: 700; margin-top: -0.7rem; letter-spacing: -1px; color: #4285f4; }
     .ai-overview-card { background: linear-gradient(135deg, #f0f4f9 0%, #e8eaf6 100%); border: 1px solid #dadce0; border-radius: 16px; padding: 24px; margin-bottom: 30px; max-width: 652px; }
     .source-chip { display: inline-block; padding: 4px 12px; border-radius: 16px; background: white; border: 1px solid #dadce0; font-size: 12px; color: #1a0dab; text-decoration: none; margin-right: 8px; margin-top: 8px; font-weight: 500; }
     .source-chip:hover { background: #f1f3f4; border-color: #4285f4; }
@@ -83,25 +80,32 @@ def fetch_content(url):
     except Exception:
         return ""
 
-def query_hf_model(prompt):
-    """Calls Mistral-7B with optimized formatting and auto-retry for loading."""
-    formatted_prompt = f"<s>[INST] {prompt} [/INST]"
-    
-    payload = {
-        "inputs": formatted_prompt,
-        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False},
-        "options": {"wait_for_model": True} # Critical to avoid 503 errors
-    }
-    
-    response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=20)
-    
-    if response.status_code == 200:
-        res_json = response.json()
-        if isinstance(res_json, list):
-            return res_json[0]['generated_text']
-        return res_json.get('generated_text', "Error parsing response.")
-    else:
-        raise Exception(f"HF Error {response.status_code}: {response.text}")
+def query_ai_model(prompt):
+    """Hybrid AI caller: Tries Mistral (HF) first, falls back to Gemini 1.5 Flash."""
+    # Attempt 1: Hugging Face Router
+    try:
+        formatted_prompt = f"<s>[INST] {prompt} [/INST]"
+        payload = {
+            "inputs": formatted_prompt,
+            "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False},
+            "options": {"wait_for_model": True}
+        }
+        response = requests.post(HF_ROUTER_URL, headers=HF_HEADERS, json=payload, timeout=15)
+        if response.status_code == 200:
+            res_json = response.json()
+            return res_json[0]['generated_text'] if isinstance(res_json, list) else res_json.get('generated_text')
+    except Exception:
+        pass # Fallback to Gemini
+
+    # Attempt 2: Gemini 1.5 Flash
+    try:
+        response = search_client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        raise Exception(f"AI Generation failed: {str(e)}")
 
 def parallel_search_worker(vector, top_k=60):
     return index.query(vector=vector, top_k=top_k, include_metadata=True)
@@ -205,7 +209,7 @@ if is_results_page:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # AI RESEARCH TRIGGER (Runs automatically if summary is missing)
+            # AI RESEARCH TRIGGER
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
                 with st.status("🧠 Generating AI Overview...", expanded=False) as status:
                     try:
@@ -219,7 +223,7 @@ if is_results_page:
                         
                         prompt = f"Summarize precisely: '{st.session_state.query}'. Use the following data:\n\n{ctx}"
                         
-                        summary = query_hf_model(prompt)
+                        summary = query_ai_model(prompt)
                         st.session_state.ai_overview = summary
                         st.session_state.ai_status = "complete"
                         st.rerun() 
