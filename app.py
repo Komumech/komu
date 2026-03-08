@@ -8,14 +8,19 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 0. SECRETS & CONFIG ---
-# This block allows the app to stay secure on the web while remaining functional locally.
+# This block handles both local development and Streamlit Cloud deployment
 if "GEMINI_KEY" in st.secrets:
+    # CLOUD: Pull from Streamlit Secrets dashboard
     GEMINI_KEY = st.secrets["GEMINI_KEY"]
     PINECONE_KEY = st.secrets["PINECONE_KEY"]
     OVERVIEW_KEY = st.secrets["OVERVIEW_KEY"]
 else:
-    # Fallback for local development
-    from config import GEMINI_KEY, PINECONE_KEY, OVERVIEW_KEY
+    # LOCAL: Fallback to your local config.py
+    try:
+        from config import GEMINI_KEY, PINECONE_KEY, OVERVIEW_KEY
+    except (ImportError, ModuleNotFoundError):
+        st.error("Config file not found and Secrets not set. Please check your setup.")
+        st.stop()
 
 OVERVIEW_MODEL = "gemini-2.0-flash-lite"
 RESULTS_PER_PAGE = 8
@@ -96,7 +101,7 @@ def fetch_content(url):
     try: 
         downloaded = trafilatura.fetch_url(url)
         return trafilatura.extract(downloaded) or ""
-    except Exception as e:
+    except Exception:
         return ""
 
 def parallel_search_worker(vector, top_k=60):
