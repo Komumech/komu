@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 if "GEMINI_KEY" in st.secrets:
     GEMINI_KEY = st.secrets["GEMINI_KEY"]
     PINECONE_KEY = st.secrets["PINECONE_KEY"]
-    HF_TOKEN = st.secrets["HF_TOKEN"] # Replace OVERVIEW_KEY with HF_TOKEN in your secrets
+    HF_TOKEN = st.secrets["HF_TOKEN"]
 else:
     try:
         from config import GEMINI_KEY, PINECONE_KEY, HF_TOKEN
@@ -20,8 +20,8 @@ else:
         st.error("Config file not found and Secrets not set. Please check your setup.")
         st.stop()
 
-# Hugging Face Configuration
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+# RELIABLE ROUTER ENDPOINT (Llama-3.1-8B)
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/meta-llama/Llama-3.1-8B-Instruct"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 
 RESULTS_PER_PAGE = 8
@@ -78,6 +78,24 @@ def fetch_content(url):
     except Exception:
         return ""
 
+def query_hf_model(prompt):
+    """Calls the Hugging Face Router API with Llama-3 formatting."""
+    payload = {
+        "inputs": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+        "parameters": {"max_new_tokens": 600, "temperature": 0.6, "return_full_text": False}
+    }
+    response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=15)
+    
+    if response.status_code == 200:
+        res_json = response.json()
+        if isinstance(res_json, list):
+            return res_json[0]['generated_text']
+        return res_json.get('generated_text', "Error parsing response.")
+    elif response.status_code == 503:
+        raise Exception("Model is starting up. Please wait a moment and search again.")
+    else:
+        raise Exception(f"HF Error {response.status_code}: {response.text}")
+
 def parallel_search_worker(vector, top_k=60):
     return index.query(vector=vector, top_k=top_k, include_metadata=True)
 
@@ -85,18 +103,6 @@ def truncate_url(url, max_len=60):
     parsed = urlparse(url)
     display_url = f"{parsed.netloc}{parsed.path}"
     return (display_url[:max_len] + "...") if len(display_url) > max_len else display_url
-
-def query_hf_model(prompt):
-    """Calls the Hugging Face Inference API."""
-    payload = {
-        "inputs": f"<s>[INST] {prompt} [/INST]",
-        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
-    }
-    response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload)
-    if response.status_code == 200:
-        return response.json()[0]['generated_text']
-    else:
-        raise Exception(f"HF API Error: {response.text}")
 
 # --- 5. UI LAYOUT ---
 is_results_page = len(st.session_state.results) > 0 or len(st.session_state.query) > 0
@@ -112,7 +118,7 @@ else:
     _, col_search, _ = st.columns([1, 4, 1])
     with col_search: user_query = st.text_input("Search", value=st.session_state.query, key="search_bar_home", label_visibility="collapsed")
 
-# --- 6. SUPER-FAST SEARCH LOGIC ---
+# --- 6. SEARCH LOGIC ---
 if user_query and user_query != st.session_state.query:
     with st.spinner("🚀 Searching..."):
         try:
@@ -144,7 +150,7 @@ if user_query and user_query != st.session_state.query:
             st.session_state.image_results = img_results
             st.session_state.query = user_query
             st.session_state.page = 1
-            st.session_state.top_urls = [r.get('url') for r in text_results[:4]] # Reduced to 4 for HF context window
+            st.session_state.top_urls = [r.get('url') for r in text_results[:4]]
             st.session_state.ai_overview = ""
             st.session_state.ai_status = "idle" 
             st.session_state.ai_error = None
@@ -157,7 +163,7 @@ if is_results_page:
     with tab_all:
         _, content_col = st.columns([0.2, 9.8])
         with content_col:
-            # AI OVERVIEW RENDER
+            # AI OVERVIEW
             if st.session_state.ai_overview:
                 source_html = '<div style="margin-top:15px; border-top:1px solid #dadce0; padding-top:10px;"><div style="font-size:12px; color:#70757a; font-weight:600; margin-bottom:5px;">SOURCES:</div>'
                 for s_url in st.session_state.top_urls:
@@ -167,7 +173,7 @@ if is_results_page:
 
                 st.markdown(f"""
                     <div class="ai-overview-card">
-                        <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 14px; letter-spacing: 0.5px;">✨ AI OVERVIEW (Hugging Face)</div>
+                        <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 14px; letter-spacing: 0.5px;">✨ AI OVERVIEW</div>
                         <div style="color: #202124; font-size: 15px; line-height: 1.6;">{st.session_state.ai_overview}</div>
                         {source_html}
                     </div>
@@ -175,7 +181,7 @@ if is_results_page:
             elif st.session_state.ai_error:
                 st.markdown(f'<div class="ai-error-notice">⚠️ {st.session_state.ai_error}</div>', unsafe_allow_html=True)
 
-            # SEARCH RESULTS
+            # TEXT RESULTS
             start = (st.session_state.page - 1) * RESULTS_PER_PAGE
             results_to_show = st.session_state.results[start:start+RESULTS_PER_PAGE]
             for p in results_to_show:
@@ -192,30 +198,28 @@ if is_results_page:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # ASYNC AI GENERATION (Now using Hugging Face)
+            # AI RESEARCH TRIGGER
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
-                with st.status("✨ Deep Researching (HF)...", expanded=False) as status:
+                with st.status("🧠 Thinking with Llama...", expanded=False) as status:
                     try:
                         with ThreadPoolExecutor(max_workers=4) as exec:
                             full_txts = list(exec.map(fetch_content, st.session_state.top_urls))
                         
-                        # Hugging Face models usually have smaller context windows than Gemini 2.0
-                        # We truncate sources to 1000 characters each for the prompt
-                        ctx = "\n\n".join([f"Source [{urlparse(st.session_state.top_urls[i]).netloc}]: {t[:1000]}" for i, t in enumerate(full_txts) if t])
+                        ctx = "\n\n".join([f"Source [{urlparse(st.session_state.top_urls[i]).netloc}]: {t[:900]}" for i, t in enumerate(full_txts) if t])
                         
                         if not ctx.strip():
-                            raise ValueError("No readable text found in top sources.")
+                            raise ValueError("No readable text found in sources.")
                         
-                        prompt = f"Based on these sources, provide a clear, helpful, and concise summary for the query: '{st.session_state.query}'. Do not repeat yourself. Sources:\n\n{ctx}"
+                        prompt = f"Summarize precisely: '{st.session_state.query}'. Use the following data:\n\n{ctx}"
                         
                         summary = query_hf_model(prompt)
                         st.session_state.ai_overview = summary
                         st.session_state.ai_status = "complete"
                         st.rerun() 
                     except Exception as e:
-                        st.session_state.ai_error = f"HF Research Error: {str(e)}"
+                        st.session_state.ai_error = f"AI Error: {str(e)}"
                         st.session_state.ai_status = "error"
-                        status.update(label="⚠️ Research Error", state="error")
+                        status.update(label="⚠️ Thinking Failed", state="error")
                         st.rerun()
 
     with tab_images:
@@ -233,5 +237,4 @@ if is_results_page:
                         <div class="image-caption">{img.get('title', 'Image')}</div>
                     </div>
                 """
-            img_html += '</div>'
-            st.markdown(img_html, unsafe_allow_html=True)
+            st.markdown(img_html + '</div>', unsafe_allow_html=True)
