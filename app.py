@@ -2,27 +2,28 @@ import streamlit as st
 import math
 import trafilatura
 import time
+import requests
 from google import genai
 from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 0. SECRETS & CONFIG ---
-# This block handles both local development and Streamlit Cloud deployment
 if "GEMINI_KEY" in st.secrets:
-    # CLOUD: Pull from Streamlit Secrets dashboard
     GEMINI_KEY = st.secrets["GEMINI_KEY"]
     PINECONE_KEY = st.secrets["PINECONE_KEY"]
-    OVERVIEW_KEY = st.secrets["OVERVIEW_KEY"]
+    HF_TOKEN = st.secrets["HF_TOKEN"] # Replace OVERVIEW_KEY with HF_TOKEN in your secrets
 else:
-    # LOCAL: Fallback to your local config.py
     try:
-        from config import GEMINI_KEY, PINECONE_KEY, OVERVIEW_KEY
+        from config import GEMINI_KEY, PINECONE_KEY, HF_TOKEN
     except (ImportError, ModuleNotFoundError):
         st.error("Config file not found and Secrets not set. Please check your setup.")
         st.stop()
 
-OVERVIEW_MODEL = "gemini-2.0-flash-lite"
+# Hugging Face Configuration
+HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
+
 RESULTS_PER_PAGE = 8
 SEARCH_CONCURRENCY = 12 
 
@@ -33,43 +34,17 @@ st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     .block-container { padding-top: 2rem !important; max-width: 1200px !important; }
-
-    /* --- SEARCH BAR --- */
-    div[data-baseweb="input"] > div {
-        border-radius: 24px !important;
-        border: 1px solid #dfe1e5 !important;
-        padding: 4px 12px !important;
-        transition: box-shadow 0.2s;
-    }
-
-    /* --- IMAGE GRID --- */
-    .image-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-        grid-gap: 20px;
-        padding: 20px 0;
-    }
-    .image-card {
-        border-radius: 12px;
-        overflow: hidden;
-        background: #f8f9fa;
-        border: 1px solid #dadce0;
-        transition: transform 0.2s;
-    }
+    div[data-baseweb="input"] > div { border-radius: 24px !important; border: 1px solid #dfe1e5 !important; padding: 4px 12px !important; transition: box-shadow 0.2s; }
+    .image-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-gap: 20px; padding: 20px 0; }
+    .image-card { border-radius: 12px; overflow: hidden; background: #f8f9fa; border: 1px solid #dadce0; transition: transform 0.2s; }
     .image-card img { width: 100%; height: 160px; object-fit: cover; display: block; }
     .image-caption { padding: 10px; font-size: 13px; color: #3c4043; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    /* --- LOGOS & TEXT --- */
     .komu-logo-large { font-family: 'Product Sans', sans-serif; font-size: 90px; font-weight: 700; text-align: center; margin-top: 15vh; margin-bottom: 30px; letter-spacing: -2px; }
     .komu-logo-small { font-family: 'Product Sans', sans-serif; font-size: 32px; font-weight: 700; margin-top: -0.7rem; letter-spacing: -1px; }
-    
-    /* --- AI OVERVIEW & SOURCES --- */
     .ai-overview-card { background: linear-gradient(135deg, #f0f4f9 0%, #e8eaf6 100%); border: 1px solid #dadce0; border-radius: 16px; padding: 24px; margin-bottom: 30px; max-width: 652px; }
     .source-chip { display: inline-block; padding: 4px 12px; border-radius: 16px; background: white; border: 1px solid #dadce0; font-size: 12px; color: #1a0dab; text-decoration: none; margin-right: 8px; margin-top: 8px; font-weight: 500; }
     .source-chip:hover { background: #f1f3f4; border-color: #4285f4; }
-    
     .ai-error-notice { padding: 12px; border-radius: 8px; border: 1px solid #ffccd5; background: #fff5f5; color: #d00000; font-size: 13px; margin-bottom: 20px; max-width: 652px; }
-    
     .search-result { margin-bottom: 28px; max-width: 652px; }
     .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; display: block; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .favicon { width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
@@ -82,15 +57,14 @@ st.markdown("""
 def get_komu_engines():
     try:
         search_client = genai.Client(api_key=GEMINI_KEY)
-        overview_client = genai.Client(api_key=OVERVIEW_KEY)
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index("plex-index")
-        return search_client, overview_client, index
+        return search_client, index
     except Exception as e:
         st.error(f"Engine Error: {e}")
-        return None, None, None
+        return None, None
 
-search_client, overview_client, index = get_komu_engines()
+search_client, index = get_komu_engines()
 
 # --- 3. SESSION STATE ---
 for key, val in [('results', []), ('image_results', []), ('query', ""), ('ai_overview', ""), ('page', 1), ('top_urls', []), ('ai_status', "idle"), ('ai_error', None)]:
@@ -111,6 +85,18 @@ def truncate_url(url, max_len=60):
     parsed = urlparse(url)
     display_url = f"{parsed.netloc}{parsed.path}"
     return (display_url[:max_len] + "...") if len(display_url) > max_len else display_url
+
+def query_hf_model(prompt):
+    """Calls the Hugging Face Inference API."""
+    payload = {
+        "inputs": f"<s>[INST] {prompt} [/INST]",
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
+    }
+    response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload)
+    if response.status_code == 200:
+        return response.json()[0]['generated_text']
+    else:
+        raise Exception(f"HF API Error: {response.text}")
 
 # --- 5. UI LAYOUT ---
 is_results_page = len(st.session_state.results) > 0 or len(st.session_state.query) > 0
@@ -135,24 +121,20 @@ if user_query and user_query != st.session_state.query:
                 config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768}
             )
             vector = emb.embeddings[0].values
-
             all_matches = []
             with ThreadPoolExecutor(max_workers=SEARCH_CONCURRENCY) as executor:
                 futures = [executor.submit(parallel_search_worker, vector) for _ in range(SEARCH_CONCURRENCY)]
                 for future in as_completed(futures):
                     all_matches.extend(future.result().get('matches', []))
-
             all_matches.sort(key=lambda x: x['score'], reverse=True)
 
             text_results, img_results, seen_urls = [], [], set()
             img_exts = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg')
-
             for m in all_matches:
                 meta = m['metadata']
                 url = meta.get('url', '').split('#')[0].rstrip('/')
                 if not url or url in seen_urls: continue
                 seen_urls.add(url)
-                
                 if meta.get('type') == 'image' or url.lower().endswith(img_exts):
                     img_results.append(meta)
                 else:
@@ -162,7 +144,7 @@ if user_query and user_query != st.session_state.query:
             st.session_state.image_results = img_results
             st.session_state.query = user_query
             st.session_state.page = 1
-            st.session_state.top_urls = [r.get('url') for r in text_results[:5]]
+            st.session_state.top_urls = [r.get('url') for r in text_results[:4]] # Reduced to 4 for HF context window
             st.session_state.ai_overview = ""
             st.session_state.ai_status = "idle" 
             st.session_state.ai_error = None
@@ -185,7 +167,7 @@ if is_results_page:
 
                 st.markdown(f"""
                     <div class="ai-overview-card">
-                        <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 14px; letter-spacing: 0.5px;">✨ AI OVERVIEW</div>
+                        <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 14px; letter-spacing: 0.5px;">✨ AI OVERVIEW (Hugging Face)</div>
                         <div style="color: #202124; font-size: 15px; line-height: 1.6;">{st.session_state.ai_overview}</div>
                         {source_html}
                     </div>
@@ -196,7 +178,6 @@ if is_results_page:
             # SEARCH RESULTS
             start = (st.session_state.page - 1) * RESULTS_PER_PAGE
             results_to_show = st.session_state.results[start:start+RESULTS_PER_PAGE]
-            
             for p in results_to_show:
                 raw_url = p.get('url', '')
                 dom = urlparse(raw_url).netloc
@@ -211,27 +192,28 @@ if is_results_page:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # ASYNC AI GENERATION
+            # ASYNC AI GENERATION (Now using Hugging Face)
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
-                with st.status("✨ Deep Researching...", expanded=False) as status:
+                with st.status("✨ Deep Researching (HF)...", expanded=False) as status:
                     try:
-                        with ThreadPoolExecutor(max_workers=5) as exec:
+                        with ThreadPoolExecutor(max_workers=4) as exec:
                             full_txts = list(exec.map(fetch_content, st.session_state.top_urls))
                         
-                        ctx = "\n\n".join([f"Source [{urlparse(st.session_state.top_urls[i]).netloc}]: {t[:1800]}" for i, t in enumerate(full_txts) if t])
+                        # Hugging Face models usually have smaller context windows than Gemini 2.0
+                        # We truncate sources to 1000 characters each for the prompt
+                        ctx = "\n\n".join([f"Source [{urlparse(st.session_state.top_urls[i]).netloc}]: {t[:1000]}" for i, t in enumerate(full_txts) if t])
                         
                         if not ctx.strip():
                             raise ValueError("No readable text found in top sources.")
                         
-                        res = overview_client.models.generate_content(
-                            model=OVERVIEW_MODEL, 
-                            contents=f"Based on these sources, provide a clear and helpful summary for: {st.session_state.query}\n\n{ctx}"
-                        )
-                        st.session_state.ai_overview = res.text
+                        prompt = f"Based on these sources, provide a clear, helpful, and concise summary for the query: '{st.session_state.query}'. Do not repeat yourself. Sources:\n\n{ctx}"
+                        
+                        summary = query_hf_model(prompt)
+                        st.session_state.ai_overview = summary
                         st.session_state.ai_status = "complete"
                         st.rerun() 
                     except Exception as e:
-                        st.session_state.ai_error = f"Research Error: {str(e)}"
+                        st.session_state.ai_error = f"HF Research Error: {str(e)}"
                         st.session_state.ai_status = "error"
                         status.update(label="⚠️ Research Error", state="error")
                         st.rerun()
