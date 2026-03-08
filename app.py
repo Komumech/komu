@@ -4,7 +4,7 @@ import trafilatura
 import time
 from google import genai
 from pinecone import Pinecone
-from config import GEMINI_KEY, PINECONE_KEY
+from config import GEMINI_KEY, PINECONE_KEY, OVERVIEW_MODEL
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -13,7 +13,7 @@ st.set_page_config(page_title="Komu", layout="wide", initial_sidebar_state="coll
 
 OVERVIEW_MODEL = "gemini-2.0-flash-lite"
 # Secondary key for AI Overviews to prevent primary quota exhaustion
-OVERVIEW_KEY = "AIzaSyAips9cPUY-Z_mhXXbcoxdV0IN7j3zuBFE" 
+ 
 RESULTS_PER_PAGE = 8
 SEARCH_CONCURRENCY = 12 
 
