@@ -1,0 +1,79 @@
+/* --- GLOBAL RESET --- */
+@import url('https://fonts.googleapis.com/css2?family=Product+Sans:wght@400;700&display=swap');
+
+#MainMenu, footer, header {visibility: hidden;} 
+
+.stApp {
+    font-family: 'Product Sans', Arial, sans-serif;
+}
+
+/* --- DYNAMIC BACKGROUNDS --- */
+.mode-home {
+    background: linear-gradient(135deg, #6e48aa 0%, #9d50bb 100%) !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+}
+
+/* --- HOME PAGE UI --- */
+/* This wrapper now forces everything to stay in the dead center */
+.home-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    width: 100%;
+    margin-top: 10vh; /* Adjusts vertical position */
+}
+
+.home-logo {
+    font-size: clamp(60px, 15vw, 110px);
+    font-weight: 700;
+    color: white;
+    letter-spacing: -2px;
+    margin-bottom: 20px;
+    text-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    width: 100%; /* Ensures it takes full width of its container */
+}
+
+/* --- SEARCH BAR FIXES --- */
+/* Targeting the specific Streamlit input container */
+.stTextInput {
+    width: 100% !important;
+    max-width: 600px !important;
+    margin: 0 auto !important;
+}
+
+.stTextInput input {
+    border-radius: 30px !important;
+    height: 55px !important;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+    font-size: 18px !important;
+}
+
+/* --- DOCK --- */
+.dock {
+    margin-top: 50px;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(15px);
+    padding: 15px 35px;
+    border-radius: 50px;
+    display: flex;
+    justify-content: center;
+    gap: 25px;
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+.dock-icon {
+    width: 45px; height: 45px;
+    background: white;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    transition: 0.3s;
+}
+
+.dock-icon:hover { transform: scale(1.1); }
