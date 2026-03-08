@@ -1,5 +1,4 @@
 streamlit
 google-genai
-pinecone-client
+pinecone
 trafilatura
-urllib3
