@@ -4,20 +4,26 @@ import trafilatura
 import time
 from google import genai
 from pinecone import Pinecone
-from config import GEMINI_KEY, PINECONE_KEY, OVERVIEW_MODEL
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- 0. SYSTEM SETUP ---
-st.set_page_config(page_title="Komu", layout="wide", initial_sidebar_state="collapsed")
+# --- 0. SECRETS & CONFIG ---
+# This block allows the app to stay secure on the web while remaining functional locally.
+if "GEMINI_KEY" in st.secrets:
+    GEMINI_KEY = st.secrets["GEMINI_KEY"]
+    PINECONE_KEY = st.secrets["PINECONE_KEY"]
+    OVERVIEW_KEY = st.secrets["OVERVIEW_KEY"]
+else:
+    # Fallback for local development
+    from config import GEMINI_KEY, PINECONE_KEY, OVERVIEW_KEY
 
 OVERVIEW_MODEL = "gemini-2.0-flash-lite"
-# Secondary key for AI Overviews to prevent primary quota exhaustion
- 
 RESULTS_PER_PAGE = 8
 SEARCH_CONCURRENCY = 12 
 
 # --- 1. UI/CSS OVERHAUL ---
+st.set_page_config(page_title="Komu", layout="wide", initial_sidebar_state="collapsed")
+
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
@@ -70,16 +76,12 @@ st.markdown("""
 @st.cache_resource
 def get_komu_engines():
     try:
-        # Client for primary search tasks
         search_client = genai.Client(api_key=GEMINI_KEY)
-        # Separate client for AI Overviews using the new key
         overview_client = genai.Client(api_key=OVERVIEW_KEY)
-        
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index("plex-index")
         return search_client, overview_client, index
     except Exception as e:
-        print(f"CRITICAL ENGINE ERROR: {e}")
         st.error(f"Engine Error: {e}")
         return None, None, None
 
@@ -95,7 +97,6 @@ def fetch_content(url):
         downloaded = trafilatura.fetch_url(url)
         return trafilatura.extract(downloaded) or ""
     except Exception as e:
-        print(f"Scrape Error for {url}: {e}")
         return ""
 
 def parallel_search_worker(vector, top_k=60):
@@ -162,7 +163,6 @@ if user_query and user_query != st.session_state.query:
             st.session_state.ai_error = None
             st.rerun()
         except Exception as e:
-            print(f"SEARCH ERROR: {e}")
             st.error(f"Search Error: {e}")
 
 # --- 7. DISPLAY RESULTS ---
@@ -170,8 +170,7 @@ if is_results_page:
     with tab_all:
         _, content_col = st.columns([0.2, 9.8])
         with content_col:
-            
-            # --- PHASE 1: RENDER AI CONTENT ---
+            # AI OVERVIEW RENDER
             if st.session_state.ai_overview:
                 source_html = '<div style="margin-top:15px; border-top:1px solid #dadce0; padding-top:10px;"><div style="font-size:12px; color:#70757a; font-weight:600; margin-bottom:5px;">SOURCES:</div>'
                 for s_url in st.session_state.top_urls:
@@ -189,7 +188,7 @@ if is_results_page:
             elif st.session_state.ai_error:
                 st.markdown(f'<div class="ai-error-notice">⚠️ {st.session_state.ai_error}</div>', unsafe_allow_html=True)
 
-            # --- PHASE 2: SEARCH RESULTS ---
+            # SEARCH RESULTS
             start = (st.session_state.page - 1) * RESULTS_PER_PAGE
             results_to_show = st.session_state.results[start:start+RESULTS_PER_PAGE]
             
@@ -207,18 +206,17 @@ if is_results_page:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # --- PHASE 3: ASYNC AI GENERATION (Using OVERVIEW_KEY) ---
+            # ASYNC AI GENERATION
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
                 with st.status("✨ Deep Researching...", expanded=False) as status:
                     try:
-                        print(f"\n--- AI Overview Start for: {st.session_state.query} ---")
                         with ThreadPoolExecutor(max_workers=5) as exec:
                             full_txts = list(exec.map(fetch_content, st.session_state.top_urls))
                         
                         ctx = "\n\n".join([f"Source [{urlparse(st.session_state.top_urls[i]).netloc}]: {t[:1800]}" for i, t in enumerate(full_txts) if t])
                         
                         if not ctx.strip():
-                            raise ValueError("No readable text could be extracted from the top sources to summarize.")
+                            raise ValueError("No readable text found in top sources.")
                         
                         res = overview_client.models.generate_content(
                             model=OVERVIEW_MODEL, 
@@ -226,12 +224,9 @@ if is_results_page:
                         )
                         st.session_state.ai_overview = res.text
                         st.session_state.ai_status = "complete"
-                        print("AI Overview Success.")
                         st.rerun() 
                     except Exception as e:
-                        error_msg = str(e)
-                        print(f"!!! AI OVERVIEW ERROR: {error_msg}")
-                        st.session_state.ai_error = f"Research Error: {error_msg}"
+                        st.session_state.ai_error = f"Research Error: {str(e)}"
                         st.session_state.ai_status = "error"
                         status.update(label="⚠️ Research Error", state="error")
                         st.rerun()
