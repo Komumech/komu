@@ -22,7 +22,7 @@ def load_secrets():
 
 GEMINI_KEY, PINECONE_KEY, HF_TOKEN = load_secrets()
 
-# UPDATED: Using the new Router endpoint to fix HF Error 410
+# UPDATED: Using the new Router endpoint to fix HF Error 410/404
 HF_ROUTER_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.3"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
 
@@ -76,13 +76,13 @@ for key, val in [('results', []), ('image_results', []), ('query', ""), ('ai_ove
 def fetch_content(url):
     try: 
         downloaded = trafilatura.fetch_url(url)
+        # We use a lower character limit for extraction to be more flexible
         return trafilatura.extract(downloaded) or ""
     except Exception:
         return ""
 
 def query_ai_model(prompt):
     """Hybrid AI caller: Tries Mistral (HF) first, falls back to Gemini 1.5 Flash."""
-    # Attempt 1: Hugging Face Router
     try:
         formatted_prompt = f"<s>[INST] {prompt} [/INST]"
         payload = {
@@ -90,14 +90,13 @@ def query_ai_model(prompt):
             "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False},
             "options": {"wait_for_model": True}
         }
-        response = requests.post(HF_ROUTER_URL, headers=HF_HEADERS, json=payload, timeout=15)
+        response = requests.post(HF_ROUTER_URL, headers=HF_HEADERS, json=payload, timeout=12)
         if response.status_code == 200:
             res_json = response.json()
             return res_json[0]['generated_text'] if isinstance(res_json, list) else res_json.get('generated_text')
     except Exception:
-        pass # Fallback to Gemini
+        pass 
 
-    # Attempt 2: Gemini 1.5 Flash
     try:
         response = search_client.models.generate_content(
             model="gemini-1.5-flash",
@@ -209,23 +208,38 @@ if is_results_page:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # AI RESEARCH TRIGGER
+            # --- AI RESEARCH TRIGGER (WITH ROBUST EXTRACTION FALLBACK) ---
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
                 with st.status("🧠 Generating AI Overview...", expanded=False) as status:
                     try:
+                        # 1. Fetch full content in parallel
                         with ThreadPoolExecutor(max_workers=4) as exec:
                             full_txts = list(exec.map(fetch_content, st.session_state.top_urls))
                         
-                        ctx = "\n\n".join([f"Source [{urlparse(st.session_state.top_urls[i]).netloc}]: {t[:900]}" for i, t in enumerate(full_txts) if t])
+                        # 2. Build context using full text OR snippets if extraction fails
+                        ctx_parts = []
+                        for i, t in enumerate(full_txts):
+                            domain = urlparse(st.session_state.top_urls[i]).netloc
+                            # If extraction yields valid text (>100 chars), use it.
+                            if t and len(t.strip()) > 100:
+                                ctx_parts.append(f"Source [{domain}]: {t[:1000]}")
+                            else:
+                                # Fallback to the snippet stored in Pinecone metadata
+                                backup_snippet = st.session_state.results[i].get('text', '')
+                                if backup_snippet:
+                                    ctx_parts.append(f"Source [{domain} (Preview)]: {backup_snippet}")
+
+                        ctx = "\n\n".join(ctx_parts)
                         
                         if not ctx.strip():
-                            raise ValueError("No readable text found in sources.")
+                            st.session_state.ai_overview = "Search results found, but no summaries are available for these sources."
+                            st.session_state.ai_status = "complete"
+                        else:
+                            prompt = f"Summarize precisely: '{st.session_state.query}'. Use the following data:\n\n{ctx}"
+                            summary = query_ai_model(prompt)
+                            st.session_state.ai_overview = summary
+                            st.session_state.ai_status = "complete"
                         
-                        prompt = f"Summarize precisely: '{st.session_state.query}'. Use the following data:\n\n{ctx}"
-                        
-                        summary = query_ai_model(prompt)
-                        st.session_state.ai_overview = summary
-                        st.session_state.ai_status = "complete"
                         st.rerun() 
                     except Exception as e:
                         st.session_state.ai_error = f"AI Error: {str(e)}"
