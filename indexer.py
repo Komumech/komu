@@ -5,41 +5,45 @@ from pinecone import Pinecone
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
 
-# --- 1. HYBRID SETUP ---
-# Try to get keys from GitHub Environment first
+# --- 1. KEY LOADING ---
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 PINECONE_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_INDEX = os.getenv("PINECONE_INDEX_NAME", "plex-index")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "plex-index")
 
-# If they aren't in Environment, try to load from your local config.py
 if not GEMINI_KEY or not PINECONE_KEY:
     try:
         from config import GEMINI_KEY, PINECONE_KEY
     except ImportError:
-        print("⚠️ Warning: No API keys found in Environment or config.py")
-
-client = genai.Client(api_key=GEMINI_KEY)
-pc = Pinecone(api_key=PINECONE_KEY)
-index = pc.Index(PINECONE_INDEX) 
-
-
+        pass
 
 def index_website(url):
+    # --- 2. THREAD-SAFE INITIALIZATION ---
+    # Initializing clients inside the function prevents the "Segmentation Fault" crash
     try:
+        if not GEMINI_KEY or not PINECONE_KEY:
+            return False
+            
+        client = genai.Client(api_key=GEMINI_KEY)
+        pc = Pinecone(api_key=PINECONE_KEY)
+        index = pc.Index(PINECONE_INDEX_NAME)
+        
         print(f"🔍 Analyzing: {url}")
         
         # --- A. CONTENT EXTRACTION ---
         downloaded = trafilatura.fetch_url(url)
-        if not downloaded: return False
+        if not downloaded: 
+            return False
         
         main_text = trafilatura.extract(downloaded, include_comments=False)
         metadata = trafilatura.extract_metadata(downloaded)
         title = (metadata.title if metadata and metadata.title else url)
         domain = urlparse(url).netloc
         
-        if not main_text: return False
+        if not main_text: 
+            return False
 
         # --- B. INDEX WEB PAGE (Text) ---
+        # Note: Ensure your Pinecone Index dimension is set to 768
         res = client.models.embed_content(
             model="gemini-embedding-001",
             contents=main_text[:3000], 
@@ -69,8 +73,9 @@ def index_website(url):
             img_url = img.get('src')
             alt_text = img.get('alt', '').strip()
             
-            # Filter: skip tiny icons or empty alts
-            if not img_url or len(alt_text) < 10: continue
+            # Skip icons or empty alts
+            if not img_url or len(alt_text) < 10: 
+                continue
             
             full_img_url = urljoin(url, img_url)
             
@@ -92,7 +97,8 @@ def index_website(url):
                 }
             })
             indexed_count += 1
-            if indexed_count >= 5: break 
+            if indexed_count >= 5: 
+                break 
 
         if img_vectors:
             index.upsert(vectors=img_vectors)
@@ -101,9 +107,10 @@ def index_website(url):
         return True
 
     except Exception as e:
-        print(f"❌ Snag on {url}: {e}")
+        # This will now print the EXACT error in your GitHub Actions log
+        print(f"❌ Snag on {url}: {type(e).__name__} - {e}")
         return False
 
 if __name__ == "__main__":
-    # Test with a high-image-content page
     index_website("https://www.theguardian.com/international")
+        
