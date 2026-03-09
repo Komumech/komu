@@ -1,73 +1,45 @@
-import threading
-import time
-import requests
-import random
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-from indexer import index_website
+name: Komu Scout Auto-Crawl
 
-# --- SETTINGS ---
-MAX_THREADS = 2 
-SEED_URLS = ["https://github.com", "https://www.bbc.com"] # Add your seed sites here
+on:
+  workflow_dispatch: # This REVEALS the "Run workflow" button
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * *' # Optional: Runs every midnight
 
-# --- SHARED STATE ---
-visited = set()
-queue = SEED_URLS.copy()
-queue_lock = threading.Lock()
-file_lock = threading.Lock()
-
-def worker(worker_id):
-    while True:
-        with queue_lock:
-            if not queue:
-                break
-            url = queue.pop(0)
-            if url in visited:
-                continue
-            visited.add(url)
-
-        print(f"\n[Worker-{worker_id}] 🎯 Targeting: {url}")
-        
-        # Call the Indexer
-        success = index_website(url)
-        
-        if success:
-            # Save success to local record
-            with file_lock:
-                with open("indexed_sites.txt", "a") as f:
-                    f.write(f"{url}\n")
-            
-            # Find new links to expand the crawl
-            try:
-                resp = requests.get(url, timeout=10)
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                found_count = 0
-                for link in soup.find_all('a', href=True):
-                    full_url = urljoin(url, link['href'])
-                    if full_url.startswith('http') and full_url not in visited:
-                        with queue_lock:
-                            if len(queue) < 1000: # Don't let the queue explode
-                                queue.append(full_url)
-                                found_count += 1
-                print(f"🔗 Worker-{worker_id} found {found_count} new links.")
-            except:
-                pass
-
-        # Nigerian Internet/API Safety: Slow and steady prevents 429 errors
-        time.sleep(random.uniform(2, 4))
-
-def run_crawler():
-    print("🚀 KOMU SCOUT STARTING...")
-    threads = []
-    for i in range(MAX_THREADS):
-        t = threading.Thread(target=worker, args=(i+1,))
-        t.start()
-        threads.append(t)
-        
-    for t in threads:
-        t.join()
-    print("🏁 CRAWL COMPLETE.")
-
-if __name__ == "__main__":
-    run_crawler()
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
     
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # Speeds up future runs
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests trafilatura urllib3 pinecone-client google-generativeai beautifulsoup4 grpcio==1.60.0
+
+      - name: Run Komu Scout
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_ENVIRONMENT: ${{ secrets.PINECONE_ENVIRONMENT }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+        run: |
+          python crawler.py
+        # This prevents a single network glitch from showing a red "Failure" 
+        continue-on-error: true 
+
+      - name: Upload Indexing Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: indexed-sites-list
+          path: indexed_sites.txt
+          
