@@ -13,6 +13,7 @@ MAX_THREADS = 6
 SEEDS = [
     'https://github.com',       # Open Source / Tech
     'https://www.bbc.com',      # News / Global
+    'https://people.com',
     'https://en.wikipedia.org/wiki/Special:Random', # Random Knowledge
     'https://www.nature.com',   # Science
     'https://www.producthunt.com', # Startups / Apps
