@@ -1,6 +1,5 @@
 import os
 import time
-import json
 import requests
 import ssl
 import trafilatura
@@ -14,7 +13,7 @@ from urllib.parse import urlparse, urljoin
 from urllib3.poolmanager import PoolManager
 from requests.adapters import HTTPAdapter
 
-# --- 0. THE SSL & SESSION PATCH ---
+# --- 0. THE SSL & API KEY PATCH ---
 class TLSAdapter(HTTPAdapter):
     def init_poolmanager(self, connections, maxsize, block=False):
         ctx = ssl.create_default_context()
@@ -25,9 +24,16 @@ class TLSAdapter(HTTPAdapter):
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 session = requests.Session()
-session.mount("https://", TLSAdapter())
+session.mount("https://", TLSAdapter(pool_connections=25, pool_maxsize=25))
 
-from config import GEMINI_KEY
+# Hybrid API Key Loading
+GEMINI_KEY = os.getenv("GEMINI_KEY")
+if not GEMINI_KEY:
+    try:
+        from config import GEMINI_KEY
+    except ImportError:
+        GEMINI_KEY = None
+
 try:
     from indexer import index_website
 except ImportError:
@@ -37,6 +43,7 @@ except ImportError:
 LOG_FILE = "indexed_sites.txt"
 TARGET_COUNT = 1000 
 MAX_THREADS = 12 
+DOMAIN_LIMIT = 40  # Prevents getting stuck on one site (like IndieWeb)
 
 SEED_SITES = [
     "https://www.france24.com/en",
@@ -49,20 +56,29 @@ SEED_SITES = [
     "https://knowyourmeme.com",
     "https://openlibrary.org",
     "https://www.artsy.net/articles",
-    "https://www.thisiscolossal.com",
+    "https://thisiscolossal.com",
     "https://publicdomainreview.org",
     "https://eyeondesign.aiga.org",
     "https://lobste.rs",
     "https://arxiv.org/list/cs/new",
     "https://curlie.org",
-    "https://www.themarginalian.org",
-    "https://indieweb.org"
+    "https://news.ycombinator.com",
+    "https://github.com/trending"
 ]
 
-# --- 2. SHARED DATA & LOCKS ---
+TRUSTED_DOMAINS = [
+    "france24.com", "theguardian.com", "scmp.com", "phys.org", 
+    "smithsonianmag.com", "nautil.us", "archive.org", "knowyourmeme.com", 
+    "openlibrary.org", "artsy.net", "thisiscolossal.com", "publicdomainreview.org", 
+    "aiga.org", "lobste.rs", "arxiv.org", "curlie.org", "indieweb.org", "bbc.co.uk",
+    "ycombinator.com", "github.com"
+]
+
+# --- 2. SHARED DATA ---
 url_queue = Queue()
 visited = set()         
 runtime_indexed = set() 
+domain_counts = {}
 data_lock = threading.Lock()
 pbar = None 
 
@@ -90,66 +106,68 @@ def crawler_worker():
         try:
             url = url_queue.get(timeout=10)
         except Empty:
-            with data_lock:
-                if pbar.n >= TARGET_COUNT: break
             continue
 
         clean_url = url.lower().strip()
+        domain = urlparse(clean_url).netloc
         
         with data_lock:
-            if pbar.n >= TARGET_COUNT:
-                url_queue.task_done()
-                break
-            if clean_url in visited or clean_url in runtime_indexed:
+            if pbar.n >= TARGET_COUNT or clean_url in visited:
                 url_queue.task_done()
                 continue
+            
+            if domain_counts.get(domain, 0) >= DOMAIN_LIMIT:
+                url_queue.task_done()
+                continue
+                
             visited.add(clean_url)
 
         try:
             headers = {'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            resp = session.get(url, headers=headers, timeout=10)
+            resp = session.get(url, headers=headers, timeout=12)
             
             if resp.status_code == 200:
-                content = trafilatura.extract(resp.text) or ""
-                domain = urlparse(url).netloc
+                # Basic Spam/Calendar Filter
+                blacklist = ["/events/", "/calendar/", "/tag/", "/category/"]
+                if any(p in clean_url for p in blacklist):
+                    url_queue.task_done()
+                    continue
 
-                if len(content) > 400:
+                content = trafilatura.extract(resp.text) or ""
+                
+                if len(content) > 450:
                     success = index_website(url)
                     if success:
                         with data_lock:
                             if clean_url not in runtime_indexed:
                                 runtime_indexed.add(clean_url)
+                                domain_counts[domain] = domain_counts.get(domain, 0) + 1
                                 log_indexed_site(url)
                                 pbar.update(1)
-                                pbar.set_postfix({"added": domain[:15]})
+                                pbar.set_postfix({"added": domain[:10]})
 
-                # Discovery with Improved Slash Filter
+                # Discovery
                 raw_links = re.findall(r'href=["\'](.*?)["\']', resp.text)
+                random.shuffle(raw_links)
+                
+                added = 0
                 for link in raw_links:
+                    if added >= 15: break
                     full_url = urljoin(url, link).split('#')[0].split('?')[0].rstrip('/')
+                    link_domain = urlparse(full_url).netloc
                     
-                    # Better Slash Counting: only looks at the path after the domain
                     parsed_path = urlparse(full_url).path.strip('/')
                     slash_count = parsed_path.count('/') if parsed_path else 0
                     
-                    # 1 slash limit (Allows site.com/folder but not site.com/folder/page)
-                    if slash_count <= 1:
-                        link_domain = urlparse(full_url).netloc
-                        # Added common patterns for the seeds provided
-                        trusted = ["france24.com", "theguardian.com", "scmp.com", "phys.org", 
-                                   "smithsonianmag.com", "nautil.us", "archive.org", 
-                                   "knowyourmeme.com", "openlibrary.org", "artsy.net", 
-                                   "thisiscolossal.com", "publicdomainreview.org", 
-                                   "aiga.org", "lobste.rs", "arxiv.org", "curlie.org", 
-                                   "themarginalian.org", "indieweb.org", "bbc.co.uk"]
-                        
-                        if any(td in link_domain for td in trusted):
-                            with data_lock:
-                                if full_url.lower() not in visited and full_url.lower() not in runtime_indexed:
-                                    url_queue.put(full_url)
+                    max_depth = 3 if any(td in link_domain for td in TRUSTED_DOMAINS) else 1
+                    
+                    if slash_count <= max_depth and link_domain:
+                        with data_lock:
+                            if domain_counts.get(link_domain, 0) < DOMAIN_LIMIT and full_url not in visited:
+                                url_queue.put(full_url)
+                                added += 1
 
-            time.sleep(random.uniform(0.3, 0.7))
-
+            time.sleep(random.uniform(0.2, 0.5))
         except Exception: pass
         finally: url_queue.task_done()
 
@@ -160,13 +178,19 @@ def run_master_crawler():
     print("🔍 Loading history...")
     history = load_history()
     runtime_indexed.update(history)
-    
-    # Fill queue with seeds
+    visited.update(history)
+
+    # Force seeds into the queue
     for site in SEED_SITES: 
+        clean_seed = site.lower().strip()
+        if clean_seed in visited:
+            visited.remove(clean_seed)
         url_queue.put(site)
 
     print(f"🌍 Komu Scout starting. Already indexed: {len(history)}")
     pbar = tqdm(total=TARGET_COUNT, initial=0, desc="Session Progress", unit="site")
+
+    
 
     threads = []
     for _ in range(MAX_THREADS):
@@ -175,30 +199,27 @@ def run_master_crawler():
         t.start()
         threads.append(t)
 
+    # Bootstrap wait
+    time.sleep(12) 
+
     try:
-        # Give seeds a moment to process
-        time.sleep(8) 
-        
+        empty_checks = 0
         while True:
-            # If the queue is empty, we are done
-            if url_queue.empty():
-                # Final 5-second grace period for slow connections
-                time.sleep(5)
-                if url_queue.empty():
-                    print("\n🏁 Queue finished naturally.")
-                    break
-            
             with data_lock:
-                if pbar.n >= TARGET_COUNT:
-                    print("\n🎯 Target reached!")
-                    break
-            time.sleep(2)
+                if pbar.n >= TARGET_COUNT: break
             
-    except KeyboardInterrupt:
-        print("\n🛑 Stop requested.")
+            if url_queue.empty():
+                empty_checks += 1
+                if empty_checks >= 3: break
+            else:
+                empty_checks = 0
+            time.sleep(10)
+            
+    except KeyboardInterrupt: pass
 
     pbar.close()
-    print(f"\n✅ Session complete. Total indexed: {len(runtime_indexed)}")
+    print(f"\n✅ Complete. Logged: {len(runtime_indexed)} total sites.")
 
 if __name__ == "__main__":
     run_master_crawler()
+        
