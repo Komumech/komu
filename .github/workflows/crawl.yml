@@ -25,12 +25,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Added pinecone-client and google-generativeai for the indexer to work
-          pip install requests trafilatura urllib3 tqdm pinecone-client google-generativeai
+          # Added beautifulsoup4 and a stable grpcio version to prevent memory crashes
+          pip install requests trafilatura urllib3 tqdm pinecone-client google-generativeai beautifulsoup4 grpcio==1.60.0
 
       - name: Run Crawler
         env:
-          # You MUST add these to your GitHub Repo Secrets for this to work
+          # These pull directly from your GitHub Repo Secrets
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           PINECONE_ENVIRONMENT: ${{ secrets.PINECONE_ENVIRONMENT }}
@@ -41,7 +41,11 @@ jobs:
         run: |
           git config --global user.name "Komu-Bot"
           git config --global user.email "bot@komumv.com"
+          
+          # This prevents "rejected push" errors if the bot runs frequently
           git pull origin main --rebase
+          
           git add indexed_sites.txt
           git commit -m "Auto-update indexed sites [skip ci]" || echo "No changes to commit"
           git push origin main
+          
