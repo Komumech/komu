@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests trafilatura urllib3 pinecone-client google-generativeai beautifulsoup4 grpcio==1.60.0
+          pip install requests trafilatura urllib3 pinecone google-genai beautifulsoup4 grpcio
 
       - name: Run Komu Scout
         env:
