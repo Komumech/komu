@@ -9,19 +9,21 @@ from indexer import index_website
 
 # --- SETTINGS ---
 MAX_THREADS = 6
-# Diverse seeds to give the crawler different "neighborhoods" of the web
+# "Hub" seeds that link to many different external domains
 SEEDS = [
-    'https://github.com',       # Open Source / Tech
-    'https://www.bbc.com',      # News / Global
-    'https://people.com',
-    'https://en.wikipedia.org/wiki/Special:Random', # Random Knowledge
-    'https://www.nature.com',   # Science
-    'https://www.producthunt.com', # Startups / Apps
-    'https://www.behance.net',  # Design / Creative
-    'https://news.ycombinator.com' # Tech News
+    'https://github.com/trending',
+    'https://www.bbc.com',
+    'https://en.wikipedia.org/wiki/Special:Random',
+    'https://dev.to',
+    'https://www.producthunt.com',
+    'https://news.ycombinator.com',
+    'https://www.theverge.com',
+    'https://www.medium.com',
+    'https://www.wired.com'
 ]
-PAGES_PER_DOMAIN_LIMIT = 3  # Keep it moving to new sites quickly
-TOTAL_CRAWL_LIMIT = 500     # Stop after 500 pages to save API credits
+PAGES_PER_DOMAIN_LIMIT = 4
+TOTAL_CRAWL_LIMIT = 500
+MAX_URL_SLASHES = 4 # Blocks deep paths like /a/b/c/d/e/f
 
 # --- SHARED STATE ---
 url_queue = Queue()
@@ -35,17 +37,25 @@ stats_lock = threading.Lock()
 def get_domain(url):
     return urlparse(url).netloc
 
+def is_too_deep(url):
+    """Returns True if the URL has too many sub-directories."""
+    path = urlparse(url).path
+    return path.count('/') > MAX_URL_SLASHES
+
 def scout_worker():
     while True:
         try:
-            # If queue is empty for 10 seconds, thread exits
-            current_url = url_queue.get(timeout=10)
+            current_url = url_queue.get(timeout=15)
         except Empty:
             break
 
+        # 1. Clean and Filter URL
+        if "?" in current_url:
+            current_url = current_url.split("?")[0]
+        current_url = current_url.rstrip('/')
+        
         domain = get_domain(current_url)
 
-        # Safety & Diversity Checks
         with stats_lock:
             if current_url in visited_urls or len(visited_urls) >= TOTAL_CRAWL_LIMIT:
                 url_queue.task_done()
@@ -53,8 +63,11 @@ def scout_worker():
             if domain_counts.get(domain, 0) >= PAGES_PER_DOMAIN_LIMIT:
                 url_queue.task_done()
                 continue
+            if is_too_deep(current_url):
+                url_queue.task_done()
+                continue
 
-        # 1. Index the page
+        # 2. Index the page
         success = index_website(current_url)
         
         if success:
@@ -62,25 +75,24 @@ def scout_worker():
                 visited_urls.add(current_url)
                 domain_counts[domain] = domain_counts.get(domain, 0) + 1
             
-            # 2. Extract Links (Internal AND External)
+            # 3. Extract Links
             try:
                 res = requests.get(current_url, timeout=5)
                 soup = BeautifulSoup(res.text, 'html.parser')
                 for a in soup.find_all('a', href=True):
                     link = urljoin(current_url, a['href'])
-                    link = link.split('#')[0].rstrip('/') # Clean URL
+                    link = link.split('#')[0].rstrip('?') 
                     
                     if link.startswith('http') and link not in visited_urls:
-                        # Add to queue - this allows "jumping" to new sites
                         url_queue.put(link)
             except Exception:
                 pass 
         
         url_queue.task_done()
-        time.sleep(0.5) # Prevent CPU spiking
+        time.sleep(0.3) # Stability delay to prevent memory 'Double Free'
 
-def start_omni_crawl():
-    print(f"🚀 KOMU OMNI-CRAWLER: Launching {MAX_THREADS} threads...")
+if __name__ == "__main__":
+    print(f"🚀 KOMU OMNI-SPIDER: Scanning the web with {MAX_THREADS} threads...")
     threads = []
     for i in range(MAX_THREADS):
         t = threading.Thread(target=scout_worker, name=f"Scout-{i+1}")
@@ -90,8 +102,4 @@ def start_omni_crawl():
 
     for t in threads:
         t.join()
-    print(f"🏁 CRAWL COMPLETE. Indexed {len(visited_urls)} unique pages.")
-
-if __name__ == "__main__":
-    start_omni_crawl()
-                
+    print(f"🏁 CRAWL COMPLETE. Indexed {len(visited_urls)} pages.")
