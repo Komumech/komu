@@ -11,6 +11,7 @@ GEMINI_KEY = os.getenv("GEMINI_KEY")
 PINECONE_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "plex-index")
 
+# Fallback for local testing
 if not GEMINI_KEY or not PINECONE_KEY:
     try:
         from config import GEMINI_KEY, PINECONE_KEY
@@ -19,44 +20,53 @@ if not GEMINI_KEY or not PINECONE_KEY:
 
 def index_website(url):
     try:
-        # Initialize clients inside for thread-safety
+        if not GEMINI_KEY or not PINECONE_KEY:
+            print("❌ CRITICAL ERROR: API Keys are missing. Check GitHub Secrets.")
+            return False
+
+        # Initialize fresh clients for thread safety
         client = genai.Client(api_key=GEMINI_KEY)
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index(PINECONE_INDEX_NAME)
 
-        # A. PRE-CHECK: Skip if already exists
+        # A. PRE-CHECK
         check_before = index.fetch(ids=[url])
         if check_before and url in check_before.get('vectors', {}):
-            print(f"⏩ Already indexed: {url}")
+            print(f"⏩ SKIPPING: {url} (Already in database)")
             return True
 
-        # B. CONTENT EXTRACTION
+        print(f"📥 DOWNLOADING: {url}")
+        
+        # B. EXTRACTION
         downloaded = trafilatura.fetch_url(url)
-        if not downloaded: return False
+        if not downloaded: 
+            print(f"⚠️ FAILED TO DOWNLOAD: {url}")
+            return False
         
         main_text = trafilatura.extract(downloaded, include_comments=False)
-        metadata = trafilatura.extract_metadata(downloaded)
-        title = (metadata.title if metadata and metadata.title else url)
-        domain = urlparse(url).netloc
-        if not main_text: return False
+        if not main_text:
+            print(f"⚠️ NO TEXT FOUND ON: {url}")
+            return False
 
-        # C. GENERATE EMBEDDING
+        metadata = trafilatura.extract_metadata(downloaded)
+        title = metadata.title if metadata and metadata.title else url
+        domain = urlparse(url).netloc
+
+        print(f"🧠 EMBEDDING TEXT FOR: {domain}")
         res = client.models.embed_content(
             model="gemini-embedding-001",
             contents=main_text[:3000], 
             config={"task_type": "RETRIEVAL_DOCUMENT", "title": title, "output_dimensionality": 768}
         )
         
-        # D. UPSERT TO PINECONE
+        print(f"💾 SAVING TEXT TO PINECONE: {url}")
         index.upsert(vectors=[{
             "id": url, 
             "values": res.embeddings[0].values, 
-            "metadata": {
-                "type": "web", "title": title, "url": url, "domain": domain, "text": main_text[:1000]
-            }
+            "metadata": {"type": "web", "title": title, "url": url, "domain": domain, "text": main_text[:1000]}
         }])
 
-        # E. IMAGE EXTRACTION
+        # C. IMAGES
         soup = BeautifulSoup(downloaded, 'html.parser')
         images = soup.find_all('img')
         img_vectors = []
@@ -74,25 +84,29 @@ def index_website(url):
             img_vectors.append({
                 "id": f"img_{full_img_url}",
                 "values": img_res.embeddings[0].values,
-                "metadata": {"type": "image", "title": alt, "url": url, "image_url": full_img_url}
+                "metadata": {"type": "image", "title": alt, "url": url, "image_url": full_img_url, "domain": domain}
             })
             if len(img_vectors) >= 3: break
         
         if img_vectors:
+            print(f"🖼️ SAVING {len(img_vectors)} IMAGES TO PINECONE...")
             index.upsert(vectors=img_vectors)
 
-        # F. FINAL VERIFICATION (The "Double Check")
-        # Give Pinecone a tiny moment to process (optional but safer)
-        time.sleep(1) 
+        # D. VERIFICATION
+        time.sleep(1.5) # Wait for Pinecone to register the save
         verify = index.fetch(ids=[url])
         if verify and url in verify.get('vectors', {}):
-            print(f"✅ VERIFIED: {domain} is now live in Pinecone.")
+            print(f"✅ VERIFIED & COMPLETED: {domain}")
             return True
         else:
-            print(f"⚠️ FAILED VERIFICATION: {url} was sent but not found.")
+            print(f"❌ PINECONE ERROR: Sent {url} but it didn't save.")
             return False
 
     except Exception as e:
-        print(f"❌ Snag on {url}: {e}")
+        # If ANYTHING crashes, it will print the exact reason here
+        print(f"🚨 CRASH ON {url}: {type(e).__name__} - {e}")
         return False
+
+if __name__ == "__main__":
+    index_website("https://github.com")
         
