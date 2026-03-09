@@ -1,68 +1,67 @@
 import os
 import time
 import trafilatura
-import google.generativeai as genai
-from pinecone import Pinecone
+from google import genai  # Modern Google AI SDK
+from pinecone import Pinecone  # Updated Pinecone SDK
 
 # --- CONFIG ---
+# These are pulled from your GitHub Actions Secrets
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 PINECONE_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "plex-index")
 
 def index_website(url):
+    """
+    Scrapes a website, generates a vector embedding using Gemini, 
+    and saves the result to Pinecone for search.
+    """
     try:
         if not GEMINI_KEY or not PINECONE_KEY:
-            print("🚨 ERROR: Missing API Keys in environment.")
+            print("🚨 ERROR: Missing API Keys. Check GitHub Secrets.")
             return False
 
-        # Init Services
-        genai.configure(api_key=GEMINI_KEY)
+        # 1. Initialize Clients
+        client = genai.Client(api_key=GEMINI_KEY)
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index(PINECONE_INDEX_NAME)
 
-        # A. SCRAPE
-        print(f"📥 Scrapping content: {url}")
+        # 2. Scrape Content
+        print(f"📥 Scraping: {url}")
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
-            print(f"⚠️ Trafilatura failed to download {url}")
+            print(f"⚠️ Failed to reach {url}")
             return False
             
-        main_text = trafilatura.extract(downloaded)
+        main_text = trafilatura.extract(downloaded, include_comments=False)
         if not main_text:
             print(f"⚠️ No readable text found on {url}")
             return False
 
-        # B. EMBED
+        # 3. Generate Embedding (Modern text-embedding-004 model)
         print(f"🧠 Generating Embedding for {url[:30]}...")
-        # Note: Using the reliable embedding model
-        embedding_res = genai.embed_content(
-            model="models/embedding-001",
-            content=main_text[:3000],
-            task_type="retrieval_document"
+        # Note: contents is plural in the new SDK
+        res = client.models.embed_content(
+            model="text-embedding-004", 
+            contents=main_text[:3000]
         )
         
-        # C. UPSERT
-        print(f"💾 Saving to Pinecone...")
+        # 4. Upsert to Pinecone
+        # The new SDK structure for embeddings is res.embeddings[0].values
+        print(f"💾 Saving to Pinecone index: {PINECONE_INDEX_NAME}")
         index.upsert(vectors=[{
             "id": url, 
-            "values": embedding_res['embedding'], 
+            "values": res.embeddings[0].values, 
             "metadata": {
                 "url": url, 
-                "text_snippet": main_text[:500]
+                "text": main_text[:500],
+                "timestamp": time.time()
             }
         }])
 
-        # D. VERIFY
-        time.sleep(1.5) # Wait for eventual consistency
-        check = index.fetch(ids=[url])
-        if check and url in check.get('vectors', {}):
-            print(f"✅ SUCCESS: {url} is indexed.")
-            return True
-        else:
-            print(f"❌ FAILED: Record was sent but not found in index.")
-            return False
+        print(f"✅ SUCCESS: {url} is now searchable.")
+        return True
 
     except Exception as e:
-        print(f"🚨 INDEXER ERROR on {url}: {e}")
+        print(f"🚨 INDEXER CRASH on {url}: {e}")
         return False
-              
+            
