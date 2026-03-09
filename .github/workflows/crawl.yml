@@ -25,18 +25,23 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests trafilatura urllib3 tqdm
+          # Added pinecone-client and google-generativeai for the indexer to work
+          pip install requests trafilatura urllib3 tqdm pinecone-client google-generativeai
 
       - name: Run Crawler
         env:
+          # You MUST add these to your GitHub Repo Secrets for this to work
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_ENVIRONMENT: ${{ secrets.PINECONE_ENVIRONMENT }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
         run: python crawler.py
 
       - name: Commit and Push changes
         run: |
           git config --global user.name "Komu-Bot"
           git config --global user.email "bot@komumv.com"
+          git pull origin main --rebase
           git add indexed_sites.txt
           git commit -m "Auto-update indexed sites [skip ci]" || echo "No changes to commit"
           git push origin main
-          
