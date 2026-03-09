@@ -41,7 +41,7 @@ def index_website(url):
         print(f"🧠 Generating Embedding for {url[:30]}...")
         # Note: contents is plural in the new SDK
         res = client.models.embed_content(
-            model="text-embedding-004", 
+            model="models/text-embedding-004", 
             contents=main_text[:3000]
         )
         
