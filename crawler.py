@@ -10,6 +10,8 @@ from indexer import index_website
 # --- SETTINGS ---
 MAX_THREADS = 6
 SEEDS = [
+    'https://about.google/products/',
+    'https://duolingo.com',
     'https://www.people.com',
     'https://www.theverge.com',
     'https://www.wired.com',
