@@ -9,23 +9,18 @@ from indexer import index_website
 
 # --- SETTINGS ---
 MAX_THREADS = 6
-# "Hub" seeds that link to many different external domains
 SEEDS = [
-    'https://github.com/trending',
-    'https://www.bbc.com',
-    'https://en.wikipedia.org/wiki/Special:Random',
-    'https://dev.to',
-    'https://www.producthunt.com',
-    'https://news.ycombinator.com',
+    'https://www.people.com',
     'https://www.theverge.com',
-    'https://www.medium.com',
-    'https://www.wired.com'
+    'https://www.wired.com',
+    'https://github.com/trending',
+    'https://dev.to',
+    'https://en.wikipedia.org/wiki/Special:Random'
 ]
-PAGES_PER_DOMAIN_LIMIT = 4
+PAGES_PER_DOMAIN_LIMIT = 50 # Increased since we are staying "shallow"
 TOTAL_CRAWL_LIMIT = 500
-MAX_URL_SLASHES = 4 # Blocks deep paths like /a/b/c/d/e/f
+MAX_PATH_SLASHES = 1 # <--- This ensures people.com/Ariana works but not people.com/a/b/c
 
-# --- SHARED STATE ---
 url_queue = Queue()
 for url in SEEDS:
     url_queue.put(url)
@@ -37,10 +32,12 @@ stats_lock = threading.Lock()
 def get_domain(url):
     return urlparse(url).netloc
 
-def is_too_deep(url):
-    """Returns True if the URL has too many sub-directories."""
-    path = urlparse(url).path
-    return path.count('/') > MAX_URL_SLASHES
+def get_path_depth(url):
+    """Counts slashes in the path only (ignores the https://)"""
+    path = urlparse(url).path.strip('/')
+    if not path:
+        return 0
+    return path.count('/') + 1
 
 def scout_worker():
     while True:
@@ -49,25 +46,28 @@ def scout_worker():
         except Empty:
             break
 
-        # 1. Clean and Filter URL
-        if "?" in current_url:
-            current_url = current_url.split("?")[0]
+        # Clean URL
+        if "?" in current_url: current_url = current_url.split("?")[0]
         current_url = current_url.rstrip('/')
         
         domain = get_domain(current_url)
+        depth = get_path_depth(current_url)
 
         with stats_lock:
+            # FILTER: If path is deeper than 1 slash, skip it
+            if depth > MAX_PATH_SLASHES:
+                url_queue.task_done()
+                continue
+                
             if current_url in visited_urls or len(visited_urls) >= TOTAL_CRAWL_LIMIT:
                 url_queue.task_done()
                 continue
+                
             if domain_counts.get(domain, 0) >= PAGES_PER_DOMAIN_LIMIT:
                 url_queue.task_done()
                 continue
-            if is_too_deep(current_url):
-                url_queue.task_done()
-                continue
 
-        # 2. Index the page
+        # Indexing
         success = index_website(current_url)
         
         if success:
@@ -75,31 +75,23 @@ def scout_worker():
                 visited_urls.add(current_url)
                 domain_counts[domain] = domain_counts.get(domain, 0) + 1
             
-            # 3. Extract Links
+            # Extract Links
             try:
                 res = requests.get(current_url, timeout=5)
                 soup = BeautifulSoup(res.text, 'html.parser')
                 for a in soup.find_all('a', href=True):
-                    link = urljoin(current_url, a['href'])
-                    link = link.split('#')[0].rstrip('?') 
-                    
+                    link = urljoin(current_url, a['href']).split('#')[0].rstrip('/')
                     if link.startswith('http') and link not in visited_urls:
                         url_queue.put(link)
             except Exception:
                 pass 
         
         url_queue.task_done()
-        time.sleep(0.3) # Stability delay to prevent memory 'Double Free'
+        time.sleep(0.2)
 
 if __name__ == "__main__":
-    print(f"🚀 KOMU OMNI-SPIDER: Scanning the web with {MAX_THREADS} threads...")
-    threads = []
-    for i in range(MAX_THREADS):
-        t = threading.Thread(target=scout_worker, name=f"Scout-{i+1}")
-        t.daemon = True
-        t.start()
-        threads.append(t)
-
-    for t in threads:
-        t.join()
-    print(f"🏁 CRAWL COMPLETE. Indexed {len(visited_urls)} pages.")
+    print(f"🚀 KOMU PROFILE-SPIDER: Starting at depth {MAX_PATH_SLASHES}...")
+    threads = [threading.Thread(target=scout_worker, name=f"Scout-{i+1}") for i in range(MAX_THREADS)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+        
