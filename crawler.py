@@ -15,7 +15,6 @@ SEEDS = [
     'https://www.people.com',
     'https://www.theverge.com',
     'https://www.wired.com',
-    'https://github.com/trending',
     'https://dev.to',
     'https://en.wikipedia.org/wiki/Special:Random'
 ]
