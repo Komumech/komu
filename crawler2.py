@@ -1,14 +1,8 @@
 import os
 import time
 import requests
-import ssl
-import trafilatura
-import urllib3
-import re
-import random
 import threading
 from queue import Queue, Empty
-from tqdm import tqdm
 from urllib.parse import urlparse, urljoin
 from urllib3.poolmanager import PoolManager
 from requests.adapters import HTTPAdapter
@@ -24,9 +18,9 @@ class TLSAdapter(HTTPAdapter):
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 session = requests.Session()
-# Higher pool size for MAX_THREADS efficiency
-session.mount("https://", TLSAdapter(pool_connections=30, pool_maxsize=30))
+session.mount("https://", TLSAdapter())
 
+from config import GEMINI_KEY
 try:
     from indexer import index_website
 except ImportError:
@@ -35,8 +29,7 @@ except ImportError:
 # --- 1. CONFIGURATION ---
 LOG_FILE = "indexed_sites.txt"
 TARGET_COUNT = 1000 
-MAX_THREADS = 15 
-DOMAIN_LIMIT = 40  # Max pages per domain to ensure diversity
+MAX_THREADS = 12 
 
 SEED_SITES = [
     "https://www.france24.com/en",
@@ -49,31 +42,20 @@ SEED_SITES = [
     "https://knowyourmeme.com",
     "https://openlibrary.org",
     "https://www.artsy.net/articles",
-    "https://thisiscolossal.com",
+    "https://www.thisiscolossal.com",
     "https://publicdomainreview.org",
     "https://eyeondesign.aiga.org",
     "https://lobste.rs",
     "https://arxiv.org/list/cs/new",
     "https://curlie.org",
     "https://www.themarginalian.org",
-    "https://github.com/trending",
-    "https://news.ycombinator.com"
+    "https://indieweb.org"
 ]
 
-TRUSTED_DOMAINS = [
-    "france24.com", "theguardian.com", "scmp.com", "phys.org", 
-    "smithsonianmag.com", "nautil.us", "archive.org", 
-    "knowyourmeme.com", "openlibrary.org", "artsy.net", 
-    "thisiscolossal.com", "publicdomainreview.org", 
-    "aiga.org", "lobste.rs", "arxiv.org", "curlie.org", 
-    "themarginalian.org", "indieweb.org", "bbc.co.uk", "github.com", "ycombinator.com"
-]
-
-# --- 2. SHARED DATA ---
+# --- 2. SHARED DATA & LOCKS ---
 url_queue = Queue()
 visited = set()         
 runtime_indexed = set() 
-domain_counts = {}  
 data_lock = threading.Lock()
 pbar = None 
 
@@ -99,78 +81,70 @@ def crawler_worker():
     global pbar
     while True:
         try:
-            url = url_queue.get(timeout=10)
+            current_url = url_queue.get(timeout=15)
         except Empty:
-            continue # Orchestrator handles the shutdown logic
+            with data_lock:
+                if pbar.n >= TARGET_COUNT: break
+            continue
 
         clean_url = url.lower().strip()
-        domain = urlparse(clean_url).netloc
         
         with data_lock:
-            if pbar.n >= TARGET_COUNT or clean_url in visited:
+            if pbar.n >= TARGET_COUNT:
+                url_queue.task_done()
+                break
+            if clean_url in visited or clean_url in runtime_indexed:
                 url_queue.task_done()
                 continue
-            
-            # Domain Capping check
-            if domain_counts.get(domain, 0) >= DOMAIN_LIMIT:
-                url_queue.task_done()
-                continue
-                
             visited.add(clean_url)
 
         try:
             headers = {'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            resp = session.get(url, headers=headers, timeout=12)
+            resp = session.get(url, headers=headers, timeout=10)
             
             if resp.status_code == 200:
-                # Filter out traps
-                blacklist = ["/events/", "/calendar/", "/tag/", "/category/", "/search/"]
-                if any(p in clean_url for p in blacklist):
-                    url_queue.task_done()
-                    continue
-
                 content = trafilatura.extract(resp.text) or ""
-                
-                if len(content) > 450:
+                domain = urlparse(url).netloc
+
+                if len(content) > 400:
                     success = index_website(url)
                     if success:
                         with data_lock:
                             if clean_url not in runtime_indexed:
                                 runtime_indexed.add(clean_url)
-                                domain_counts[domain] = domain_counts.get(domain, 0) + 1
                                 log_indexed_site(url)
                                 pbar.update(1)
-                                pbar.set_postfix({"added": domain[:10], "cnt": f"{domain_counts[domain]}/{DOMAIN_LIMIT}"})
+                                pbar.set_postfix({"added": domain[:15]})
 
-                # Discovery logic
+                # Discovery with Improved Slash Filter
                 raw_links = re.findall(r'href=["\'](.*?)["\']', resp.text)
-                random.shuffle(raw_links)
-                
-                added_from_this_page = 0
                 for link in raw_links:
-                    if added_from_this_page >= 15: break
-                    
                     full_url = urljoin(url, link).split('#')[0].split('?')[0].rstrip('/')
-                    link_domain = urlparse(full_url).netloc
                     
+                    # Better Slash Counting: only looks at the path after the domain
                     parsed_path = urlparse(full_url).path.strip('/')
                     slash_count = parsed_path.count('/') if parsed_path else 0
                     
-                    is_trusted = any(td in link_domain for td in TRUSTED_DOMAINS)
-                    max_depth = 3 if is_trusted else 1
-                    
-                    if slash_count <= max_depth and link_domain:
-                        with data_lock:
-                            if domain_counts.get(link_domain, 0) < DOMAIN_LIMIT:
-                                if full_url.lower() not in visited:
+                    # 1 slash limit (Allows site.com/folder but not site.com/folder/page)
+                    if slash_count <= 1:
+                        link_domain = urlparse(full_url).netloc
+                        # Added common patterns for the seeds provided
+                        trusted = ["france24.com", "theguardian.com", "scmp.com", "phys.org", 
+                                   "smithsonianmag.com", "nautil.us", "archive.org", 
+                                   "knowyourmeme.com", "openlibrary.org", "artsy.net", 
+                                   "thisiscolossal.com", "publicdomainreview.org", 
+                                   "aiga.org", "lobste.rs", "arxiv.org", "curlie.org", 
+                                   "themarginalian.org", "indieweb.org", "bbc.co.uk"]
+                        
+                        if any(td in link_domain for td in trusted):
+                            with data_lock:
+                                if full_url.lower() not in visited and full_url.lower() not in runtime_indexed:
                                     url_queue.put(full_url)
-                                    added_from_this_page += 1
 
-            time.sleep(random.uniform(0.2, 0.5))
-        except Exception:
-            pass
-        finally:
-            url_queue.task_done()
+            time.sleep(random.uniform(0.3, 0.7))
+
+        except Exception: pass
+        finally: url_queue.task_done()
 
 # --- 5. ORCHESTRATOR ---
 
@@ -179,19 +153,13 @@ def run_master_crawler():
     print("🔍 Loading history...")
     history = load_history()
     runtime_indexed.update(history)
-    visited.update(history)
-
-    # RE-BOOTSTRAP SEEDS: Remove seeds from 'visited' so we can re-scan them for new links
+    
+    # Fill queue with seeds
     for site in SEED_SITES: 
-        clean_seed = site.lower().strip()
-        if clean_seed in visited:
-            visited.remove(clean_seed)
         url_queue.put(site)
 
-    print(f"🌍 Komu Scout starting. Existing database: {len(history)}")
+    print(f"🌍 Komu Scout starting. Already indexed: {len(history)}")
     pbar = tqdm(total=TARGET_COUNT, initial=0, desc="Session Progress", unit="site")
-
-    
 
     threads = []
     for _ in range(MAX_THREADS):
@@ -200,34 +168,34 @@ def run_master_crawler():
         t.start()
         threads.append(t)
 
-    # 1. BOOTSTRAP PHASE: Let threads start working before we check if the queue is empty
-    print("🚀 Bootstrapping queue (12 seconds)...")
-    time.sleep(12) 
-
     try:
-        consecutive_empty = 0
+        # Give seeds a moment to process
+        time.sleep(8) 
+        
         while True:
+            # If the queue is empty, we are done
+            if url_queue.empty():
+                # Final 5-second grace period for slow connections
+                time.sleep(5)
+                if url_queue.empty():
+                    print("\n🏁 Queue finished naturally.")
+                    break
+            
             with data_lock:
                 if pbar.n >= TARGET_COUNT:
                     print("\n🎯 Target reached!")
                     break
-            
-            if url_queue.empty():
-                consecutive_empty += 1
-                # Exit only if queue is empty for 30 seconds straight
-                if consecutive_empty >= 3: 
-                    print("\n🏁 Queue exhausted naturally.")
-                    break
-            else:
-                consecutive_empty = 0 # Reset if we found work
-            
-            time.sleep(10) # Monitor every 10 seconds
+            time.sleep(2)
             
     except KeyboardInterrupt:
         print("\n🛑 Stop requested.")
 
     pbar.close()
-    print(f"\n✅ Complete. Logged: {len(runtime_indexed)} unique sites.")
+    print(f"\n✅ Session complete. Total indexed: {len(runtime_indexed)}")
 
 if __name__ == "__main__":
-    run_master_crawler()
+    print(f"🚀 KOMU PROFILE-SPIDER: Starting at depth {MAX_PATH_SLASHES}...")
+    threads = [threading.Thread(target=scout_worker, name=f"Scout-{i+1}") for i in range(MAX_THREADS)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+        

@@ -1,0 +1,47 @@
+name: Komu Scout Auto-Crawl
+
+on:
+  workflow_dispatch: # Allows manual start
+  push:
+    branches: [main]
+  schedule:
+    # Runs at 00:00, 06:00, 12:00, and 18:00 UTC
+    - cron: '0 */6 * * *' 
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # Upgraded to 3.11 to avoid Google library warnings
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests trafilatura urllib3 pinecone google-genai beautifulsoup4 grpcio
+
+      - name: Run Komu Scout
+        env:
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_ENVIRONMENT: ${{ secrets.PINECONE_ENVIRONMENT }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+        run: |
+          # Timeout set to 5 hours to stay within GitHub's 6-hour free limit
+          timeout 5h python crawler.py
+        continue-on-error: true 
+
+      - name: Upload Indexing Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: indexed-sites-list
+          path: indexed_sites.txt
+          if-no-files-found: ignore
+          

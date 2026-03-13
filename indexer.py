@@ -1,97 +1,63 @@
+import os
+import time
 import trafilatura
 from google import genai
+from google.genai import types # Needed for the configuration
 from pinecone import Pinecone
-from config import GEMINI_KEY, PINECONE_KEY
-from urllib.parse import urlparse, urljoin
-from bs4 import BeautifulSoup # Added for better image discovery
 
-# 1. Setup
-client = genai.Client(api_key=GEMINI_KEY)
-pc = Pinecone(api_key=PINECONE_KEY)
-index = pc.Index("plex-index") 
+# --- CONFIG ---
+GEMINI_KEY = os.getenv("GEMINI_KEY", "").strip()
+PINECONE_KEY = os.getenv("PINECONE_API_KEY", "").strip()
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "plex-index").strip()
 
 def index_website(url):
     try:
-        print(f"🔍 Analyzing: {url}")
-        
-        # --- A. CONTENT EXTRACTION ---
-        downloaded = trafilatura.fetch_url(url)
-        if not downloaded: return False
-        
-        main_text = trafilatura.extract(downloaded, include_comments=False)
-        metadata = trafilatura.extract_metadata(downloaded)
-        title = metadata.title if metadata and metadata.title else url
-        domain = urlparse(url).netloc
-        
-        if not main_text: return False
+        if not GEMINI_KEY or not PINECONE_KEY:
+            print("🚨 ERROR: Missing API Keys.")
+            return False
 
-        # --- B. INDEX WEB PAGE (Text) ---
+        # 1. Init Clients
+        client = genai.Client(api_key=GEMINI_KEY)
+        pc = Pinecone(api_key=PINECONE_KEY)
+        index = pc.Index(PINECONE_INDEX_NAME)
+
+        # 2. Scrape Content
+        print(f"📥 Scraping: {url}")
+        downloaded = trafilatura.fetch_url(url)
+        if not downloaded: 
+            print(f"⚠️ Could not download {url}")
+            return False
+            
+        main_text = trafilatura.extract(downloaded)
+        if not main_text: 
+            print(f"⚠️ No text found on {url}")
+            return False
+
+        # 3. Generate Embedding (Forced to 768 dimensions)
+        print(f"🧠 Generating 768-dim Embedding...")
         res = client.models.embed_content(
             model="gemini-embedding-001",
-            contents=main_text[:3000], 
-            config={"task_type": "RETRIEVAL_DOCUMENT", "title": title, "output_dimensionality": 768}
+            contents=main_text[:3000],
+            config=types.EmbedContentConfig(
+                output_dimensionality=768 # <--- This fixes your crash!
+            )
         )
         
+        # 4. Upsert to Pinecone
+        print(f"💾 Saving to Pinecone...")
         index.upsert(vectors=[{
             "id": url, 
             "values": res.embeddings[0].values, 
             "metadata": {
-                "type": "web", # Label as web content
-                "title": title, 
-                "url": url,
-                "domain": domain,
-                "text": main_text[:1000]
+                "url": url, 
+                "text": main_text[:500]
             }
         }])
 
-        # --- C. IMAGE DISCOVERY & INDEXING ---
-        # We parse the HTML to find <img> tags with alt text
-        soup = BeautifulSoup(downloaded, 'html.parser')
-        images_found = soup.find_all('img')
-        
-        img_vectors = []
-        indexed_count = 0
-
-        for img in images_found:
-            img_url = img.get('src')
-            alt_text = img.get('alt', '').strip()
-            
-            # Filter for quality: skip icons, small spacers, or empty alt text
-            if not img_url or len(alt_text) < 10: continue
-            
-            full_img_url = urljoin(url, img_url)
-            
-            # Vectorize the image based on its ALT TEXT and Page Title
-            # This allows the search engine to find the image when users type relevant keywords
-            img_res = client.models.embed_content(
-                model="gemini-embedding-001",
-                contents=f"Image from {title}: {alt_text}",
-                config={"task_type": "RETRIEVAL_DOCUMENT", "output_dimensionality": 768}
-            )
-            
-            img_vectors.append({
-                "id": f"img_{full_img_url}", # Unique ID for images
-                "values": img_res.embeddings[0].values,
-                "metadata": {
-                    "type": "image", # Label for the Images tab
-                    "title": alt_text,
-                    "url": url, # Parent page
-                    "image_url": full_img_url,
-                    "domain": domain
-                }
-            })
-            indexed_count += 1
-            if indexed_count >= 5: break # Cap at 5 images per page to save Pinecone space
-
-        if img_vectors:
-            index.upsert(vectors=img_vectors)
-        
-        print(f"✅ Indexed: {domain} (+{indexed_count} images)")
+        print(f"✅ SUCCESS: {url}")
         return True
 
     except Exception as e:
-        print(f"❌ Snag on {url}: {e}")
+        print(f"🚨 INDEXER ERROR on {url}: {e}")
         return False
-
-if __name__ == "__main__":
-    index_website("https://people.com/celebrity/ariana-grande")
+        
