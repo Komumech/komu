@@ -24,7 +24,7 @@ def load_secrets():
 PINECONE_KEY, HF_TOKEN = load_secrets()
 
 # --- FREE AI MODEL CONFIG ---
-# Using Mistral-Nemo for high-quality, fast, free inference
+# Mistral-Nemo is highly capable, fast, and available for free inference
 HF_MODEL_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-Nemo-Instruct-2407"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
 
@@ -36,15 +36,17 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     .block-container { padding-top: 2rem !important; max-width: 1200px !important; }
     
+    /* Search Bar Styling */
     div[data-baseweb="input"] > div { 
         border-radius: 24px !important; 
         border: 1px solid #dfe1e5 !important; 
         padding: 4px 12px !important; 
     }
     
+    /* Branding */
     .komu-logo-large { font-family: 'Product Sans', sans-serif; font-size: 90px; font-weight: 700; text-align: center; margin-top: 10vh; margin-bottom: 30px; letter-spacing: -2px; color: #4285f4; }
-    .komu-logo-small { font-family: 'Product Sans', sans-serif; font-size: 32px; font-weight: 700; margin-top: -0.7rem; letter-spacing: -1px; color: #4285f4; cursor: pointer; }
     
+    /* AI Overview Card */
     .ai-overview-card { 
         background: linear-gradient(135deg, #f0f4f9 0%, #e8eaf6 100%); 
         border: 1px solid #dadce0; 
@@ -59,11 +61,13 @@ st.markdown("""
         margin-right: 8px; margin-top: 8px; font-weight: 500; 
     }
     
+    /* Search Results */
     .search-result { margin-bottom: 28px; max-width: 652px; }
     .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; display: block; margin-bottom: 2px; }
     .site-path { font-size: 14px; color: #202124; display: inline-block; max-width: 450px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .favicon { width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
 
+    /* Image Grid */
     .image-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); grid-gap: 15px; }
     .image-card { border-radius: 8px; overflow: hidden; border: 1px solid #dadce0; }
     .image-card img { width: 100%; height: 150px; object-fit: cover; }
@@ -76,8 +80,8 @@ def get_komu_engines():
     try:
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index("plex-index")
-        # Switching to a faster, lighter embedding model for free-tier performance
-        embed_model = SentenceTransformer('all-MiniLM-L6-v2')
+        # SWITCHED TO 768 DIMENSIONS to match your index
+        embed_model = SentenceTransformer('all-mpnet-base-v2')
         return index, embed_model
     except Exception as e:
         st.error(f"Engine Initialization Error: {e}")
@@ -106,18 +110,18 @@ def query_huggingface(prompt):
         response = requests.post(HF_MODEL_URL, headers=HF_HEADERS, json=payload, timeout=15)
         if response.status_code == 200:
             res = response.json()
-            # Handle different return formats from HF API
             raw_text = res[0]['generated_text'] if isinstance(res, list) else res.get('generated_text')
-            # Clean up the prompt if the model repeats it
+            # Extract only the response part
             return raw_text.split("[/INST]")[-1].strip()
     except Exception as e:
-        return f"Scout AI is temporarily unavailable. Error: {str(e)}"
+        return f"Summary unavailable. (HF Error)"
     return "Could not generate summary."
 
 # --- 5. SEARCH LOGIC ---
 def run_search(query):
     with st.spinner("Scouting the web..."):
         try:
+            # Encodes to 768 dimensions
             vector = embed_model.encode(query).tolist()
             query_res = index.query(vector=vector, top_k=40, include_metadata=True)
             
@@ -150,7 +154,7 @@ if not is_results_page:
     st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
     _, col_search, _ = st.columns([1, 4, 1])
     with col_search:
-        query_input = st.text_input("Search the web", placeholder="Search for GitHub, news, or useful sites...", label_visibility="collapsed")
+        query_input = st.text_input("Search the web", placeholder="Search for GitHub, code, or news...", label_visibility="collapsed")
         if query_input: run_search(query_input)
 else:
     col_logo, col_search, _ = st.columns([1, 6, 2])
@@ -176,7 +180,7 @@ else:
                     
                     ctx = "\n\n".join([f"Source {i+1}: {c[:900]}" for i, c in enumerate(contents) if c])
                     if ctx:
-                        prompt = f"Topic: '{st.session_state.query}'. Instructions: Write a concise, 3-sentence summary based strictly on these snippets:\n\n{ctx}"
+                        prompt = f"Topic: '{st.session_state.query}'. Instructions: Write a concise summary based on these snippets:\n\n{ctx}"
                         st.session_state.ai_overview = query_huggingface(prompt)
                     st.session_state.ai_status = "complete"
                     st.rerun()
