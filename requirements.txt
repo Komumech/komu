@@ -1,21 +1,9 @@
-# --- Core Intelligence ---
 sentence-transformers
 torch
 google-genai
-openai
-
-# --- Vector Database (Updated Name) ---
 pinecone
-
-# --- UI & Deployment ---
 streamlit
-
-# --- Web Scraping & Discovery ---
 trafilatura
 requests
 urllib3
-duckduckgo_search
-tqdm
-
-# --- Utilities ---
 huggingface_hub
