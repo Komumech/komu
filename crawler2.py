@@ -1,13 +1,33 @@
 import os
 import time
 import requests
+import ssl
+import trafilatura
+import urllib3
+import re
+import random
 import threading
 from queue import Queue, Empty
-from urllib.parse import urlparse, urljoin
+from tqdm import tqdm
+from urllib.parse import urlparse
 from urllib3.poolmanager import PoolManager
 from requests.adapters import HTTPAdapter
 
-# --- 0. THE SSL & SESSION PATCH ---
+# --- VECTOR ENGINE ---
+from pinecone import Pinecone
+from sentence_transformers import SentenceTransformer
+
+# --- LOAD SECURE KEYS ---
+try:
+    import config
+    PINECONE_KEY = config.PINECONE_KEY
+    INDEX_NAME = config.INDEX_NAME
+    NAMESPACE = config.NAMESPACE
+except (ImportError, AttributeError):
+    print("❌ ERROR: Ensure config.py exists with keys.")
+    exit()
+
+# --- SSL & SESSION STABILIZER ---
 class TLSAdapter(HTTPAdapter):
     def init_poolmanager(self, connections, maxsize, block=False):
         ctx = ssl.create_default_context()
@@ -18,184 +38,188 @@ class TLSAdapter(HTTPAdapter):
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 session = requests.Session()
-session.mount("https://", TLSAdapter())
+session.mount("https://", TLSAdapter(pool_connections=100, pool_maxsize=100))
 
-from config import GEMINI_KEY
-try:
-    from indexer import index_website
-except ImportError:
-    def index_website(url): return True 
-
-# --- 1. CONFIGURATION ---
-LOG_FILE = "indexed_sites.txt"
-TARGET_COUNT = 1000 
-MAX_THREADS = 12 
-
-SEED_SITES = [
-    "https://www.france24.com/en",
-    "https://www.theguardian.com/international",
-    "https://www.scmp.com",
-    "https://phys.org",
-    "https://www.smithsonianmag.com",
-    "https://nautil.us",
-    "https://blog.archive.org",
-    "https://knowyourmeme.com",
-    "https://openlibrary.org",
-    "https://www.artsy.net/articles",
-    "https://www.thisiscolossal.com",
-    "https://publicdomainreview.org",
-    "https://eyeondesign.aiga.org",
-    "https://lobste.rs",
-    "https://arxiv.org/list/cs/new",
-    "https://curlie.org",
-    "https://www.themarginalian.org",
-    "https://indieweb.org"
+# --- USER AGENT ROTATION ---
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 ]
 
-# --- 2. SHARED DATA & LOCKS ---
+# --- GLOBAL CONFIG ---
+LOG_FILE = "indexed_sites.txt"
+TARGET_COUNT = 1500 
+MAX_THREADS = 5   # Balanced for CPU/Network efficiency
+DOMAIN_LIMIT = 40 # Max pages per single domain
+
+SEED_SITES = [
+    "https://news.ycombinator.com",
+    "https://about.google/products/",
+    "https://lobste.rs",
+    "https://arxiv.org/list/cs/new",
+    "https://slashdot.org",
+    "https://blog.google/",
+    "https://wordpress.org/",
+    "https://people.com/celebrity/",
+    "https://www.sciencedaily.com"
+]
+
+# --- INITIALIZE ENGINES ---
+print(f"🛰️  KOMU SCOUT v10 - ACTIVATED")
+try:
+    print("🧠 Loading Sentence Transformer...")
+    model = SentenceTransformer('all-mpnet-base-v2')
+    print(f"📡 Connecting to Pinecone Index: {INDEX_NAME}...")
+    pc = Pinecone(api_key=PINECONE_KEY)
+    pc_index = pc.Index(INDEX_NAME)
+except Exception as e:
+    print(f"❌ Initialization Failed: {e}"); exit()
+
+# --- SHARED DATA ---
 url_queue = Queue()
 visited = set()         
 runtime_indexed = set() 
+domain_counts = {}  
+active_workers = 0 
 data_lock = threading.Lock()
 pbar = None 
 
-# --- 3. UTILS ---
-
-def load_history():
-    if not os.path.exists(LOG_FILE): return set()
-    history = set()
-    with open(LOG_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            parts = line.split("] ")
-            if len(parts) > 1:
-                history.add(parts[1].strip().lower())
-    return history
-
-def log_indexed_site(url):
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{time.strftime('%H:%M:%S')}] {url}\n")
-
-# --- 4. THE CRAWLER WORKER ---
+# --- CORE FUNCTIONS ---
+def index_to_pinecone(url, text, domain, t_name):
+    try:
+        # AI Vectorization
+        vector = model.encode(text).tolist()
+        v_id = re.sub(r'\W+', '_', url)[:512]
+        
+        pc_index.upsert(
+            vectors=[{
+                "id": v_id, 
+                "values": vector, 
+                "metadata": {
+                    "url": url, 
+                    "domain": domain, 
+                    "text": text[:800], 
+                    "scanned_at": time.time()
+                }
+            }],
+            namespace=NAMESPACE
+        )
+        return True
+    except Exception as e:
+        tqdm.write(f"⚠️ [{t_name}] Pinecone Error: {str(e)[:40]}")
+        return False
 
 def crawler_worker():
-    global pbar
+    global pbar, active_workers
+    t_name = threading.current_thread().name
     while True:
         try:
-            current_url = url_queue.get(timeout=15)
+            url = url_queue.get(timeout=15) 
         except Empty:
-            with data_lock:
-                if pbar.n >= TARGET_COUNT: break
             continue
 
-        clean_url = url.lower().strip()
+        with data_lock: active_workers += 1
+
+        clean_url = url.lower().strip().rstrip('/')
+        domain = urlparse(clean_url).netloc
         
         with data_lock:
-            if pbar.n >= TARGET_COUNT:
-                url_queue.task_done()
-                break
-            if clean_url in visited or clean_url in runtime_indexed:
+            if pbar.n >= TARGET_COUNT or clean_url in visited:
+                active_workers -= 1
                 url_queue.task_done()
                 continue
             visited.add(clean_url)
 
         try:
-            headers = {'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            resp = session.get(url, headers=headers, timeout=10)
+            tqdm.write(f"🌐 [{t_name}] Fetching: {domain}")
+            headers = {'User-Agent': random.choice(USER_AGENTS), 'Referer': 'https://www.google.com/'}
+            resp = session.get(url, headers=headers, timeout=15)
             
             if resp.status_code == 200:
-                content = trafilatura.extract(resp.text) or ""
-                domain = urlparse(url).netloc
-
-                if len(content) > 400:
-                    success = index_website(url)
-                    if success:
+                tqdm.write(f"✂️  [{t_name}] Cleaning Content...")
+                text = trafilatura.extract(resp.text) or ""
+                
+                if len(text) > 250: 
+                    tqdm.write(f"🧬 [{t_name}] AI Processing & Uploading...")
+                    if index_to_pinecone(url, text, domain, t_name):
                         with data_lock:
-                            if clean_url not in runtime_indexed:
-                                runtime_indexed.add(clean_url)
-                                log_indexed_site(url)
-                                pbar.update(1)
-                                pbar.set_postfix({"added": domain[:15]})
+                            runtime_indexed.add(clean_url)
+                            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+                            pbar.update(1)
+                            tqdm.write(f"✅ [{t_name}] SUCCESS: {domain}")
 
-                # Discovery with Improved Slash Filter
-                raw_links = re.findall(r'href=["\'](.*?)["\']', resp.text)
-                for link in raw_links:
-                    full_url = urljoin(url, link).split('#')[0].split('?')[0].rstrip('/')
+                # RECURSIVE LINK DISCOVERY
+                # This finds "links from links from links"
+                links = re.findall(r'href=["\'](https?://[^\s"\']+)["\']', resp.text)
+                random.shuffle(links)
+                found_new = 0
+                for l in links:
+                    if found_new >= 30: break # Keep the queue healthy but not overflowing
+                    l_clean = l.split('#')[0].split('?')[0].rstrip('/')
+                    l_domain = urlparse(l_clean).netloc
                     
-                    # Better Slash Counting: only looks at the path after the domain
-                    parsed_path = urlparse(full_url).path.strip('/')
-                    slash_count = parsed_path.count('/') if parsed_path else 0
-                    
-                    # 1 slash limit (Allows site.com/folder but not site.com/folder/page)
-                    if slash_count <= 1:
-                        link_domain = urlparse(full_url).netloc
-                        # Added common patterns for the seeds provided
-                        trusted = ["france24.com", "theguardian.com", "scmp.com", "phys.org", 
-                                   "smithsonianmag.com", "nautil.us", "archive.org", 
-                                   "knowyourmeme.com", "openlibrary.org", "artsy.net", 
-                                   "thisiscolossal.com", "publicdomainreview.org", 
-                                   "aiga.org", "lobste.rs", "arxiv.org", "curlie.org", 
-                                   "themarginalian.org", "indieweb.org", "bbc.co.uk"]
-                        
-                        if any(td in link_domain for td in trusted):
-                            with data_lock:
-                                if full_url.lower() not in visited and full_url.lower() not in runtime_indexed:
-                                    url_queue.put(full_url)
+                    # Filter for quality
+                    if any(x in l_clean for x in ["/tag/", "/search/", "/login", "facebook.com", "twitter.com"]):
+                        continue
 
-            time.sleep(random.uniform(0.3, 0.7))
+                    with data_lock:
+                        if l_domain and l_clean not in visited and domain_counts.get(l_domain, 0) < DOMAIN_LIMIT:
+                            url_queue.put(l_clean)
+                            found_new += 1
+            else:
+                tqdm.write(f"❌ [{t_name}] HTTP {resp.status_code}: {domain}")
 
-        except Exception: pass
-        finally: url_queue.task_done()
+            time.sleep(random.uniform(1, 2)) 
+        except Exception as e:
+            tqdm.write(f"💥 [{t_name}] Request Error on {domain}")
+        finally:
+            with data_lock: active_workers -= 1
+            url_queue.task_done()
 
-# --- 5. ORCHESTRATOR ---
-
-def run_master_crawler():
+# --- MASTER ORCHESTRATOR ---
+def run_komu():
     global pbar
-    print("🔍 Loading history...")
-    history = load_history()
-    runtime_indexed.update(history)
-    
-    # Fill queue with seeds
-    for site in SEED_SITES: 
-        url_queue.put(site)
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r") as f:
+            for line in f:
+                parts = line.split("] ")
+                if len(parts) > 1: visited.add(parts[1].strip().lower())
 
-    print(f"🌍 Komu Scout starting. Already indexed: {len(history)}")
-    pbar = tqdm(total=TARGET_COUNT, initial=0, desc="Session Progress", unit="site")
+    for site in SEED_SITES: url_queue.put(site)
 
-    threads = []
-    for _ in range(MAX_THREADS):
-        t = threading.Thread(target=crawler_worker)
-        t.daemon = True 
+    print(f"🚀 KOMU SCOUT READY. Beginning Deep Recursive Crawl.")
+    pbar = tqdm(total=TARGET_COUNT, desc="Indexing", unit="site", colour="cyan")
+
+    # Start Threads
+    for i in range(MAX_THREADS):
+        t = threading.Thread(target=crawler_worker, name=f"Scout-{i+1}", daemon=True)
         t.start()
-        threads.append(t)
 
+    # Smart Monitoring Loop
     try:
-        # Give seeds a moment to process
-        time.sleep(8) 
-        
-        while True:
-            # If the queue is empty, we are done
-            if url_queue.empty():
-                # Final 5-second grace period for slow connections
-                time.sleep(5)
-                if url_queue.empty():
-                    print("\n🏁 Queue finished naturally.")
-                    break
-            
+        while pbar.n < TARGET_COUNT:
+            time.sleep(10)
             with data_lock:
-                if pbar.n >= TARGET_COUNT:
-                    print("\n🎯 Target reached!")
-                    break
-            time.sleep(2)
+                busy = active_workers
+                pending = url_queue.qsize()
             
+            if pending == 0 and busy == 0:
+                tqdm.write("⏳ Discovery check... waiting for threads to report links.")
+                time.sleep(40) # Extended wait for AI processing to finish
+                if url_queue.empty() and active_workers == 0:
+                    tqdm.write("🏁 Mission Finished: No more links found.")
+                    break
     except KeyboardInterrupt:
-        print("\n🛑 Stop requested.")
+        print("\n🛑 Safe Exit: Progress Saved.")
+
+    # Final log of all unique sites found
+    with open(LOG_FILE, "a") as f:
+        for url in runtime_indexed:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {url}\n")
 
     pbar.close()
-    print(f"\n✅ Session complete. Total indexed: {len(runtime_indexed)}")
+    print(f"✅ Mission Complete. Total Sites Indexed this session: {len(runtime_indexed)}")
 
 if __name__ == "__main__":
-    print(f"🚀 KOMU PROFILE-SPIDER: Starting at depth {MAX_PATH_SLASHES}...")
-    threads = [threading.Thread(target=scout_worker, name=f"Scout-{i+1}") for i in range(MAX_THREADS)]
-    for t in threads: t.start()
-    for t in threads: t.join()
-        
+    run_komu()

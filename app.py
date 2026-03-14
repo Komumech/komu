@@ -3,10 +3,12 @@ import math
 import trafilatura
 import time
 import requests
+import re
 from google import genai
 from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from sentence_transformers import SentenceTransformer
 
 # --- 0. SECRETS & CONFIG ---
 def load_secrets():
@@ -22,12 +24,12 @@ def load_secrets():
 
 GEMINI_KEY, PINECONE_KEY, HF_TOKEN = load_secrets()
 
-# UPDATED: Using the new Router endpoint to fix HF Error 410/404
+# AI Overview Config
 HF_ROUTER_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.3"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
 
 RESULTS_PER_PAGE = 8
-SEARCH_CONCURRENCY = 12 
+SEARCH_CONCURRENCY = 1  # Reduced concurrency as local embedding is sequential and fast
 
 # --- 1. UI/CSS OVERHAUL ---
 st.set_page_config(page_title="Komu", layout="wide", initial_sidebar_state="collapsed")
@@ -46,7 +48,6 @@ st.markdown("""
     .ai-overview-card { background: linear-gradient(135deg, #f0f4f9 0%, #e8eaf6 100%); border: 1px solid #dadce0; border-radius: 16px; padding: 24px; margin-bottom: 30px; max-width: 652px; }
     .source-chip { display: inline-block; padding: 4px 12px; border-radius: 16px; background: white; border: 1px solid #dadce0; font-size: 12px; color: #1a0dab; text-decoration: none; margin-right: 8px; margin-top: 8px; font-weight: 500; }
     .source-chip:hover { background: #f1f3f4; border-color: #4285f4; }
-    .ai-error-notice { padding: 12px; border-radius: 8px; border: 1px solid #ffccd5; background: #fff5f5; color: #d00000; font-size: 13px; margin-bottom: 20px; max-width: 652px; }
     .search-result { margin-bottom: 28px; max-width: 652px; }
     .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; display: block; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .favicon { width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
@@ -58,15 +59,20 @@ st.markdown("""
 @st.cache_resource
 def get_komu_engines():
     try:
+        # Gemini is still used for the "AI Overview" text generation
         search_client = genai.Client(api_key=GEMINI_KEY)
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index("plex-index")
-        return search_client, index
+        
+        # NEW: Load the same local model used by your crawler
+        embed_model = SentenceTransformer('all-mpnet-base-v2')
+        
+        return search_client, index, embed_model
     except Exception as e:
         st.error(f"Engine Error: {e}")
-        return None, None
+        return None, None, None
 
-search_client, index = get_komu_engines()
+search_client, index, embed_model = get_komu_engines()
 
 # --- 3. SESSION STATE ---
 for key, val in [('results', []), ('image_results', []), ('query', ""), ('ai_overview', ""), ('page', 1), ('top_urls', []), ('ai_status', "idle"), ('ai_error', None)]:
@@ -76,38 +82,24 @@ for key, val in [('results', []), ('image_results', []), ('query', ""), ('ai_ove
 def fetch_content(url):
     try: 
         downloaded = trafilatura.fetch_url(url)
-        # We use a lower character limit for extraction to be more flexible
         return trafilatura.extract(downloaded) or ""
-    except Exception:
-        return ""
+    except Exception: return ""
 
 def query_ai_model(prompt):
-    """Hybrid AI caller: Tries Mistral (HF) first, falls back to Gemini 1.5 Flash."""
+    """Hybrid AI caller for Overview generation."""
     try:
         formatted_prompt = f"<s>[INST] {prompt} [/INST]"
-        payload = {
-            "inputs": formatted_prompt,
-            "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False},
-            "options": {"wait_for_model": True}
-        }
+        payload = {"inputs": formatted_prompt, "parameters": {"max_new_tokens": 500, "temperature": 0.7}}
         response = requests.post(HF_ROUTER_URL, headers=HF_HEADERS, json=payload, timeout=12)
         if response.status_code == 200:
             res_json = response.json()
             return res_json[0]['generated_text'] if isinstance(res_json, list) else res_json.get('generated_text')
-    except Exception:
-        pass 
+    except Exception: pass 
 
     try:
-        response = search_client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
+        response = search_client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
         return response.text
-    except Exception as e:
-        raise Exception(f"AI Generation failed: {str(e)}")
-
-def parallel_search_worker(vector, top_k=60):
-    return index.query(vector=vector, top_k=top_k, include_metadata=True)
+    except Exception as e: raise Exception(f"AI Generation failed: {str(e)}")
 
 def truncate_url(url, max_len=60):
     parsed = urlparse(url)
@@ -132,25 +124,23 @@ else:
 if user_query and user_query != st.session_state.query:
     with st.spinner("🚀 Searching..."):
         try:
-            emb = search_client.models.embed_content(
-                model="gemini-embedding-001", contents=user_query,
-                config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768}
-            )
-            vector = emb.embeddings[0].values
-            all_matches = []
-            with ThreadPoolExecutor(max_workers=SEARCH_CONCURRENCY) as executor:
-                futures = [executor.submit(parallel_search_worker, vector) for _ in range(SEARCH_CONCURRENCY)]
-                for future in as_completed(futures):
-                    all_matches.extend(future.result().get('matches', []))
-            all_matches.sort(key=lambda x: x['score'], reverse=True)
+            # NEW: Using the local crawler model to encode your search query
+            # We convert to list because Pinecone expects a list of floats
+            vector = embed_model.encode(user_query).tolist()
+
+            # Query Pinecone
+            query_res = index.query(vector=vector, top_k=60, include_metadata=True)
+            all_matches = query_res.get('matches', [])
 
             text_results, img_results, seen_urls = [], [], set()
             img_exts = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg')
+            
             for m in all_matches:
                 meta = m['metadata']
                 url = meta.get('url', '').split('#')[0].rstrip('/')
                 if not url or url in seen_urls: continue
                 seen_urls.add(url)
+                
                 if meta.get('type') == 'image' or url.lower().endswith(img_exts):
                     img_results.append(meta)
                 else:
@@ -173,25 +163,20 @@ if is_results_page:
     with tab_all:
         _, content_col = st.columns([0.2, 9.8])
         with content_col:
-            # AI OVERVIEW
+            # AI OVERVIEW SECTION
             if st.session_state.ai_overview:
-                source_html = '<div style="margin-top:15px; border-top:1px solid #dadce0; padding-top:10px;"><div style="font-size:12px; color:#70757a; font-weight:600; margin-bottom:5px;">SOURCES:</div>'
-                for s_url in st.session_state.top_urls:
-                    s_dom = urlparse(s_url).netloc.replace('www.', '')
-                    source_html += f'<a href="{s_url}" target="_blank" class="source-chip">{s_dom}</a>'
-                source_html += '</div>'
-
                 st.markdown(f"""
                     <div class="ai-overview-card">
-                        <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 14px; letter-spacing: 0.5px;">✨ AI OVERVIEW</div>
+                        <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 14px;">✨ AI OVERVIEW</div>
                         <div style="color: #202124; font-size: 15px; line-height: 1.6;">{st.session_state.ai_overview}</div>
-                        {source_html}
+                        <div style="margin-top:15px; border-top:1px solid #dadce0; padding-top:10px;">
+                            <div style="font-size:12px; color:#70757a; font-weight:600;">SOURCES:</div>
+                            {''.join([f'<a href="{u}" target="_blank" class="source-chip">{urlparse(u).netloc.replace("www.", "")}</a>' for u in st.session_state.top_urls])}
+                        </div>
                     </div>
                 """, unsafe_allow_html=True)
-            elif st.session_state.ai_error:
-                st.markdown(f'<div class="ai-error-notice">⚠️ {st.session_state.ai_error}</div>', unsafe_allow_html=True)
 
-            # TEXT RESULTS
+            # TEXT SEARCH RESULTS
             start = (st.session_state.page - 1) * RESULTS_PER_PAGE
             results_to_show = st.session_state.results[start:start+RESULTS_PER_PAGE]
             for p in results_to_show:
@@ -204,47 +189,32 @@ if is_results_page:
                             <span class="site-path">{truncate_url(raw_url)}</span>
                         </div>
                         <a class="result-title" href="{raw_url}" target="_blank">{p.get('title', 'Untitled')}</a>
-                        <div style="color:#4d5156; font-size:14px; line-height:1.5;">{p.get('text', '')[:210]}...</div>
+                        <div style="color:#4d5156; font-size:14px;">{p.get('text', '')[:210]}...</div>
                     </div>
                 """, unsafe_allow_html=True)
 
-            # --- AI RESEARCH TRIGGER (WITH ROBUST EXTRACTION FALLBACK) ---
+            # AI RESEARCH TRIGGER
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
-                with st.status("🧠 Generating AI Overview...", expanded=False) as status:
+                with st.status("🧠 Thinking...", expanded=False) as status:
                     try:
-                        # 1. Fetch full content in parallel
                         with ThreadPoolExecutor(max_workers=4) as exec:
                             full_txts = list(exec.map(fetch_content, st.session_state.top_urls))
                         
-                        # 2. Build context using full text OR snippets if extraction fails
                         ctx_parts = []
                         for i, t in enumerate(full_txts):
                             domain = urlparse(st.session_state.top_urls[i]).netloc
-                            # If extraction yields valid text (>100 chars), use it.
-                            if t and len(t.strip()) > 100:
-                                ctx_parts.append(f"Source [{domain}]: {t[:1000]}")
-                            else:
-                                # Fallback to the snippet stored in Pinecone metadata
-                                backup_snippet = st.session_state.results[i].get('text', '')
-                                if backup_snippet:
-                                    ctx_parts.append(f"Source [{domain} (Preview)]: {backup_snippet}")
+                            content = t[:1000] if (t and len(t.strip()) > 100) else st.session_state.results[i].get('text', '')
+                            if content: ctx_parts.append(f"Source [{domain}]: {content}")
 
                         ctx = "\n\n".join(ctx_parts)
-                        
-                        if not ctx.strip():
-                            st.session_state.ai_overview = "Search results found, but no summaries are available for these sources."
-                            st.session_state.ai_status = "complete"
-                        else:
-                            prompt = f"Summarize precisely: '{st.session_state.query}'. Use the following data:\n\n{ctx}"
-                            summary = query_ai_model(prompt)
-                            st.session_state.ai_overview = summary
-                            st.session_state.ai_status = "complete"
-                        
+                        if ctx.strip():
+                            prompt = f"Summarize precisely: '{st.session_state.query}'. Data:\n\n{ctx}"
+                            st.session_state.ai_overview = query_ai_model(prompt)
+                        st.session_state.ai_status = "complete"
                         st.rerun() 
                     except Exception as e:
-                        st.session_state.ai_error = f"AI Error: {str(e)}"
+                        st.session_state.ai_error = str(e)
                         st.session_state.ai_status = "error"
-                        status.update(label="⚠️ Thinking Failed", state="error")
                         st.rerun()
 
     with tab_images:
@@ -257,7 +227,7 @@ if is_results_page:
                 img_html += f"""
                     <div class="image-card">
                         <a href="{img.get('url')}" target="_blank">
-                            <img src="{src}" onerror="this.src='https://placehold.co/400x300?text=Image+Unavailable'">
+                            <img src="{src}" onerror="this.src='https://placehold.co/400x300?text=Unavailable'">
                         </a>
                         <div class="image-caption">{img.get('title', 'Image')}</div>
                     </div>

@@ -1,63 +1,74 @@
-import os
-import time
 import trafilatura
 from google import genai
-from google.genai import types # Needed for the configuration
+from google.genai import types
 from pinecone import Pinecone
 
-# --- CONFIG ---
-GEMINI_KEY = os.getenv("GEMINI_KEY", "").strip()
-PINECONE_KEY = os.getenv("PINECONE_API_KEY", "").strip()
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "plex-index").strip()
+# --- IMPORT FROM CONFIG ---
+try:
+    import config
+    GEMINI_KEY = getattr(config, 'GEMINI_KEY', None)
+    PINECONE_KEY = getattr(config, 'PINECONE_KEY', None)
+    PINECONE_INDEX_NAME = getattr(config, 'PINECONE_INDEX_NAME', "plex-index")
+except ImportError:
+    print("🚨 [Config Error] config.py not found! Please create it.")
+    GEMINI_KEY = None
+    PINECONE_KEY = None
 
 def index_website(url):
     try:
+        # Basic validation
         if not GEMINI_KEY or not PINECONE_KEY:
-            print("🚨 ERROR: Missing API Keys.")
+            print(f"🚨 [Auth Error] Missing Keys in config.py for {url}")
             return False
 
-        # 1. Init Clients
-        client = genai.Client(api_key=GEMINI_KEY)
+        # 1. Initialize Clients
+        client = genai.Client(api_key=GEMINI_KEY, http_options=types.HttpOptions(api_version="v1beta"))
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index(PINECONE_INDEX_NAME)
 
-        # 2. Scrape Content
-        print(f"📥 Scraping: {url}")
+        # 2. Extract and Clean Text
         downloaded = trafilatura.fetch_url(url)
         if not downloaded: 
-            print(f"⚠️ Could not download {url}")
             return False
             
         main_text = trafilatura.extract(downloaded)
-        if not main_text: 
-            print(f"⚠️ No text found on {url}")
+        if not main_text or len(main_text) < 400: 
             return False
 
-        # 3. Generate Embedding (Forced to 768 dimensions)
-        print(f"🧠 Generating 768-dim Embedding...")
+        # 3. Auto-Detect Dimensions
+        stats = index.describe_index_stats()
+        target_dim = stats.get('dimension', 768)
+
+        # 4. Generate High-Quality Embeddings
         res = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=main_text[:3000],
+            model="gemini-embedding-2-preview",
+            contents=main_text[:8000],
             config=types.EmbedContentConfig(
-                output_dimensionality=768 # <--- This fixes your crash!
+                task_type="RETRIEVAL_DOCUMENT",
+                output_dimensionality=target_dim
             )
         )
-        
-        # 4. Upsert to Pinecone
-        print(f"💾 Saving to Pinecone...")
+
+        # 5. Upsert to Pinecone
         index.upsert(vectors=[{
             "id": url, 
             "values": res.embeddings[0].values, 
             "metadata": {
                 "url": url, 
-                "text": main_text[:500]
+                "text_snippet": main_text[:600].replace("\n", " "),
+                "indexed_at": "2026-03-14"
             }
         }])
-
-        print(f"✅ SUCCESS: {url}")
+        
         return True
 
     except Exception as e:
-        print(f"🚨 INDEXER ERROR on {url}: {e}")
+        err_msg = str(e).lower()
+        if "401" in err_msg or "invalid api key" in err_msg:
+            print(f"\n[!] AUTH ERROR: Check your keys in config.py")
+        elif "400" in err_msg or "dimension" in err_msg:
+            print(f"\n[!] DIMENSION ERROR: Index mismatch at {url}")
+        else:
+            # Print specific error if it's not a common one to help debugging
+            print(f"\n[Indexer Debug] {url} -> {str(e)[:100]}")
         return False
-        

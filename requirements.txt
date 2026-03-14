@@ -1,4 +1,6 @@
+sentence-transformers
+torch
+pinecone-client
 streamlit
-google-genai
-pinecone
 trafilatura
+google-genai

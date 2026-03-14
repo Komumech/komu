@@ -1,0 +1,7 @@
+[20:26:54] HTTP 403: https://stackexchange.com/sites
+[20:33:04] HTTP 404: https://pypi.org/browse
+[20:33:04] HTTP 403: https://stackexchange.com/questions?tab=hot
+[20:34:20] HTTP 403: https://appleinsider.com/articles/26/03/13/apples-app-store-in-china-gets-lower-25-commission-to-appease-regulators
+[20:40:22] HTTP 403: https://stackexchange.com/sites
+[20:40:22] HTTP 401: https://www.reuters.com/technology/
+[20:48:41] HTTP 403: https://stackexchange.com/sites
