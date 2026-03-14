@@ -1,6 +1,21 @@
+# --- Core Intelligence ---
 sentence-transformers
 torch
-pinecone-client
-streamlit
-trafilatura
 google-genai
+openai
+
+# --- Vector Database ---
+pinecone-client
+
+# --- UI & Deployment ---
+streamlit
+
+# --- Web Scraping & Discovery ---
+trafilatura
+requests
+urllib3
+duckduckgo_search
+tqdm
+
+# --- Utilities ---
+huggingface_hub
