@@ -1,7 +1,10 @@
 import trafilatura
+import re
+from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 from pinecone import Pinecone
+from urllib.parse import urlparse
 
 # --- IMPORT FROM CONFIG ---
 try:
@@ -10,36 +13,72 @@ try:
     PINECONE_KEY = getattr(config, 'PINECONE_KEY', None)
     PINECONE_INDEX_NAME = getattr(config, 'PINECONE_INDEX_NAME', "plex-index")
 except ImportError:
-    print("🚨 [Config Error] config.py not found! Please create it.")
+    print("🚨 [Config Error] config.py not found!")
     GEMINI_KEY = None
     PINECONE_KEY = None
 
+def get_metadata(html, url):
+    """Rigorous extraction of Title and Preview Image."""
+    soup = BeautifulSoup(html, 'html.parser')
+    metadata = {"title": "", "image": ""}
+    
+    # 1. Hunt for Title
+    metadata['title'] = (
+        soup.find("meta", property="og:title") or 
+        soup.find("meta", attrs={"name": "twitter:title"}) or
+        soup.find("title")
+    )
+    if metadata['title']:
+        metadata['title'] = metadata['title'].get_text() if hasattr(metadata['title'], 'get_text') else metadata['title'].get('content', '')
+
+    # 2. Hunt for Image (The 'Rigorous' Part)
+    # Priority: OpenGraph -> Twitter -> Main Article Image -> First Large Img
+    img_tag = (
+        soup.find("meta", property="og:image") or 
+        soup.find("meta", attrs={"name": "twitter:image"}) or
+        soup.find("link", rel="image_src")
+    )
+    
+    if img_tag:
+        metadata['image'] = img_tag.get('content', '') or img_tag.get('href', '')
+    
+    # Fallback to first high-res looking image if no meta tags
+    if not metadata['image']:
+        for img in soup.find_all("img", src=True):
+            src = img['src']
+            if any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                if "logo" not in src.lower(): # Prefer content images over icons
+                    metadata['image'] = src
+                    break
+
+    # Clean up relative URLs (e.g., "/img.jpg" -> "https://site.com/img.jpg")
+    if metadata['image'] and metadata['image'].startswith('/'):
+        parsed = urlparse(url)
+        metadata['image'] = f"{parsed.scheme}://{parsed.netloc}{metadata['image']}"
+
+    return metadata
+
 def index_website(url):
     try:
-        # Basic validation
         if not GEMINI_KEY or not PINECONE_KEY:
-            print(f"🚨 [Auth Error] Missing Keys in config.py for {url}")
             return False
 
-        # 1. Initialize Clients
         client = genai.Client(api_key=GEMINI_KEY, http_options=types.HttpOptions(api_version="v1beta"))
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index(PINECONE_INDEX_NAME)
 
-        # 2. Extract and Clean Text
         downloaded = trafilatura.fetch_url(url)
-        if not downloaded: 
-            return False
+        if not downloaded: return False
             
+        # Extract metadata rigorously from raw HTML
+        meta_data = get_metadata(downloaded, url)
+        
         main_text = trafilatura.extract(downloaded)
-        if not main_text or len(main_text) < 400: 
-            return False
+        if not main_text or len(main_text) < 400: return False
 
-        # 3. Auto-Detect Dimensions
         stats = index.describe_index_stats()
         target_dim = stats.get('dimension', 768)
 
-        # 4. Generate High-Quality Embeddings
         res = client.models.embed_content(
             model="gemini-embedding-2-preview",
             contents=main_text[:8000],
@@ -49,13 +88,15 @@ def index_website(url):
             )
         )
 
-        # 5. Upsert to Pinecone
+        # Upsert with MORE metadata so the UI doesn't have to guess
         index.upsert(vectors=[{
             "id": url, 
             "values": res.embeddings[0].values, 
             "metadata": {
                 "url": url, 
-                "text_snippet": main_text[:600].replace("\n", " "),
+                "title": meta_data['title'] or "Untitled Result",
+                "image_url": meta_data['image'], # Saved forever now!
+                "text": main_text[:600].replace("\n", " "),
                 "indexed_at": "2026-03-14"
             }
         }])
@@ -63,12 +104,5 @@ def index_website(url):
         return True
 
     except Exception as e:
-        err_msg = str(e).lower()
-        if "401" in err_msg or "invalid api key" in err_msg:
-            print(f"\n[!] AUTH ERROR: Check your keys in config.py")
-        elif "400" in err_msg or "dimension" in err_msg:
-            print(f"\n[!] DIMENSION ERROR: Index mismatch at {url}")
-        else:
-            # Print specific error if it's not a common one to help debugging
-            print(f"\n[Indexer Debug] {url} -> {str(e)[:100]}")
+        print(f"❌ [Indexer Error] {url}: {e}")
         return False

@@ -239,30 +239,27 @@ else:
                 dom = group['domain']
                 subs = group['subs']
                 
-                # Main Result HTML
-                html_block = f"""
-                    <div class="search-result">
-                        <div class="site-path">
-                            <img src="https://icon.horse/icon/{dom}" class="favicon">
-                            <span class="site-path-text">{shorten_url(main_res.get('url'))}</span>
-                        </div>
-                        <a class="result-title" href="{main_res.get('url')}" target="_blank">{main_res.get('title')}</a>
-                        <div style="color:#4d5156; font-size:14px;">{main_res.get('text', '')[:230]}...</div>
-                """
+                # Main Result HTML (No leading indentation)
+                html_block = f"""<div class="search-result">
+<div class="site-path">
+<img src="https://icon.horse/icon/{dom}" class="favicon">
+<span class="site-path-text">{shorten_url(main_res.get('url'))}</span>
+</div>
+<a class="result-title" href="{main_res.get('url')}" target="_blank">{main_res.get('title')}</a>
+<div style="color:#4d5156; font-size:14px;">{main_res.get('text', '')[:230]}...</div>"""
                 
-                # Render Sub-results if they exist
+                # Render Sub-results if they exist (No leading indentation)
                 if subs:
-                    html_block += '<div class="sub-results-container">'
+                    html_block += '\n<div class="sub-results-container">'
                     for sub in subs:
                         html_block += f"""
-                            <div class="sub-result">
-                                <a class="sub-result-title" href="{sub.get('url')}" target="_blank">{sub.get('title')}</a>
-                                <div class="site-path-text" style="color:#5f6368; font-size:13px;">{shorten_url(sub.get('url'), 65)}</div>
-                            </div>
-                        """
-                    html_block += '</div>'
+<div class="sub-result">
+<a class="sub-result-title" href="{sub.get('url')}" target="_blank">{sub.get('title')}</a>
+<div class="site-path-text" style="color:#5f6368; font-size:13px;">{shorten_url(sub.get('url'), 65)}</div>
+</div>"""
+                    html_block += '\n</div>'
                 
-                html_block += "</div>"
+                html_block += "\n</div>"
                 st.markdown(html_block, unsafe_allow_html=True)
 
     with tab_images:
