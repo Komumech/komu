@@ -4,8 +4,8 @@ torch
 google-genai
 openai
 
-# --- Vector Database ---
-pinecone-client
+# --- Vector Database (Updated Name) ---
+pinecone
 
 # --- UI & Deployment ---
 streamlit
