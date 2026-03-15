@@ -66,7 +66,6 @@ st.markdown("""
     .favicon { width: 18px; height: 18px; border-radius: 50%; margin-right: 8px; }
     .site-path-text { font-size: 14px; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     
-    /* Google-Style Sub-results Grouping */
     .sub-results-container { margin-top: 12px; padding-left: 20px; border-left: 2px solid #dadce0; margin-left: 8px; }
     .sub-result { margin-bottom: 12px; }
     .sub-result:last-child { margin-bottom: 0; }
@@ -99,7 +98,6 @@ for key, val in [('results', []), ('image_results', []), ('query', ""), ('ai_ove
 
 # --- 4. UTILS ---
 def shorten_url(url, max_length=65):
-    """Truncates long URLs and adds an ellipsis."""
     url = url.replace("https://", "").replace("http://", "").rstrip('/')
     if len(url) > max_length:
         return url[:max_length] + "..."
@@ -122,29 +120,54 @@ def fetch_content(url):
     except: return ""
 
 def query_huggingface(prompt):
+    """Refined AI call for better stability and longer timeouts."""
     try:
-        payload = {"inputs": f"<s>[INST] {prompt} [/INST]", "parameters": {"max_new_tokens": 450, "temperature": 0.2}}
-        response = requests.post(HF_MODEL_URL, headers=HF_HEADERS, json=payload, timeout=12)
+        payload = {"inputs": f"<s>[INST] {prompt} [/INST]", "parameters": {"max_new_tokens": 300, "temperature": 0.1}}
+        # Timeout increased to 20 for free-tier loading
+        response = requests.post(HF_MODEL_URL, headers=HF_HEADERS, json=payload, timeout=20)
+        
         if response.status_code == 200:
             res = response.json()
-            raw = res[0]['generated_text'] if isinstance(res, list) else res.get('generated_text')
+            raw = res[0]['generated_text'] if isinstance(res, list) else res.get('generated_text', '')
             return raw.split("[/INST]")[-1].strip()
-    except: return "Summary unavailable. The AI model is currently under heavy load."
-    return "Could not generate summary."
+        elif response.status_code == 503:
+            return "The AI model is currently busy. Please refresh in a moment."
+        else:
+            print(f"HF Error {response.status_code}: {response.text}") # Debugging
+            return "Summary unavailable. The AI model is under high demand."
+    except Exception as e:
+        print(f"HF Request Error: {e}")
+        return "Connection to AI timed out."
 
 # --- 5. SEARCH LOGIC ---
 def run_search(query):
     with st.spinner("Scouting..."):
         try:
             vector = embed_model.encode(query).tolist()
-            # Fetch more matches so we have enough data to group
             query_res = index.query(vector=vector, top_k=80, include_metadata=True)
             
+            matches = query_res.get('matches', [])
+            q_lower = query.lower()
+
+            for m in matches:
+                meta = m['metadata']
+                url = meta.get('url', '').lower()
+                title = meta.get('title', '').lower()
+                domain = urlparse(url).netloc
+                
+                custom_score = m['score']
+                if q_lower in domain: custom_score += 0.50
+                if q_lower in title: custom_score += 0.30
+                if q_lower in meta.get('text', '').lower(): custom_score += 0.05
+                m['custom_score'] = custom_score
+
+            matches = sorted(matches, key=lambda x: x['custom_score'], reverse=True)
+
             domain_map = {}
             ordered_domains = []
             img_results, seen_urls = [], set()
             
-            for m in query_res.get('matches', []):
+            for m in matches:
                 meta = m['metadata']
                 url = meta.get('url', '').split('#')[0].rstrip('/')
                 if not url or url in seen_urls: continue
@@ -156,29 +179,16 @@ def run_search(query):
                 if meta.get('type') == 'image' or url.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
                     img_results.append(meta)
                 else:
-                    # DOMAIN GROUPING LOGIC (Max 5 per domain)
                     if domain not in domain_map:
                         domain_map[domain] = []
-                        ordered_domains.append(domain) # Preserves Pinecone's best-match ranking
-                    
+                        ordered_domains.append(domain)
                     if len(domain_map[domain]) < 5:
                         domain_map[domain].append(meta)
 
-            # Structure the grouped results
-            grouped_results = []
-            for d in ordered_domains:
-                group = domain_map[d]
-                grouped_results.append({
-                    'domain': d,
-                    'main': group[0], # Best match for this domain
-                    'subs': group[1:] # Up to 4 extra matches
-                })
-
-            st.session_state.results = grouped_results
+            st.session_state.results = [{'domain': d, 'main': domain_map[d][0], 'subs': domain_map[d][1:]} for d in ordered_domains]
             st.session_state.image_results = img_results
             st.session_state.query = query
-            # Get the top 4 unique domains for the AI overview
-            st.session_state.top_urls = [g['main'].get('url') for g in grouped_results[:4]]
+            st.session_state.top_urls = [g['main'].get('url') for g in st.session_state.results[:4]]
             st.session_state.ai_overview = ""
             st.session_state.ai_status = "idle"
             st.rerun()
@@ -209,16 +219,24 @@ else:
     with tab_all:
         col_pad, col_main = st.columns([0.1, 9.9])
         with col_main:
-            # AI OVERVIEW
+            # AI OVERVIEW LOGIC - UPDATED
             if st.session_state.ai_status == "idle" and st.session_state.top_urls:
-                with st.status("🧠 Hugging Face Analysis...", expanded=False):
+                with st.status("🧠 Analyzing Results...", expanded=False):
                     with ThreadPoolExecutor(max_workers=4) as exec:
                         contents = list(exec.map(fetch_content, st.session_state.top_urls))
-                    ctx = "\n\n".join([f"Source: {c[:800]}" for c in contents if len(c) > 150])
-                    if ctx:
-                        st.session_state.ai_overview = query_huggingface(f"Analyze: '{st.session_state.query}'. Summary:\n\n{ctx}")
+                    
+                    # Clean context to stay within token limits
+                    cleaned_ctx = ""
+                    for i, c in enumerate(contents):
+                        if len(c) > 100:
+                            source_dom = urlparse(st.session_state.top_urls[i]).netloc
+                            cleaned_ctx += f"\nSource [{source_dom}]: {c[:600]}...\n"
+                    
+                    if cleaned_ctx:
+                        prompt = f"Based on these sources, provide a concise, factual answer for: '{st.session_state.query}'.\n\n{cleaned_ctx}\n\nAnswer:"
+                        st.session_state.ai_overview = query_huggingface(prompt)
                     else:
-                        st.session_state.ai_overview = "I couldn't extract enough text from these pages to provide a summary. Please check the links directly."
+                        st.session_state.ai_overview = "I couldn't find enough text to summarize this. Try clicking the links below."
                 st.session_state.ai_status = "complete"
                 st.rerun()
 
@@ -233,34 +251,28 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # RENDER GROUPED RESULTS
-            for group in st.session_state.results[:15]: # Show top 15 domains
+            # RENDER SEARCH RESULTS
+            for group in st.session_state.results[:15]: 
                 main_res = group['main']
                 dom = group['domain']
                 subs = group['subs']
                 
-                # Main Result HTML (No leading indentation)
                 html_block = f"""<div class="search-result">
-<div class="site-path">
-<img src="https://icon.horse/icon/{dom}" class="favicon">
-<span class="site-path-text">{shorten_url(main_res.get('url'))}</span>
-</div>
-<a class="result-title" href="{main_res.get('url')}" target="_blank">{main_res.get('title')}</a>
-<div style="color:#4d5156; font-size:14px;">{main_res.get('text', '')[:230]}...</div>"""
+                <div class="site-path">
+                <img src="https://icon.horse/icon/{dom}" class="favicon">
+                <span class="site-path-text">{shorten_url(main_res.get('url'))}</span>
+                </div>
+                <a class="result-title" href="{main_res.get('url')}" target="_blank">{main_res.get('title')}</a>
+                <div style="color:#4d5156; font-size:14px; line-height: 1.4;">{main_res.get('text', '')[:140]}...</div>"""
                 
-                # Render Sub-results if they exist (No leading indentation)
                 if subs:
                     html_block += '\n<div class="sub-results-container">'
                     for sub in subs:
-                        html_block += f"""
-<div class="sub-result">
-<a class="sub-result-title" href="{sub.get('url')}" target="_blank">{sub.get('title')}</a>
-<div class="site-path-text" style="color:#5f6368; font-size:13px;">{shorten_url(sub.get('url'), 65)}</div>
-</div>"""
+                        html_block += f"""<div class="sub-result"><a class="sub-result-title" href="{sub.get('url')}" target="_blank">{sub.get('title')}</a>
+                        <div class="site-path-text" style="color:#5f6368; font-size:13px;">{shorten_url(sub.get('url'), 65)}</div></div>"""
                     html_block += '\n</div>'
                 
-                html_block += "\n</div>"
-                st.markdown(html_block, unsafe_allow_html=True)
+                st.markdown(html_block + "\n</div>", unsafe_allow_html=True)
 
     with tab_images:
         if st.session_state.image_results:
