@@ -38,8 +38,16 @@ DOMAIN_LIMIT = 150  # 🚀 Increased to capture "most pages" of a site
 BLACKLIST = ["facebook.com", "twitter.com", "instagram.com", "tiktok.com", "quora.com", "reddit.com", "amazon.com", "ebay.com"]
 
 SEARCH_TOPICS = [
-    "latest multimodal AI research papers 2026",
-    "open source agentic workflows github",
+    "modern day celebrities and youtubers",
+    "most used apps in the 2026 era",
+    "2026 latest government news",
+    "latest movies to watch 2026",
+    "Latest animes 2026",
+    "latest movies to watch 2026",
+    "Latest animes 2026",
+    "Latest google and microsoft apps",
+    "remove bg from images",
+    "image editing software 2026",
     "history of hand-drawn vs 3D animation techniques",
     "recent breakthroughs in quantum entanglement 2026",
     "modern stoicism vs epicureanism in the digital age",
@@ -69,7 +77,7 @@ def generate_ai_topics(existing_topics, recent_finds):
         prompt = f"""
         You are an autonomous web scout. Seed topics: {existing_topics}
         Recently discovered: {recent_finds[:5]}
-        Generate 5 NEW, hyper-specific search queries for 2026 focusing on deep technical/historical value.
+        Generate 5 NEW, hyper-specific search queries for 2026 focusing on general topics totaly general.
         Return ONLY a list of strings. No numbering.
         """
         response = ai_client.chat.completions.create(
@@ -128,6 +136,14 @@ def crawler_worker():
         parsed_current = urlparse(clean_url)
         domain = parsed_current.netloc
         
+        # --- 1. CLIMB UP FIX: Ensure we index the Homepage too ---
+        # If we are on a subpage (e.g. site.com/blog), make sure site.com is queued
+        if parsed_current.path not in ["", "/"]:
+            root_url = f"{parsed_current.scheme}://{domain}"
+            with data_lock:
+                if root_url not in visited and domain_counts.get(domain, 0) < DOMAIN_LIMIT:
+                    url_queue.put(root_url)
+
         with data_lock:
             if clean_url in visited or not is_high_quality(clean_url):
                 active_workers -= 1
@@ -141,7 +157,18 @@ def crawler_worker():
             
             if resp.status_code == 200:
                 text = trafilatura.extract(resp.text) or ""
-                if len(text) > 400: # Slightly lower threshold for sub-pages
+                
+                # --- 2. MAIN DOMAIN FIX: Lower thresholds & Metadata fallback ---
+                is_root = parsed_current.path in ["", "/"]
+                
+                # If homepage text is thin (common on landing pages), try to salvage metadata
+                if is_root and len(text) < 300:
+                    meta_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', resp.text, re.I)
+                    desc = meta_match.group(1) if meta_match else ""
+                    text = f"{desc}\n{text}".strip()
+                
+                # Lower barrier for Root Domains (100 chars) vs Articles (400 chars)
+                if len(text) > (100 if is_root else 400): 
                     if index_to_pinecone(url, text, domain):
                         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         tqdm.write(f"✅ [{now}] [{t_name}] INDEXED: {url}")
