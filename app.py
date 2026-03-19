@@ -434,8 +434,14 @@ if 'code' in st.query_params:
 # --- B. TOP BAR (LOGIN & PROFILE) ---
 # Layout: [Title/Spacer] [Profile/Login]
 col_spacer, col_auth = st.columns([9, 1]) # Tighter column for profile
+col1, col2, col3 = st.columns([2, 7, 1])
 
 with col_auth:
+with col1:
+    st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
+
+with col3:
+    if st.session_state.user_info:
     if st.session_state.user_info:
         # --- Custom CSS to make the popover trigger a circular profile image ---
         profile_pic_url = st.session_state.user_info.get('picture', '')
@@ -462,6 +468,8 @@ with col_auth:
         with st.popover("👤", use_container_width=False):
             st.markdown(f"""
                 <div style='text-align: center;'>
+        with st.popover("", use_container_width=False):
+            st.markdown(f'''<div style='text-align: center;'>
                     <img src='{profile_pic_url}' style='width: 60px; height: 60px; border-radius: 50%; margin-bottom: 10px;'>
                     <div style='font-weight: bold; font-size: 16px;'>{st.session_state.user_info.get('name')}</div>
                     <div style='color: gray; font-size: 12px; margin-bottom: 15px;'>{st.session_state.user_info.get('email')}</div>
