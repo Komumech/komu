@@ -4,10 +4,25 @@ import requests
 import re
 import json
 import os
+import datetime
+import ssl
+import urllib3
+
+# --- NETWORK/SSL PATCH ---
+os.environ['CURL_CA_BUNDLE'] = ''
+os.environ["GRPC_SSL_CIPHER_SUITES"] = "HIGH+ECDSA"
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+    ssl._create_default_https_context = _create_unverified_https_context
+except AttributeError: pass
+
 from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from sentence_transformers import SentenceTransformer
+
+st.set_page_config(page_title="Komu Scout", layout="wide", initial_sidebar_state="collapsed")
 
 # --- 0. CONFIG & FILTERING ---
 AUTHORITY_DOMAINS = [
@@ -17,49 +32,77 @@ AUTHORITY_DOMAINS = [
 
 BLOCKED_DOMAINS = ["facebook.com", "instagram.com", "t.me", "linkedin.com"]
 
-def load_secrets():
-    if "PINECONE_KEY" in st.secrets:
-        return st.secrets["PINECONE_KEY"], st.secrets.get("HF_TOKEN", "")
-    try:
-        import config
-        return config.PINECONE_KEY, getattr(config, 'HF_TOKEN', "")
-    except (ImportError, AttributeError):
-        # Fallback for local testing if config is missing
-        return None, None
+try:
+    import extra_streamlit_components as stx
+except ImportError:
+    stx = None
+    # Persistence will be disabled if library is missing
 
-PINECONE_KEY, HF_TOKEN = load_secrets()
-# Using a reliable instruction-tuned model
+def load_secrets():
+    try:
+        # Streamlit automatically looks in .streamlit/secrets.toml
+        return (
+            st.secrets.get("PINECONE_KEY"), 
+            st.secrets.get("HF_TOKEN", ""),
+            st.secrets.get("GOOGLE_CLIENT_ID"),
+            st.secrets.get("GOOGLE_CLIENT_SECRET"),
+            st.secrets.get("REDIRECT_URI"),
+            st.secrets.get("FIREBASE_API_KEY"),
+            st.secrets.get("FIREBASE_PROJECT_ID")
+        )
+    except Exception as e:
+        st.error(f"Error loading secrets: {e}")
+        return None, None, None, None, None, None, None
+
+# Initialize the variables
+PINECONE_KEY, HF_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI, FIREBASE_API_KEY, FIREBASE_PROJECT_ID = load_secrets()
+
 HF_MODEL_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
 
-# --- 0.1 HISTORY MANAGEMENT ---
-HISTORY_FILE = "user_history.json"
+# --- 0.1 FIREBASE & OAUTH ---
+FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents" if FIREBASE_PROJECT_ID else None
 
 def get_history(username):
-    if not os.path.exists(HISTORY_FILE): return []
+    if not username or not FIREBASE_API_KEY: return []
+    safe_user = re.sub(r'[^a-zA-Z0-9]', '_', username)
+    url = f"{FIRESTORE_URL}/user_history/{safe_user}?key={FIREBASE_API_KEY}"
     try:
-        with open(HISTORY_FILE, 'r') as f:
-            data = json.load(f)
-            return data.get(username, [])
-    except: return []
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            raw_list = data.get('fields', {}).get('history', {}).get('arrayValue', {}).get('values', [])
+            return [x.get('stringValue') for x in raw_list if 'stringValue' in x]
+    except Exception: pass
+    return []
 
 def save_history(username, query):
-    if not query: return
-    data = {}
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r') as f:
-                data = json.load(f)
-        except: pass
+    if not query or not username or not FIREBASE_API_KEY: return
+    safe_user = re.sub(r'[^a-zA-Z0-9]', '_', username)
     
-    user_hist = data.get(username, [])
-    # Deduplicate and move to top
-    if query in user_hist: user_hist.remove(query)
-    user_hist.insert(0, query)
-    data[username] = user_hist[:20] # Keep last 20
+    current = get_history(username)
+    if query in current: current.remove(query)
+    current.insert(0, query)
+    current = current[:20]
     
-    with open(HISTORY_FILE, 'w') as f:
-        json.dump(data, f)
+    values = [{"stringValue": q} for q in current]
+    payload = {"fields": {"history": {"arrayValue": {"values": values}}}}
+    
+    url = f"{FIRESTORE_URL}/user_history/{safe_user}?key={FIREBASE_API_KEY}"
+    try: requests.patch(url, json=payload, timeout=5)
+    except Exception: pass
+
+def get_google_oauth_login_url():
+    if not all([GOOGLE_CLIENT_ID, REDIRECT_URI]): return None
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline"
+    }
+    qs = requests.compat.urlencode(params)
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{qs}"
 
 def sort_history(history, query):
     """Sorts history to put most alike content on top."""
@@ -69,8 +112,6 @@ def sort_history(history, query):
     return sorted(history, key=lambda x: (not x.lower().startswith(q), not q in x.lower()))
 
 # --- 1. UI/CSS OVERHAUL ---
-st.set_page_config(page_title="Komu Scout", layout="wide", initial_sidebar_state="collapsed")
-
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
@@ -84,27 +125,75 @@ st.markdown("""
     }
     
     .komu-logo-large { font-family: 'Product Sans', sans-serif; font-size: 85px; font-weight: 700; text-align: center; margin-top: 8vh; margin-bottom: 30px; letter-spacing: -2px; color: #4285f4; }
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap');
+    
+    .komu-logo-large { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 80px; font-weight: 800; text-align: center; margin-top: 8vh; margin-bottom: 20px; letter-spacing: -2px; background: linear-gradient(135deg, #4285f4, #d96570); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     
     /* Login Styles */
     .login-container { display: flex; justify-content: center; align-items: center; height: 60vh; flex-direction: column; }
     .login-card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; width: 400px; border: 1px solid #dadce0; }
     .login-title { font-size: 24px; font-weight: 500; margin-bottom: 20px; color: #202124; }
+    .login-container { display: flex; justify-content: center; align-items: center; height: 70vh; flex-direction: column; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .login-card { background: white; padding: 40px; border-radius: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.08); text-align: center; width: 380px; border: 1px solid #eaeaea; }
+    .login-title { font-size: 2.2rem; font-weight: 800; margin-bottom: 8px; background: linear-gradient(135deg, #4285f4, #d96570); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .login-sub { color: #5f6368; margin-bottom: 30px; font-size: 15px; }
+    
+    /* Popover/Profile Styles */
+    div[data-testid="stPopover"] > button {
+        border: none;
+        background-color: transparent;
+    }
+
+    /* Mock Google Button Style */
+    div.stButton > button {
+        width: 100%;
+        border-radius: 30px;
+        border: 1px solid #dadce0;
+        background-color: white;
+        color: #3c4043;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-weight: 600;
+        font-size: 14px;
+        padding: 10px 0;
+        transition: all 0.2s;
+    }
+    div.stButton > button:hover {
+        background-color: #f7f8f8;
+        border-color: #d2e3fc;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        color: #1a73e8;
+    }
     
     /* History Styles */
-    .history-container { 
-        background: white; 
-        border: 1px solid #dfe1e5; 
-        border-radius: 0 0 24px 24px; 
-        box-shadow: 0 4px 6px rgba(32,33,36,0.28); 
-        margin-top: -24px; 
-        padding: 10px 0; 
-        position: relative; 
+    .history-container {
+        background: white;
+        border: 1px solid #dfe1e5;
+        border-top: none;
+        border-radius: 0 0 24px 24px;
+        box-shadow: 0 4px 6px rgba(32,33,36,0.28);
+        margin-top: -24px; /* Pulls the container up under the search bar */
+        padding: 8px 0;
+        position: relative;
         z-index: 1000;
         width: 100%;
+        overflow: hidden; /* Ensures children conform to border-radius */
     }
-    .history-item { padding: 8px 20px; color: #5f6368; cursor: pointer; display: flex; align-items: center; font-size: 14px; }
-    .history-item:hover { background-color: #f1f3f4; color: #202124; }
-    
+    .history-container .stButton button {
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        background-color: transparent !important;
+        color: #3c4043 !important;
+        text-align: left !important;
+        font-weight: 400 !important;
+        padding: 8px 20px !important;
+        font-size: 16px !important;
+    }
+    .history-container .stButton button:hover {
+        background-color: #f1f3f4 !important;
+        color: #202124 !important;
+        border-color: transparent !important;
+    }
     .ai-overview-card { 
         background: #f8f9fa;
         border: 1px solid #e8eaed;
@@ -164,9 +253,21 @@ for key, val in [
     ('ai_overview', ""), 
     ('top_urls', []),
     ('ai_status', "idle"),
-    ('user', None)
+    ('user_info', None) # Will store {'name': ..., 'email': ..., 'picture': ...}
 ]:
     if key not in st.session_state: st.session_state[key] = val
+
+# --- 3.1 COOKIE MANAGER (PERSISTENCE) ---
+cookie_manager = None
+if stx:
+    # Initialize Cookie Manager
+    cookie_manager = stx.CookieManager(key="komu_auth_cookies")
+    
+    # Attempt to load user from cookie if session is empty (Auto-Login)
+    if not st.session_state.user_info:
+        cookie_user = cookie_manager.get("komu_user_session")
+        if cookie_user:
+            st.session_state.user_info = cookie_user
 
 # --- 4. UTILS & RERANKING ---
 def shorten_url(url, max_length=60):
@@ -258,7 +359,7 @@ def run_search(query):
     with st.spinner("Searching Komu Index..."):
         try:
             # Save to history
-            save_history(st.session_state.user, query)
+            if st.session_state.user_info: save_history(st.session_state.user_info.get('email'), query)
             
             vector = embed_model.encode(query).tolist()
             query_res = index.query(vector=vector, top_k=80, include_metadata=True)
@@ -295,62 +396,136 @@ def run_search(query):
 
 # --- 6. UI RENDER ---
 
-# --- A. LOGIN SCREEN ---
-if not st.session_state.user:
-    st.markdown("""<div class='login-container'><div class='login-card'>
-        <div style='font-family: Product Sans; font-size: 32px; font-weight: bold; color: #4285f4; margin-bottom: 10px;'>Komu</div>
-        <div class='login-title'>Sign In</div>
-    </div></div>""", unsafe_allow_html=True)
-    
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c2:
-        username = st.text_input("Username", placeholder="Enter your name", label_visibility="collapsed")
-        if st.button("Continue", type="primary", use_container_width=True):
-            if username:
-                st.session_state.user = username
-                st.rerun()
-            else:
-                st.warning("Please enter a username.")
-    st.stop()
+# --- A. OAUTH CALLBACK HANDLER ---
+if 'code' in st.query_params:
+    if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI]):
+        st.warning("⚠️ Google OAuth credentials missing in config.")
+    else:
+        try:
+            code = st.query_params['code']
+            token_url = "https://oauth2.googleapis.com/token"
+            token_data = {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": REDIRECT_URI
+            }
+            token_res = requests.post(token_url, data=token_data)
+            
+            if token_res.status_code == 200:
+                access_token = token_res.json().get("access_token")
+                user_info_res = requests.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                if user_info_res.status_code == 200:
+                    user_data = user_info_res.json()
+                    st.session_state.user_info = user_data
+                    # Save session to cookie (expires in 30 days)
+                    if cookie_manager:
+                        cookie_manager.set("komu_user_session", user_data, expires_at=datetime.datetime.now() + datetime.timedelta(days=30))
+                    # Clear query params to clean URL
+                    st.query_params.clear()
+                    st.rerun() 
+        except Exception as e:
+            st.error(f"Login failed: {e}")
 
-# --- B. MAIN APP ---
+# --- B. TOP BAR (LOGIN & PROFILE) ---
+# Layout: [Title/Spacer] [Profile/Login]
+col_spacer, col_auth = st.columns([9, 1]) # Tighter column for profile
+
+with col_auth:
+    if st.session_state.user_info:
+        # --- Custom CSS to make the popover trigger a circular profile image ---
+        profile_pic_url = st.session_state.user_info.get('picture', '')
+        st.markdown(f"""
+            <style>
+                /* Target the popover button */
+                div[data-testid="stPopover"] > button {{
+                    background-image: url('{profile_pic_url}');
+                    background-size: cover;
+                    background-position: center center;
+                    border-radius: 50%; /* Make it a circle */
+                    width: 40px;
+                    height: 40px;
+                    border: 1px solid #dfe1e5; /* Optional: add a light border */
+                }}
+                /* Hide the default button label (the emoji) */
+                div[data-testid="stPopover"] > button > div {{
+                    display: none;
+                }}
+            </style>
+        """, unsafe_allow_html=True)
+
+        # The emoji is a placeholder; CSS will hide it and show the background image.
+        with st.popover("👤", use_container_width=False):
+            st.markdown(f"""
+                <div style='text-align: center;'>
+                    <img src='{profile_pic_url}' style='width: 60px; height: 60px; border-radius: 50%; margin-bottom: 10px;'>
+                    <div style='font-weight: bold; font-size: 16px;'>{st.session_state.user_info.get('name')}</div>
+                    <div style='color: gray; font-size: 12px; margin-bottom: 15px;'>{st.session_state.user_info.get('email')}</div>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("Sign Out", key="logout_btn", type="primary", use_container_width=True):
+                if cookie_manager:
+                    cookie_manager.delete("komu_user_session")
+                st.session_state.user_info = None
+                st.rerun()
+    else:
+        auth_url = get_google_oauth_login_url()
+        if auth_url:
+            st.link_button("Sign in with Google", auth_url, type="primary", use_container_width=True)
+        else:
+            st.warning("⚠️ OAuth Config Missing")
+
+# --- C. MAIN APP RENDER ---
 is_home = len(st.session_state.results) == 0 and not st.session_state.query
 
 # Fetch History
-user_history = get_history(st.session_state.user)
+user_email = st.session_state.user_info.get('email') if st.session_state.user_info else None
+user_history = get_history(user_email)
 
 if is_home:
     st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
     _, col_s, _ = st.columns([1, 4, 1])
     with col_s:
-        q = st.text_input("Search", placeholder="Search Wikipedia, news, or science...", label_visibility="collapsed")
+        q = st.text_input("Search", placeholder="Search Wikipedia, news, or science...", label_visibility="collapsed", key="search_home")
         
-        # HISTORY DROPDOWN (Simulated)
+        # GOOGLE-LIKE SEARCH SUGGESTIONS
         if not q and user_history:
-            with st.expander("🕒 Recent Searches", expanded=True):
-                for h in user_history[:5]:
-                    if st.button(f"🕒  {h}", key=f"hist_{h}", help="Search again"):
-                        run_search(h)
-                        st.rerun()
+            clicked_history = None
+            # We render the container and all buttons first...
+            st.markdown('<div class="history-container">', unsafe_allow_html=True)
+            for i, h in enumerate(user_history[:6]):
+                if st.button(f"🕒  {h}", key=f"hist_{i}", use_container_width=True):
+                    clicked_history = h
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # ...then we check if a button was clicked and act on it.
+            if clicked_history:
+                run_search(clicked_history)
+                st.rerun()
         
         # Run Search
         if q: run_search(q); st.rerun()
 
+
+    # --- Fetch History
+    user_email = st.session_state.user_info.get('email') if st.session_state.user_info else None
+    user_history = get_history(user_email)
 else:
     # --- HEADER ---
     c1, c2, _ = st.columns([1, 6, 2])
     with c1: 
-        if st.button("Komu", key="home_btn"):
+        if st.button("Komu", key="home_btn", type="tertiary"):
             st.session_state.results = []
             st.session_state.query = ""
             st.rerun()
     with c2:
-        q = st.text_input("Search", value=st.session_state.query, label_visibility="collapsed")
+        q = st.text_input("Search", value=st.session_state.query, label_visibility="collapsed", key="search_results")
         if q and q != st.session_state.query: run_search(q); st.rerun()
-        
-        # SEARCH PAGE HISTORY (Only show if cleared)
-        if not q and user_history:
-             st.caption("Recent: " + ", ".join(user_history[:3]))
     
     # --- TABS ---
     tab_all, tab_img = st.tabs(["🔍 All", "🖼️ Images"])
@@ -425,8 +600,6 @@ else:
 
                     st.session_state.ai_status = "complete"
                     status_box.update(label="Done!", state="complete", expanded=False)
-                    
-                    # Rerun to switch from "Status Box" to "Clean Card"
                     st.rerun()
 
     with tab_img:

@@ -34,20 +34,22 @@ session = requests.Session()
 # --- GLOBAL CONFIG ---
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
-DOMAIN_LIMIT = 150  # 🚀 Increased to capture "most pages" of a site
+DOMAIN_LIMIT = 100  
+MAX_DEPTH = 3  # 🛡️ Prevents "too many slashes" / going too deep
 BLACKLIST = ["facebook.com", "twitter.com", "instagram.com", "tiktok.com", "quora.com", "reddit.com", "amazon.com", "ebay.com"]
 
 SEARCH_TOPICS = [
+    "freelancer platforms 2026",
     "modern day celebrities and youtubers",
     "most used apps in the 2026 era",
     "2026 latest government news",
     "latest movies to watch 2026",
     "Latest animes 2026",
-    "latest movies to watch 2026",
-    "Latest animes 2026",
     "Latest google and microsoft apps",
     "remove bg from images",
     "image editing software 2026",
+    "new top animation software 2026",
+    "new top development software 2026",
     "history of hand-drawn vs 3D animation techniques",
     "recent breakthroughs in quantum entanglement 2026",
     "modern stoicism vs epicureanism in the digital age",
@@ -55,7 +57,7 @@ SEARCH_TOPICS = [
 ]
 
 # --- INIT ENGINES ---
-print(f"🛰️  KOMU SCOUT v15.2 - DEEP-DIVE & AI ENABLED")
+print(f"🛰️  KOMU SCOUT v16.0 - ROOT-PRIORITY & DEPTH-GUARD")
 model = SentenceTransformer('all-mpnet-base-v2')
 pc = Pinecone(api_key=PINECONE_KEY)
 pc_index = pc.Index(INDEX_NAME)
@@ -63,41 +65,28 @@ pc_index = pc.Index(INDEX_NAME)
 ai_client = OpenAI(api_key=AI_API_KEY, base_url=AI_BASE_URL)
 
 url_queue = Queue()
-visited = set()         
+visited = set()          
 runtime_indexed = [] 
 domain_counts = {}  
 active_workers = 0 
 data_lock = threading.Lock()
 pbar = None 
 
-# --- AI TOPIC GENERATOR ---
-def generate_ai_topics(existing_topics, recent_finds):
-    tqdm.write(f"🧠 [{datetime.now().strftime('%H:%M:%S')}] AI is brainstorming new research directions...")
-    try:
-        prompt = f"""
-        You are an autonomous web scout. Seed topics: {existing_topics}
-        Recently discovered: {recent_finds[:5]}
-        Generate 5 NEW, hyper-specific search queries for 2026 focusing on general topics totaly general.
-        Return ONLY a list of strings. No numbering.
-        """
-        response = ai_client.chat.completions.create(
-            model="gpt-3.5-turbo", 
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200
-        )
-        new_queries = response.choices[0].message.content.strip().split('\n')
-        return [re.sub(r'^\d+\.\s*|-\s*', '', q).strip() for q in new_queries if len(q) > 5]
-    except Exception as e:
-        tqdm.write(f"⚠️ AI Generation failed. Using shuffle.")
-        return [f"advanced {random.choice(existing_topics)}" for _ in range(3)]
-
 # --- CORE LOGIC ---
 def is_high_quality(url):
     parsed = urlparse(url.lower())
     domain = parsed.netloc
+    path = parsed.path.strip('/')
+    
+    # Check Blacklist
     if any(bad in domain for bad in BLACKLIST): return False
-    # Filter out non-content files
+    
+    # Check File Extensions
     if re.search(r'\.(zip|exe|mp4|pdf|png|jpg|jpeg|gif|css|js|json|xml|iso)$', url.lower()): return False
+    
+    # 🛡️ Depth Guard: count slashes in path
+    if path and path.count('/') >= MAX_DEPTH: return False
+    
     return True
 
 def get_seeds_robust(queries):
@@ -105,10 +94,10 @@ def get_seeds_robust(queries):
     try:
         with DDGS() as ddgs:
             for q in queries:
-                tqdm.write(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Seed Scouting: {q}")
+                tqdm.write(f"🔍 Seed Scouting: {q}")
                 results = ddgs.text(q, max_results=5)
                 for r in results: seeds.append(r['href'])
-                time.sleep(1.2)
+                time.sleep(1.0)
     except: pass
     return list(set(seeds))
 
@@ -128,7 +117,7 @@ def crawler_worker():
     t_name = threading.current_thread().name
     while True:
         try:
-            url = url_queue.get(timeout=30) 
+            url = url_queue.get(timeout=20) 
         except Empty: break
 
         with data_lock: active_workers += 1
@@ -136,13 +125,11 @@ def crawler_worker():
         parsed_current = urlparse(clean_url)
         domain = parsed_current.netloc
         
-        # --- 1. CLIMB UP FIX: Ensure we index the Homepage too ---
-        # If we are on a subpage (e.g. site.com/blog), make sure site.com is queued
-        if parsed_current.path not in ["", "/"]:
-            root_url = f"{parsed_current.scheme}://{domain}"
-            with data_lock:
-                if root_url not in visited and domain_counts.get(domain, 0) < DOMAIN_LIMIT:
-                    url_queue.put(root_url)
+        # --- CLIMB UP FIX: Force Main Domain Indexing ---
+        root_url = f"{parsed_current.scheme}://{domain}"
+        with data_lock:
+            if root_url not in visited:
+                url_queue.put(root_url) # Prioritize the main domain
 
         with data_lock:
             if clean_url in visited or not is_high_quality(clean_url):
@@ -153,60 +140,45 @@ def crawler_worker():
 
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0'}
-            resp = session.get(url, headers=headers, timeout=12, verify=False)
+            resp = session.get(url, headers=headers, timeout=10, verify=False)
             
             if resp.status_code == 200:
                 text = trafilatura.extract(resp.text) or ""
-                
-                # --- 2. MAIN DOMAIN FIX: Lower thresholds & Metadata fallback ---
                 is_root = parsed_current.path in ["", "/"]
                 
-                # If homepage text is thin (common on landing pages), try to salvage metadata
+                # Homepage Fallback (if thin content)
                 if is_root and len(text) < 300:
                     meta_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', resp.text, re.I)
-                    desc = meta_match.group(1) if meta_match else ""
-                    text = f"{desc}\n{text}".strip()
+                    title_match = re.search(r'<title>(.*?)</title>', resp.text, re.I)
+                    meta_desc = meta_match.group(1) if meta_match else ""
+                    title = title_match.group(1) if title_match else ""
+                    text = f"{title} - {meta_desc} {text}".strip()
                 
-                # Lower barrier for Root Domains (100 chars) vs Articles (400 chars)
-                if len(text) > (100 if is_root else 400): 
+                # Thresholds: Root (50 chars) vs Subpages (400 chars)
+                if len(text) > (50 if is_root else 400): 
                     if index_to_pinecone(url, text, domain):
-                        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        tqdm.write(f"✅ [{now}] [{t_name}] INDEXED: {url}")
-                        
+                        tqdm.write(f"✅ [{'ROOT' if is_root else 'PAGE'}] INDEXED: {url}")
                         with data_lock:
                             runtime_indexed.append(clean_url)
                             domain_counts[domain] = domain_counts.get(domain, 0) + 1
                             pbar.update(1)
 
-                # --- ROBUST DEEP-CRAWL ENGINE ---
-                # Find all links on the page
+                # --- SUB-LINK DISCOVERY ---
                 raw_links = re.findall(r'href=["\'](https?://[^\s"\']+|/[^\s"\']+)["\']', resp.text)
-                
-                new_sub_links = 0
                 for l in raw_links:
-                    # Resolve relative links (e.g., "/about" -> "https://site.com/about")
                     full_link = urljoin(url, l).split('#')[0].rstrip('/')
-                    l_parsed = urlparse(full_link)
-                    l_domain = l_parsed.netloc
-
+                    l_domain = urlparse(full_link).netloc
+                    
                     with data_lock:
-                        # Check if it's the SAME domain for deep crawling, OR a new domain for discovery
                         if l_domain and full_link not in visited:
-                            # If it's the same domain, we are more aggressive
-                            if l_domain == domain:
+                            if l_domain == domain: # Stay on site
                                 if domain_counts.get(l_domain, 0) < DOMAIN_LIMIT:
                                     url_queue.put(full_link)
-                                    new_sub_links += 1
-                            else:
-                                # If it's a new domain, we add it as a new seed
-                                if domain_counts.get(l_domain, 0) < 5: # Limit initial discovery
+                            else: # New discovery
+                                if domain_counts.get(l_domain, 0) < 3:
                                     url_queue.put(full_link)
-                
-                if new_sub_links > 0:
-                    tqdm.write(f"📂 [{t_name}] Deep-Dive: Found {new_sub_links} secondary pages on {domain}")
 
-        except Exception:
-            pass
+        except Exception: pass
         finally:
             with data_lock: active_workers -= 1
             url_queue.task_done()
@@ -221,30 +193,17 @@ def run_komu_autonomous():
                     try: visited.add(line.split("] ")[1].strip().lower())
                     except: pass
 
-    current_topics = SEARCH_TOPICS.copy()
-    seeds = get_seeds_robust(current_topics)
+    seeds = get_seeds_robust(SEARCH_TOPICS)
     for url in seeds: url_queue.put(url)
 
-    print(f"🚀 KOMU SCOUT READY. Deep-Crawl & Sub-site indexing active.")
-    pbar = tqdm(total=None, desc="Live Indexing", unit="site", colour="magenta")
-    
+    pbar = tqdm(total=None, desc="Live Indexing", unit="site", colour="cyan")
     for i in range(MAX_THREADS):
         threading.Thread(target=crawler_worker, name=f"Agent-{i+1}", daemon=True).start()
 
     try:
         while True:
-            time.sleep(15)
-            
-            # AI Evolution
-            if url_queue.qsize() < 15:
-                recent_samples = [urlparse(u).netloc for u in list(visited)[-10:]]
-                new_topics = generate_ai_topics(current_topics[-5:], recent_samples)
-                current_topics.extend(new_topics)
-                new_seeds = get_seeds_robust(new_topics)
-                for s in new_seeds: url_queue.put(s)
-                if len(current_topics) > 100: current_topics = current_topics[-50:]
-
-            # Save progress
+            time.sleep(10)
+            # Progress Saving
             if len(runtime_indexed) >= 5:
                 with data_lock:
                     with open(LOG_FILE, "a") as f:
@@ -252,11 +211,11 @@ def run_komu_autonomous():
                             f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {url}\n")
                     runtime_indexed = []
                     
-            if len(visited) > 20000: # Increased memory limit
+            if len(visited) > 15000:
                 with data_lock: visited.clear()
 
     except KeyboardInterrupt:
-        print(f"\n🛑 Manual Stop. Saving final data...")
+        print(f"\n🛑 Manual Stop.")
     finally:
         pbar.close()
 
