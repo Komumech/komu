@@ -431,101 +431,68 @@ if 'code' in st.query_params:
         except Exception as e:
             st.error(f"Login failed: {e}")
 
-# --- B. TOP BAR (LOGIN & PROFILE) ---
-# Layout: [Title/Spacer] [Profile/Login]
-col_spacer, col_auth = st.columns([9, 1]) # Tighter column for profile
-col1, col2, col3 = st.columns([2, 7, 1])
+# --- B. UI LOGIC & LAYOUT ---
+is_home = len(st.session_state.results) == 0 and not st.session_state.query
+user_email = st.session_state.user_info.get('email') if st.session_state.user_info else None
+user_history = get_history(user_email)
 
-with col_auth:
-with col1:
-    st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
-
-with col3:
+def render_auth_widget(key_suffix):
+    """Renders the Profile Picture/Login Button in a consistent way."""
     if st.session_state.user_info:
-    if st.session_state.user_info:
-        # --- Custom CSS to make the popover trigger a circular profile image ---
         profile_pic_url = st.session_state.user_info.get('picture', '')
         st.markdown(f"""
             <style>
-                /* Target the popover button */
                 div[data-testid="stPopover"] > button {{
                     background-image: url('{profile_pic_url}');
                     background-size: cover;
                     background-position: center center;
-                    border-radius: 50%; /* Make it a circle */
+                    border-radius: 50%;
                     width: 40px;
                     height: 40px;
-                    border: 1px solid #dfe1e5; /* Optional: add a light border */
+                    border: 1px solid #dfe1e5;
                 }}
-                /* Hide the default button label (the emoji) */
-                div[data-testid="stPopover"] > button > div {{
-                    display: none;
-                }}
+                div[data-testid="stPopover"] > button > div {{ display: none; }}
             </style>
         """, unsafe_allow_html=True)
 
-        # The emoji is a placeholder; CSS will hide it and show the background image.
-        with st.popover("👤", use_container_width=False):
-            st.markdown(f"""
-                <div style='text-align: center;'>
         with st.popover("", use_container_width=False):
             st.markdown(f'''<div style='text-align: center;'>
                     <img src='{profile_pic_url}' style='width: 60px; height: 60px; border-radius: 50%; margin-bottom: 10px;'>
                     <div style='font-weight: bold; font-size: 16px;'>{st.session_state.user_info.get('name')}</div>
                     <div style='color: gray; font-size: 12px; margin-bottom: 15px;'>{st.session_state.user_info.get('email')}</div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button("Sign Out", key="logout_btn", type="primary", use_container_width=True):
-                if cookie_manager:
-                    cookie_manager.delete("komu_user_session")
+                </div>''', unsafe_allow_html=True)
+            if st.button("Sign Out", key=f"logout_{key_suffix}", type="primary", use_container_width=True):
+                if cookie_manager: cookie_manager.delete("komu_user_session")
                 st.session_state.user_info = None
                 st.rerun()
     else:
         auth_url = get_google_oauth_login_url()
-        if auth_url:
-            st.link_button("Sign in with Google", auth_url, type="primary", use_container_width=True)
-        else:
-            st.warning("⚠️ OAuth Config Missing")
-
-# --- C. MAIN APP RENDER ---
-is_home = len(st.session_state.results) == 0 and not st.session_state.query
-
-# Fetch History
-user_email = st.session_state.user_info.get('email') if st.session_state.user_info else None
-user_history = get_history(user_email)
+        if auth_url: st.link_button("Sign in", auth_url, type="primary")
+        else: st.warning("Config Missing")
 
 if is_home:
+    # --- HOME PAGE LAYOUT ---
+    # 1. Top Right Login
+    _, col_auth = st.columns([9, 1])
+    with col_auth: render_auth_widget("home")
+
+    # 2. Centered Search
     st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
     _, col_s, _ = st.columns([1, 4, 1])
     with col_s:
         q = st.text_input("Search", placeholder="Search Wikipedia, news, or science...", label_visibility="collapsed", key="search_home")
-        
-        # GOOGLE-LIKE SEARCH SUGGESTIONS
         if not q and user_history:
-            clicked_history = None
-            # We render the container and all buttons first...
             st.markdown('<div class="history-container">', unsafe_allow_html=True)
             for i, h in enumerate(user_history[:6]):
                 if st.button(f"🕒  {h}", key=f"hist_{i}", use_container_width=True):
-                    clicked_history = h
+                    run_search(h); st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
-            
-            # ...then we check if a button was clicked and act on it.
-            if clicked_history:
-                run_search(clicked_history)
-                st.rerun()
-        
-        # Run Search
         if q: run_search(q); st.rerun()
 
-
-    # --- Fetch History
-    user_email = st.session_state.user_info.get('email') if st.session_state.user_info else None
-    user_history = get_history(user_email)
 else:
-    # --- HEADER ---
-    c1, c2, _ = st.columns([1, 6, 2])
+    # --- RESULTS PAGE LAYOUT ---
+    # Header: [Logo] [Search Bar] [Profile]
+    c1, c2, c3 = st.columns([2, 6, 2])
     with c1: 
         if st.button("Komu", key="home_btn", type="tertiary"):
             st.session_state.results = []
@@ -534,6 +501,9 @@ else:
     with c2:
         q = st.text_input("Search", value=st.session_state.query, label_visibility="collapsed", key="search_results")
         if q and q != st.session_state.query: run_search(q); st.rerun()
+        
+    with c3:
+        render_auth_widget("results")
     
     # --- TABS ---
     tab_all, tab_img = st.tabs(["🔍 All", "🖼️ Images"])
