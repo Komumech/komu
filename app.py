@@ -21,6 +21,7 @@ from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from sentence_transformers import SentenceTransformer
+from huggingface_hub import InferenceClient
 
 st.set_page_config(page_title="Komu Scout", layout="wide", initial_sidebar_state="collapsed")
 
@@ -57,8 +58,7 @@ def load_secrets():
 # Initialize the variables
 PINECONE_KEY, HF_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI, FIREBASE_API_KEY, FIREBASE_PROJECT_ID = load_secrets()
 
-HF_MODEL_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
-HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
+client = InferenceClient(api_key=HF_TOKEN)
 
 # --- 0.1 FIREBASE & OAUTH ---
 FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents" if FIREBASE_PROJECT_ID else None
@@ -195,14 +195,23 @@ st.markdown("""
         border-color: transparent !important;
     }
     .ai-overview-card { 
-        background: #f8f9fa;
-        border: 1px solid #e8eaed;
-        border-radius: 12px; 
-        padding: 20px; 
+        background: #ffffff;
+        border: 1px solid #dadce0;
+        border-radius: 18px; 
+        padding: 24px; 
         margin-bottom: 30px; 
         max-width: 800px;
-        box-shadow: 0 1px 2px rgba(60,64,67,0.1);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        font-family: 'Plus Jakarta Sans', sans-serif;
     }
+    .ai-content {
+        max-height: 350px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        padding-right: 10px;
+    }
+    .ai-content::-webkit-scrollbar { width: 6px; }
+    .ai-content::-webkit-scrollbar-thumb { background-color: #dfe1e5; border-radius: 10px; }
     
     .source-chip { 
         display: inline-block; padding: 4px 10px; border-radius: 18px; background: #fff; 
@@ -211,13 +220,16 @@ st.markdown("""
     }
     .source-chip:hover { background: #f1f3f4; }
     
-    .search-result { margin-bottom: 28px; max-width: 700px; }
-    .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; display: block; font-weight: 400; line-height: 1.3; margin-bottom: 4px; }
+    .search-result { margin-bottom: 26px; max-width: 650px; font-family: arial, sans-serif; }
+    .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; display: block; font-weight: 400; line-height: 1.3; margin-top: 5px; margin-bottom: 3px; }
     .result-title:hover { text-decoration: underline; }
     
-    .site-path { display: flex; align-items: center; margin-bottom: 6px; }
-    .favicon { width: 16px; height: 16px; border-radius: 50%; margin-right: 8px; }
-    .site-path-text { font-size: 14px; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .site-path { display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; }
+    .favicon { width: 28px; height: 28px; border-radius: 50%; margin-right: 12px; background: #f1f3f4; padding: 4px; object-fit: contain; flex-shrink: 0; }
+    .site-header-text { display: flex; flex-direction: column; justify-content: center; }
+    .site-name { font-size: 14px; color: #202124; font-weight: 400; line-height: 1.3; }
+    .site-url { font-size: 12px; color: #4d5156; line-height: 1.3; }
+    .result-snippet { font-size: 14px; color: #4d5156; line-height: 1.58; }
     
     .sub-results-container { margin-top: 8px; padding-left: 15px; border-left: 3px solid #dfe1e5; }
     .sub-result { margin-bottom: 6px; }
@@ -227,6 +239,18 @@ st.markdown("""
     .image-card { border-radius: 12px; overflow: hidden; height: 150px; background: #f1f3f4; }
     .image-card img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s; }
     .image-card img:hover { transform: scale(1.05); }
+    
+    /* --- INSTANT ANSWER CARD --- */
+    .ia-card { background: white; border: 1px solid #dfe1e5; border-radius: 12px; padding: 24px; margin-bottom: 30px; box-shadow: 0 1px 2px rgba(60,64,67,0.1); font-family: 'Product Sans', sans-serif; max-width: 800px; margin-top: 10px; }
+    .ia-sub { color: #70757a; font-size: 14px; margin-bottom: 8px; font-weight: 400; font-family: 'Google Sans', sans-serif; }
+    .ia-title { font-size: 32px; color: #202124; line-height: 1.2; margin-bottom: 8px; font-weight: 400; }
+    .ia-fact { font-size: 42px; color: #202124; font-weight: 400; margin-bottom: 5px; }
+    .ia-text { font-size: 16px; color: #4d5156; line-height: 1.6; }
+    .ia-flex { display: flex; justify-content: space-between; gap: 24px; align-items: start; }
+    .ia-content { flex: 1; }
+    .ia-img { width: 120px; height: 120px; border-radius: 12px; object-fit: cover; border: 1px solid #f1f3f4; }
+    .ia-link { font-size: 14px; margin-top: 12px; display: block; color: #1a0dab; text-decoration: none; }
+    .ia-calc { font-family: 'Courier New', monospace; font-size: 36px; padding: 10px 0; letter-spacing: -1px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -253,7 +277,9 @@ for key, val in [
     ('ai_overview', ""), 
     ('top_urls', []),
     ('ai_status', "idle"),
-    ('user_info', None) # Will store {'name': ..., 'email': ..., 'picture': ...}
+    ('user_info', None), # Will store {'name': ..., 'email': ..., 'picture': ...}
+    ('instant_answer', None),
+    ('error_log', [])
 ]:
     if key not in st.session_state: st.session_state[key] = val
 
@@ -324,27 +350,72 @@ def query_huggingface(prompt):
     if not prompt or len(prompt) < 50: return "Not enough context found to generate a summary."
     
     try:
-        # Prompt structure for Mistral Instruct
-        formatted_prompt = f"<s>[INST] You are a helpful search assistant. Based on the following search results, summarize the answer to the user query.\n\n{prompt} [/INST]"
-        
-        payload = {
-            "inputs": formatted_prompt,
-            "parameters": {"max_new_tokens": 400, "temperature": 0.2, "return_full_text": False}
-        }
-        
-        response = requests.post(HF_MODEL_URL, headers=HF_HEADERS, json=payload, timeout=25)
-        
-        if response.status_code == 200:
-            res = response.json()
-            if isinstance(res, list) and len(res) > 0:
-                return res[0].get('generated_text', '').strip()
-            return "AI returned an empty response."
-        elif response.status_code == 503:
-            return "⏳ AI Model is loading... try again in 30s."
-        else:
-            return f"AI Error ({response.status_code})"
+        # Using InferenceClient for robust routing and error handling
+        response = client.chat.completions.create(
+            model="meta-llama/Llama-3.2-1B-Instruct", 
+            messages=[
+                {"role": "system", "content": "You are a helpful, intelligent search assistant. Provide a comprehensive, detailed, and well-structured answer based on the provided context. Use paragraphs and bullet points to organize the information effectively. Do not be too brief."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            stream=False
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        return f"AI Connection Error: {str(e)[:50]}"
+        st.session_state.error_log.append(f"AI Connection Exception: {str(e)}")
+        return f"AI Error: {str(e)[:100]}"
+
+def get_instant_answer(query):
+    """Determine if the query has a factual direct answer (Time, Date, Math, Wiki Entity)."""
+    raw_q = query.strip()
+    q = raw_q.lower().strip().rstrip('?.')
+    
+    # 1. Date & Time
+    now = datetime.datetime.now()
+    # More robust check for date phrases
+    if ("date" in q and ("today" in q or "current" in q or "now" in q)) or q in ["todays date"]:
+        return {"type": "fact", "sub": "Current Date", "title": now.strftime("%A, %B %d, %Y"), "desc": ""}
+    
+    if any(x in q for x in ["time", "clock"]) and ("current" in q or "now" in q or "what" in q or "local" in q):
+        return {"type": "fact", "sub": "Current Time", "title": now.strftime("%I:%M %p"), "desc": getattr(now.astimezone().tzinfo, 'key', 'Local Time')}
+
+    # 2. Math (Calculator) - Simple whitelist for safety
+    if re.match(r'^[\d\.\s\+\-\*\/\(\)]+$', q):
+        if re.search(r'[\+\-\*\/]', q) and len(q) < 50:
+            try:
+                # Restricted eval
+                res = eval(q, {"__builtins__": None}, {})
+                # Format integers cleanly
+                val = f"{int(res)}" if res == int(res) else f"{res:.3f}"
+                return {"type": "fact", "sub": "Calculator", "title": val, "desc": f"{raw_q} ="}
+            except: pass
+
+    # 3. Knowledge Graph (Wikipedia)
+    try:
+        # Pre-process: Strip "who is", "what is" to improve hit rate (e.g. "who is avatar's son" -> "avatar's son")
+        # Improved regex to handle "what's", "who's", and other variations
+        clean_search = re.sub(r"^(what|who|where|when|why|how)(?:'s|\s+is|\s+are|\s+was|\s+were|\s+do|\s+does)\s+", "", q).strip()
+
+        # Wikipedia requires a User-Agent or it blocks the request
+        headers = {'User-Agent': 'KomuScout/1.0 (Educational Project)'}
+        api = "https://en.wikipedia.org/w/api.php"
+        
+        search_res = requests.get(api, headers=headers, params={"action": "query", "list": "search", "srsearch": clean_search, "format": "json", "srlimit": 1}, timeout=2.0).json()
+        
+        if search_res.get('query', {}).get('search'):
+            title = search_res['query']['search'][0]['title']
+            # Get summary
+            summary = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}", headers=headers, timeout=2.0).json()
+            
+            if 'extract' in summary and summary.get('type') != 'disambiguation':
+                if "refer to:" in summary.get('extract', ''): return None
+                return {
+                    "type": "entity", "title": summary.get('title'), "sub": summary.get('description', 'About'),
+                    "text": summary.get('extract'), "image": summary.get('thumbnail', {}).get('source'),
+                    "url": summary.get('content_urls', {}).get('desktop', {}).get('page')
+                }
+    except Exception as e: st.session_state.error_log.append(f"Instant Answer Error: {e}")
+    return None
 
 # --- 5. SEARCH LOGIC ---
 def run_search(query):
@@ -355,6 +426,8 @@ def run_search(query):
     st.session_state.query = query
     st.session_state.ai_overview = ""
     st.session_state.ai_status = "idle" # Reset AI state
+    st.session_state.instant_answer = None
+    st.session_state.error_log = [] # Clear logs on new search
     
     with st.spinner("Searching Komu Index..."):
         try:
@@ -391,7 +464,11 @@ def run_search(query):
             # Prepare data for AI
             st.session_state.top_urls = [g['main'].get('url') for g in st.session_state.results[:3]]
             
+            # Get Direct Answer (Non-AI)
+            st.session_state.instant_answer = get_instant_answer(query)
+            
         except Exception as e:
+            st.session_state.error_log.append(f"Search Execution Error: {str(e)}")
             st.error(f"Search failed: {e}")
 
 # --- 6. UI RENDER ---
@@ -509,76 +586,104 @@ else:
     tab_all, tab_img = st.tabs(["🔍 All", "🖼️ Images"])
 
     with tab_all:
-        col_p, col_m = st.columns([0.1, 9.9])
-        with col_m:
-            # 1. AI CONTAINER (Placeholder at the top)
-            ai_container = st.empty()
+        # 0. DIRECT ANSWER (Knowledge Graph)
+        if st.session_state.instant_answer:
+            ia = st.session_state.instant_answer
+                
+            if ia['type'] == 'fact':
+                # Calculator / Date Style
+                st.markdown(f"""<div class="ia-card">
+                    <div class="ia-sub">{ia['sub']}</div>
+                    <div style="font-size: 20px; color: #70757a; margin-bottom: 4px;">{ia['desc']}</div>
+                    <div class="ia-fact">{ia['title']}</div>
+                </div>""", unsafe_allow_html=True)
+                
+            elif ia['type'] == 'entity':
+                # Wiki Entity Style
+                img_html = f'<div style="min-width:120px;"><img src="{ia["image"]}" class="ia-img"></div>' if ia.get('image') else ''
+                st.markdown(f"""<div class="ia-card"><div class="ia-flex"><div class="ia-content">
+                    <div class="ia-title">{ia['title']}</div><div class="ia-sub">{ia['sub']}</div>
+                    <div class="ia-text">{ia['text']}</div><a href="{ia['url']}" class="ia-link" target="_blank">Wikipedia</a>
+                </div>{img_html}</div></div>""", unsafe_allow_html=True)
 
-            # 2. RENDER RESULTS IMMEDIATELY
-            if st.session_state.results:
-                for group in st.session_state.results[:15]: 
-                    main, dom, subs = group['main'], group['domain'], group['subs']
+        # 1. AI CONTAINER (Placeholder at the top)
+        ai_container = st.empty()
+
+        # 2. RENDER RESULTS IMMEDIATELY
+        if st.session_state.results:
+            for group in st.session_state.results[:15]: 
+                main, dom, subs = group['main'], group['domain'], group['subs']
                     
-                    html = f"""<div class="search-result">
-                    <div class="site-path">
-                        <img src="https://www.google.com/s2/favicons?sz=64&domain={dom}" class="favicon" onerror="this.style.display='none'">
-                        <span class="site-path-text">{shorten_url(main.get('url'))}</span>
+                html = f"""<div class="search-result">
+                <div class="site-path">
+                    <img src="https://icons.duckduckgo.com/ip3/{dom}.ico" class="favicon" onerror="this.onerror=null; this.src='https://www.google.com/s2/favicons?sz=64&domain={dom}';">
+                    <div class="site-header-text">
+                        <div class="site-name">{dom.split('.')[0].title()}</div>
+                        <div class="site-url">{shorten_url(main.get('url'))}</div>
                     </div>
-                    <a class="result-title" href="{main.get('url')}" target="_blank">{main.get('title')}</a>
-                    <div style="color:#4d5156; font-size:14px; line-height: 1.5;">{main.get('text', '')[:180]}...</div>"""
+                </div>
+                <a class="result-title" href="{main.get('url')}" target="_blank">{main.get('title')}</a>
+                <div class="result-snippet">{main.get('text', '')[:220]}...</div>"""
                     
-                    if subs:
-                        html += '<div class="sub-results-container">'
-                        for sub in subs:
-                            html += f'<div class="sub-result"><a class="sub-result-title" href="{sub.get("url")}" target="_blank">{sub.get("title")}</a></div>'
-                        html += '</div>'
+                if subs:
+                    html += '<div class="sub-results-container">'
+                    for sub in subs:
+                        html += f'<div class="sub-result"><a class="sub-result-title" href="{sub.get("url")}" target="_blank">{sub.get("title")}</a></div>'
+                    html += '</div>'
                     
-                    st.markdown(html + "</div>", unsafe_allow_html=True)
-            else:
-                st.write("No results found.")
+                st.markdown(html + "</div>", unsafe_allow_html=True)
+        else:
+            st.write("No results found.")
 
-            # 3. DISPLAY OR GENERATE AI (After results are shown)
+        # 3. DISPLAY OR GENERATE AI (After results are shown)
             
-            # If AI is already done, show it in the top placeholder
-            if st.session_state.ai_status == "complete" and st.session_state.ai_overview:
-                with ai_container.container():
-                    st.markdown(f"""
-                        <div class="ai-overview-card">
-                            <div style="color:#4285f4; font-weight:600; margin-bottom:10px; font-size: 15px;">✨ AI OVERVIEW</div>
-                            <div style="color: #202124; font-size: 15px; line-height: 1.6;">{st.session_state.ai_overview}</div>
-                            <div style="margin-top:15px; border-top:1px solid #dfe1e5; padding-top:10px;">
-                                {''.join([f'<a href="{u}" target="_blank" class="source-chip">{urlparse(u).netloc}</a>' for u in st.session_state.top_urls])}
-                            </div>
+        # If AI is already done, show it in the top placeholder
+        if st.session_state.ai_status == "complete" and st.session_state.ai_overview:
+            with ai_container.container():
+                st.markdown(f"""
+                    <div class="ai-overview-card">
+                        <div style="display:flex; align-items:center; margin-bottom:12px;">
+                            <div style="background: linear-gradient(135deg, #4285f4, #d96570); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight:700; font-size: 16px;">✨ AI Overview</div>
                         </div>
-                    """, unsafe_allow_html=True)
+                        <div class="ai-content" style="color: #202124; font-size: 16px; line-height: 1.6;">{st.session_state.ai_overview}</div>
+                        <div style="margin-top:15px; padding-top:10px;">
+                            {''.join([f'<a href="{u}" target="_blank" class="source-chip">{urlparse(u).netloc}</a>' for u in st.session_state.top_urls])}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
             
-            # If AI is idle (new search), trigger generation
-            elif st.session_state.ai_status == "idle" and st.session_state.top_urls:
-                with ai_container.container():
-                    # Show progress box
-                    status_box = st.status("🧠 Komu is reading sources...", expanded=False)
-                    
-                    # Fetch content
-                    with ThreadPoolExecutor(max_workers=3) as exc:
-                        contents = list(exc.map(fetch_content, st.session_state.top_urls))
-                    
-                    # Prepare Context
-                    context_text = ""
-                    for i, txt in enumerate(contents):
-                        if len(txt) > 200:
-                            context_text += f"\nSource [{i+1}]: {txt[:800]}\n"
-                    
-                    if context_text:
-                        status_box.update(label="✨ Generating Summary...", state="running")
-                        prompt = f"User Query: {st.session_state.query}\nContext:\n{context_text}\nTask: concise summary."
-                        summary = query_huggingface(prompt)
-                        st.session_state.ai_overview = summary
-                    else:
-                        st.session_state.ai_overview = "Could not read source content."
+        # If AI is idle (new search), trigger generation
+        elif st.session_state.ai_status == "idle" and st.session_state.top_urls:
+            with ai_container.container():
+                # Custom modern loader (No brain emoji, no st.status)
+                st.markdown("""<div class="ai-overview-card" style="padding: 20px; text-align: left;">
+                    <div style="color:#5f6368; font-weight:500; font-size: 14px; animation: pulse 1.5s infinite;">✨ Generating Overview...</div>
+                    <style>@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }</style>
+                </div>""", unsafe_allow_html=True)
+                
+                # Fetch content
+                with ThreadPoolExecutor(max_workers=3) as exc:
+                    contents = list(exc.map(fetch_content, st.session_state.top_urls))
+                
+                # Prepare Context
+                context_text = ""
+                # Add Wikipedia Instant Answer to context if available
+                if st.session_state.instant_answer and st.session_state.instant_answer.get('text'):
+                     context_text += f"\nWikipedia Source: {st.session_state.instant_answer['text']}\n"
 
-                    st.session_state.ai_status = "complete"
-                    status_box.update(label="Done!", state="complete", expanded=False)
-                    st.rerun()
+                for i, txt in enumerate(contents):
+                    if len(txt) > 200:
+                        context_text += f"\nSource [{i+1}]: {txt[:800]}\n"
+                
+                if context_text:
+                    prompt = f"User Query: {st.session_state.query}\nContext:\n{context_text}\n"
+                    summary = query_huggingface(prompt)
+                    st.session_state.ai_overview = summary
+                else:
+                    st.session_state.ai_overview = "Could not retrieve sufficient information to generate an overview."
+
+                st.session_state.ai_status = "complete"
+                st.rerun()
 
     with tab_img:
         if st.session_state.image_results:
@@ -589,3 +694,9 @@ else:
             st.markdown(html + "</div>", unsafe_allow_html=True)
         else:
             st.write("No images found.")
+            
+    # --- ERROR LOG VIEWER ---
+    if st.session_state.error_log:
+        with st.expander("🔴 Debug / Error Logs", expanded=False):
+            for err in st.session_state.error_log:
+                st.error(err)
