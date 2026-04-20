@@ -7,3 +7,6 @@ trafilatura
 requests
 urllib3
 huggingface_hub
+fastapi
+python-dotenv
+uvicorn

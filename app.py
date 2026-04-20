@@ -7,6 +7,7 @@ import os
 import datetime
 import ssl
 import urllib3
+import sys
 
 # --- NETWORK/SSL PATCH ---
 os.environ['CURL_CA_BUNDLE'] = ''
@@ -52,7 +53,8 @@ def load_secrets():
             st.secrets.get("FIREBASE_PROJECT_ID")
         )
     except Exception as e:
-        st.error(f"Error loading secrets: {e}")
+        print(f"CONSOLE ERROR: Secrets loading failed: {e}", file=sys.stderr)
+        st.error("Configuration error. Please check console.")
         return None, None, None, None, None, None, None
 
 # Initialize the variables
@@ -73,7 +75,8 @@ def get_history(username):
             data = resp.json()
             raw_list = data.get('fields', {}).get('history', {}).get('arrayValue', {}).get('values', [])
             return [x.get('stringValue') for x in raw_list if 'stringValue' in x]
-    except Exception: pass
+    except Exception as e: 
+        print(f"CONSOLE ERROR: Firebase Get History failed: {e}", file=sys.stderr)
     return []
 
 def save_history(username, query):
@@ -91,6 +94,8 @@ def save_history(username, query):
     url = f"{FIRESTORE_URL}/user_history/{safe_user}?key={FIREBASE_API_KEY}"
     try: requests.patch(url, json=payload, timeout=5)
     except Exception: pass
+    except Exception as e:
+        print(f"CONSOLE ERROR: Firebase Save History failed: {e}", file=sys.stderr)
 
 def get_google_oauth_login_url():
     if not all([GOOGLE_CLIENT_ID, REDIRECT_URI]): return None
@@ -115,13 +120,73 @@ def sort_history(history, query):
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-    .block-container { padding-top: 2rem !important; max-width: 1100px !important; }
+    .block-container { padding-top: 1.5rem !important; max-width: 1400px !important; padding-left: 10% !important; }
     
-    div[data-baseweb="input"] > div { 
-        border-radius: 24px !important; 
-        border: 1px solid #dfe1e5 !important; 
-        padding: 4px 12px !important; 
-        box-shadow: 0 1px 6px rgba(32,33,36,0.28);
+    /* --- REMOVE ST-BA AND DEFAULT STYLING --- */
+    .st-ba {
+        background-color: transparent !important;
+        border: none !important;
+    }
+
+    /* --- CUSTOM SEARCH BAR (NON-STREAMLIT LOOK) --- */
+    div[data-testid="stTextInput"] {
+        margin-top: -5px;
+    }
+    div[data-baseweb="base-input"] {
+        background-color: transparent !important;
+        border: none !important;
+    }
+    div[data-baseweb="input"] {
+        border: none !important;
+        background-color: transparent !important;
+    }
+    div[data-baseweb="input"] > div {
+        border-radius: 24px !important;
+        border: 1px solid #dfe1e5 !important;
+        padding: 8px 50px !important;
+        box-shadow: 0 1px 3px rgba(32,33,36,0.1) !important;
+        background-color: #fff !important;
+        transition: box-shadow 0.2s, border-color 0.2s;
+        height: 48px;
+        background-image: 
+            url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%239aa0a6"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>'),
+            url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%234285f4" d="m12 15c1.66 0 3-1.31 3-2.97v-7.07c0-1.65-1.34-2.96-3-2.96s-3 1.31-3 2.96v7.07c0 1.66 1.34 2.97 3 2.97z"/><path fill="%2334a853" d="m11 18.08h2v3.92h-2z"/><path fill="%23fbbc05" d="m7.05 16.87c-1.27-1.33-2.05-3.12-2.05-5.09h2c0 1.38.56 2.63 1.48 3.53l-1.43 1.56z"/><path fill="%23ea4335" d="m12 18c-2.12 0-4.07-.87-5.47-2.27l1.45-1.27c1.03 1.01 2.45 1.54 4.02 1.54 3.32 0 6.01-2.7 6.01-6h2c0 4.14-3.36 8-8 8z"/></svg>');
+        background-repeat: no-repeat;
+        background-position: 15px center, right 15px center;
+        background-size: 20px, 24px;
+    }
+    div[data-baseweb="input"] > div:hover, div[data-baseweb="input"]:focus-within > div {
+        box-shadow: 0 2px 8px rgba(32,33,36,0.2) !important;
+        border-color: #dfe1e5 !important;
+    }
+    input[data-testid="stTextInputEnterChat"] {
+        font-size: 19px !important;
+        color: #202124 !important;
+    }
+
+    /* --- HEADER ALIGNMENT --- */
+    [data-testid="column"] {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        height: 60px; /* Force consistent height for horizontal line */
+    }
+    /* TAB FONT SIZE INCREASE */
+    button[data-baseweb="tab"] p {
+        font-size: 18px !important;
+        font-weight: 500 !important;
+    }
+    [data-testid="column"]:last-child {
+        justify-content: flex-end;
+    }
+    
+    .logo-text {
+        font-family: 'Product Sans', sans-serif;
+        font-size: 28px;
+        font-weight: 700;
+        color: #4285f4;
+        cursor: pointer;
+        text-decoration: none;
     }
     
     .komu-logo-large { font-family: 'Product Sans', sans-serif; font-size: 85px; font-weight: 700; text-align: center; margin-top: 8vh; margin-bottom: 30px; letter-spacing: -2px; color: #4285f4; }
@@ -175,10 +240,14 @@ st.markdown("""
         padding: 8px 0;
         position: relative;
         z-index: 1000;
-        width: 100%;
+        width: 95%;
+        margin-left: auto;
+        margin-right: auto;
         overflow: hidden; /* Ensures children conform to border-radius */
     }
-    .history-container .stButton button {
+    
+    /* Minimalist buttons for Clear and History */
+    .history-container .stButton button, .clear-btn button {
         border: none !important;
         box-shadow: none !important;
         border-radius: 0 !important;
@@ -189,47 +258,52 @@ st.markdown("""
         padding: 8px 20px !important;
         font-size: 16px !important;
     }
-    .history-container .stButton button:hover {
+    .history-container .stButton button:hover, .clear-btn button:hover {
         background-color: #f1f3f4 !important;
         color: #202124 !important;
         border-color: transparent !important;
     }
-    .ai-overview-card { 
-        background: #ffffff;
-        border: 1px solid #dadce0;
-        border-radius: 18px; 
-        padding: 24px; 
-        margin-bottom: 30px; 
-        max-width: 800px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    
+    .clear-btn button {
+        padding: 0 !important;
+        font-size: 18px !important;
+        color: #70757a !important;
+    }
+    .ai-overview-card {
+        background: transparent;
+        border: none;
+        border-radius: 0; 
+        padding: 0; 
+        margin-bottom: 24px; 
+        max-width: 720px;
+        box-shadow: none;
         font-family: 'Plus Jakarta Sans', sans-serif;
     }
     .ai-content {
-        max-height: 350px;
+        max-height: 450px;
         overflow-y: auto;
         scrollbar-width: thin;
         padding-right: 10px;
+        color: #202124 !important;
+        font-size: 18px !important;
+        line-height: 1.6 !important;
     }
     .ai-content::-webkit-scrollbar { width: 6px; }
     .ai-content::-webkit-scrollbar-thumb { background-color: #dfe1e5; border-radius: 10px; }
     
-    .source-chip { 
-        display: inline-block; padding: 4px 10px; border-radius: 18px; background: #fff; 
-        border: 1px solid #dfe1e5; font-size: 11px; color: #202124; text-decoration: none; 
-        margin-right: 6px; margin-top: 6px; font-weight: 500; 
-    }
+    .source-chip { display: inline-block; padding: 5px 12px; border-radius: 18px; background: #fff; border: 1px solid #dfe1e5; font-size: 12px; color: #4d5156; text-decoration: none; margin-right: 8px; margin-top: 8px; font-weight: 500; }
     .source-chip:hover { background: #f1f3f4; }
     
-    .search-result { margin-bottom: 26px; max-width: 650px; font-family: arial, sans-serif; }
-    .result-title { font-size: 20px; color: #1a0dab; text-decoration: none; display: block; font-weight: 400; line-height: 1.3; margin-top: 5px; margin-bottom: 3px; }
+    .search-result { margin-bottom: 32px; max-width: 680px; font-family: 'Inter', 'Roboto', arial, sans-serif; }
+    .result-title { font-size: 23px; color: #1a0dab; text-decoration: none; display: block; font-weight: 400; line-height: 1.3; margin-top: 5px; margin-bottom: 4px; }
     .result-title:hover { text-decoration: underline; }
     
-    .site-path { display: flex; align-items: center; margin-bottom: 6px; white-space: nowrap; }
+    .site-path { display: flex; align-items: center; margin-bottom: 2px; white-space: nowrap; }
     .favicon { width: 28px; height: 28px; border-radius: 50%; margin-right: 12px; background: #f1f3f4; padding: 4px; object-fit: contain; flex-shrink: 0; }
     .site-header-text { display: flex; flex-direction: column; justify-content: center; }
     .site-name { font-size: 14px; color: #202124; font-weight: 400; line-height: 1.3; }
     .site-url { font-size: 12px; color: #4d5156; line-height: 1.3; }
-    .result-snippet { font-size: 14px; color: #4d5156; line-height: 1.58; }
+    .result-snippet { font-size: 17px; color: #4d5156; line-height: 1.6; }
     
     .sub-results-container { margin-top: 8px; padding-left: 15px; border-left: 3px solid #dfe1e5; }
     .sub-result { margin-bottom: 6px; }
@@ -240,12 +314,12 @@ st.markdown("""
     .image-card img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s; }
     .image-card img:hover { transform: scale(1.05); }
     
-    /* --- INSTANT ANSWER CARD --- */
-    .ia-card { background: white; border: 1px solid #dfe1e5; border-radius: 12px; padding: 24px; margin-bottom: 30px; box-shadow: 0 1px 2px rgba(60,64,67,0.1); font-family: 'Product Sans', sans-serif; max-width: 800px; margin-top: 10px; }
-    .ia-sub { color: #70757a; font-size: 14px; margin-bottom: 8px; font-weight: 400; font-family: 'Google Sans', sans-serif; }
-    .ia-title { font-size: 32px; color: #202124; line-height: 1.2; margin-bottom: 8px; font-weight: 400; }
-    .ia-fact { font-size: 42px; color: #202124; font-weight: 400; margin-bottom: 5px; }
-    .ia-text { font-size: 16px; color: #4d5156; line-height: 1.6; }
+    /* --- INSTANT ANSWER CARD --- (GOOGLE-LEVEL REFINEMENT) */
+    .ia-card { background: transparent; border: none; border-radius: 0; padding: 0; margin-bottom: 35px; box-shadow: none; font-family: 'Plus Jakarta Sans', sans-serif; max-width: 680px; margin-top: 10px; }
+    .ia-sub { color: #70757a; font-size: 15px; margin-bottom: 8px; font-weight: 400; font-family: 'Google Sans', sans-serif; }
+    .ia-title { font-size: 36px; color: #202124; line-height: 1.2; margin-bottom: 8px; font-weight: 400; }
+    .ia-fact { font-size: 42px; color: #202124; font-weight: 400; margin-bottom: 5px; letter-spacing: -1px; }
+    .ia-text { font-size: 19px; color: #4d5156; line-height: 1.6; }
     .ia-flex { display: flex; justify-content: space-between; gap: 24px; align-items: start; }
     .ia-content { flex: 1; }
     .ia-img { width: 120px; height: 120px; border-radius: 12px; object-fit: cover; border: 1px solid #f1f3f4; }
@@ -264,7 +338,8 @@ def get_komu_engines():
         embed_model = SentenceTransformer('all-mpnet-base-v2')
         return index, embed_model
     except Exception as e:
-        st.error(f"Engine Init Error: {e}")
+        print(f"CONSOLE ERROR: Engine Init failed: {e}", file=sys.stderr)
+        st.error("Search system offline.")
         return None, None
 
 index, embed_model = get_komu_engines()
@@ -278,6 +353,7 @@ for key, val in [
     ('top_urls', []),
     ('ai_status', "idle"),
     ('user_info', None), # Will store {'name': ..., 'email': ..., 'picture': ...}
+    ('ai_expanded', False),
     ('instant_answer', None),
     ('error_log', [])
 ]:
@@ -362,7 +438,7 @@ def query_huggingface(prompt):
         )
         return response.choices[0].message.content
     except Exception as e:
-        st.session_state.error_log.append(f"AI Connection Exception: {str(e)}")
+        print(f"CONSOLE ERROR: HuggingFace API Exception: {e}", file=sys.stderr)
         return f"AI Error: {str(e)[:100]}"
 
 def get_instant_answer(query):
@@ -414,7 +490,9 @@ def get_instant_answer(query):
                     "text": summary.get('extract'), "image": summary.get('thumbnail', {}).get('source'),
                     "url": summary.get('content_urls', {}).get('desktop', {}).get('page')
                 }
-    except Exception as e: st.session_state.error_log.append(f"Instant Answer Error: {e}")
+    except Exception as e: 
+        print(f"CONSOLE ERROR: Instant Answer Wiki Lookup failed: {e}", file=sys.stderr)
+        st.session_state.error_log.append(f"Instant Answer Error: {e}")
     return None
 
 # --- 5. SEARCH LOGIC ---
@@ -426,6 +504,7 @@ def run_search(query):
     st.session_state.query = query
     st.session_state.ai_overview = ""
     st.session_state.ai_status = "idle" # Reset AI state
+    st.session_state.ai_expanded = False
     st.session_state.instant_answer = None
     st.session_state.error_log = [] # Clear logs on new search
     
@@ -468,7 +547,7 @@ def run_search(query):
             st.session_state.instant_answer = get_instant_answer(query)
             
         except Exception as e:
-            st.session_state.error_log.append(f"Search Execution Error: {str(e)}")
+            print(f"CONSOLE ERROR: Search Execution failed: {e}", file=sys.stderr)
             st.error(f"Search failed: {e}")
 
 # --- 6. UI RENDER ---
@@ -506,7 +585,8 @@ if 'code' in st.query_params:
                     st.query_params.clear()
                     st.rerun() 
         except Exception as e:
-            st.error(f"Login failed: {e}")
+            print(f"CONSOLE ERROR: OAuth Callback failed: {e}", file=sys.stderr)
+            st.error("Login failed.")
 
 # --- B. UI LOGIC & LAYOUT ---
 is_home = len(st.session_state.results) == 0 and not st.session_state.query
@@ -557,7 +637,13 @@ if is_home:
     st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
     _, col_s, _ = st.columns([1, 4, 1])
     with col_s:
-        q = st.text_input("Search", placeholder="Search Wikipedia, news, or science...", label_visibility="collapsed", key="search_home")
+        # Search input with an integrated X button logic
+        s_col1, s_col2 = st.columns([0.9, 0.1])
+        with s_col1:
+            q = st.text_input("Search", placeholder="Search Wikipedia, news, or science...", label_visibility="collapsed", key="search_home")
+        with s_col2:
+            if q: st.markdown('<div class="clear-btn">', unsafe_allow_html=True); st.button("✕", key="clr_home", on_click=lambda: st.session_state.update({"query": ""})); st.markdown('</div>', unsafe_allow_html=True)
+            
         if not q and user_history:
             st.markdown('<div class="history-container">', unsafe_allow_html=True)
             for i, h in enumerate(user_history[:6]):
@@ -569,21 +655,31 @@ if is_home:
 else:
     # --- RESULTS PAGE LAYOUT ---
     # Header: [Logo] [Search Bar] [Profile]
-    c1, c2, c3 = st.columns([2, 6, 2])
+    c1, c2, c3 = st.columns([1.2, 6, 1.2], gap="small")
     with c1: 
-        if st.button("Komu", key="home_btn", type="tertiary"):
+        st.image("image.png", width=110)
+        if st.button("Home", key="home_btn", type="tertiary", use_container_width=True):
             st.session_state.results = []
             st.session_state.query = ""
             st.rerun()
     with c2:
-        q = st.text_input("Search", value=st.session_state.query, label_visibility="collapsed", key="search_results")
-        if q and q != st.session_state.query: run_search(q); st.rerun()
+        r_col1, r_col2 = st.columns([0.94, 0.06])
+        with r_col1:
+            q = st.text_input("Search", value=st.session_state.query, label_visibility="collapsed", key="search_results", placeholder="Search...")
+            if q and q != st.session_state.query: run_search(q); st.rerun()
+        with r_col2:
+            if st.session_state.query:
+                st.markdown('<div class="clear-btn">', unsafe_allow_html=True)
+                if st.button("✕", key="clr_res"): 
+                    st.session_state.query = ""; st.session_state.results = []; st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
         
     with c3:
+        # Profile aligns horizontally with c1 and c2 automatically now
         render_auth_widget("results")
     
     # --- TABS ---
-    tab_all, tab_img = st.tabs(["🔍 All", "🖼️ Images"])
+    tab_all, tab_img = st.tabs(["All", "Images"])
 
     with tab_all:
         # 0. DIRECT ANSWER (Knowledge Graph)
@@ -607,50 +703,36 @@ else:
                 </div>{img_html}</div></div>""", unsafe_allow_html=True)
 
         # 1. AI CONTAINER (Placeholder at the top)
+        # Now positioned above Instant Answer
         ai_container = st.empty()
 
-        # 2. RENDER RESULTS IMMEDIATELY
-        if st.session_state.results:
-            for group in st.session_state.results[:15]: 
-                main, dom, subs = group['main'], group['domain'], group['subs']
-                    
-                html = f"""<div class="search-result">
-                <div class="site-path">
-                    <img src="https://icons.duckduckgo.com/ip3/{dom}.ico" class="favicon" onerror="this.onerror=null; this.src='https://www.google.com/s2/favicons?sz=64&domain={dom}';">
-                    <div class="site-header-text">
-                        <div class="site-name">{dom.split('.')[0].title()}</div>
-                        <div class="site-url">{shorten_url(main.get('url'))}</div>
-                    </div>
-                </div>
-                <a class="result-title" href="{main.get('url')}" target="_blank">{main.get('title')}</a>
-                <div class="result-snippet">{main.get('text', '')[:220]}...</div>"""
-                    
-                if subs:
-                    html += '<div class="sub-results-container">'
-                    for sub in subs:
-                        html += f'<div class="sub-result"><a class="sub-result-title" href="{sub.get("url")}" target="_blank">{sub.get("title")}</a></div>'
-                    html += '</div>'
-                    
-                st.markdown(html + "</div>", unsafe_allow_html=True)
-        else:
-            st.write("No results found.")
-
-        # 3. DISPLAY OR GENERATE AI (After results are shown)
-            
-        # If AI is already done, show it in the top placeholder
         if st.session_state.ai_status == "complete" and st.session_state.ai_overview:
+            text_to_show = st.session_state.ai_overview
+            is_long = len(text_to_show) > 450
+            if is_long and not st.session_state.ai_expanded:
+                text_to_show = text_to_show[:450] + "..."
+
+            # Clean up error message for display if it's an error state
+            display_text = text_to_show
+            if "AI Error:" in display_text:
+                display_text = "⚠️ Something went wrong while generating the overview. Please try again later."
+
             with ai_container.container():
                 st.markdown(f"""
                     <div class="ai-overview-card">
                         <div style="display:flex; align-items:center; margin-bottom:12px;">
-                            <div style="background: linear-gradient(135deg, #4285f4, #d96570); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight:700; font-size: 16px;">✨ AI Overview</div>
+                            <div style="color: #202124; font-weight:700; font-size: 18px;">✨ AI Overview</div>
                         </div>
-                        <div class="ai-content" style="color: #202124; font-size: 16px; line-height: 1.6;">{st.session_state.ai_overview}</div>
+                        <div class="ai-content">{display_text}</div>
                         <div style="margin-top:15px; padding-top:10px;">
-                            {''.join([f'<a href="{u}" target="_blank" class="source-chip">{urlparse(u).netloc}</a>' for u in st.session_state.top_urls])}
+                            {'' if "AI Error:" in text_to_show else ''.join([f'<a href="{u}" target="_blank" class="source-chip">{urlparse(u).netloc}</a>' for u in st.session_state.top_urls])}
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
+                if is_long and not st.session_state.ai_expanded:
+                    if st.button("Show more", key="btn_ai_more"):
+                        st.session_state.ai_expanded = True
+                        st.rerun()
             
         # If AI is idle (new search), trigger generation
         elif st.session_state.ai_status == "idle" and st.session_state.top_urls:
@@ -684,6 +766,34 @@ else:
 
                 st.session_state.ai_status = "complete"
                 st.rerun()
+
+        # 2. RENDER RESULTS IMMEDIATELY
+        if st.session_state.results:
+            for group in st.session_state.results[:15]: 
+                main, dom, subs = group['main'], group['domain'], group['subs']
+                    
+                html = f"""<div class="search-result">
+                <div class="site-path">
+                    <img src="https://icons.duckduckgo.com/ip3/{dom}.ico" class="favicon" onerror="this.onerror=null; this.src='https://www.google.com/s2/favicons?sz=64&domain={dom}';">
+                    <div class="site-header-text">
+                        <div class="site-name">{dom.split('.')[0].title()}</div>
+                        <div class="site-url">{shorten_url(main.get('url'))}</div>
+                    </div>
+                </div>
+                <a class="result-title" href="{main.get('url')}" target="_blank">{main.get('title')}</a>
+                <div class="result-snippet">{main.get('text', '')[:220]}...</div>"""
+                    
+                if subs:
+                    html += '<div class="sub-results-container">'
+                    for sub in subs:
+                        html += f'<div class="sub-result"><a class="sub-result-title" href="{sub.get("url")}" target="_blank">{sub.get("title")}</a></div>'
+                    html += '</div>'
+                    
+                st.markdown(html + "</div>", unsafe_allow_html=True)
+        else:
+            st.write("No results found.")
+
+        # 3. DISPLAY OR GENERATE AI (After results are shown)
 
     with tab_img:
         if st.session_state.image_results:

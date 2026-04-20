@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 from pinecone import Pinecone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 # --- IMPORT FROM CONFIG ---
 try:
@@ -87,6 +87,37 @@ def index_website(url):
                 output_dimensionality=target_dim
             )
         )
+
+        # Index additional images from the page (up to 3 with alt text)
+        soup = BeautifulSoup(downloaded, 'html.parser')
+        img_count = 0
+        for img in soup.find_all('img', alt=True):
+            alt = img.get('alt', '').strip()
+            src = img.get('src', '')
+            if len(alt) > 5 and src and img_count < 3:
+                img_url = urljoin(url, src).split('?')[0]
+                if any(ext in img_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                    # Embed alt text for the image
+                    img_res = client.models.embed_content(
+                        model="gemini-embedding-2-preview",
+                        contents=alt,
+                        config=types.EmbedContentConfig(
+                            task_type="RETRIEVAL_DOCUMENT",
+                            output_dimensionality=target_dim
+                        )
+                    )
+                    index.upsert(vectors=[{
+                        "id": img_url,
+                        "values": img_res.embeddings[0].values,
+                        "metadata": {
+                            "url": img_url,
+                            "title": alt,
+                            "text": alt,
+                            "domain": urlparse(url).netloc,
+                            "indexed_at": "2026-03-14"
+                        }
+                    }])
+                    img_count += 1
 
         # Upsert with MORE metadata so the UI doesn't have to guess
         index.upsert(vectors=[{

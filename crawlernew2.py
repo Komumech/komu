@@ -3,6 +3,7 @@ import time
 import requests
 import trafilatura
 import urllib3
+from bs4 import BeautifulSoup
 import re
 import random
 import threading
@@ -36,6 +37,40 @@ LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 150  # 🚀 Increased to capture "most pages" of a site
 BLACKLIST = ["facebook.com", "twitter.com", "instagram.com", "tiktok.com", "quora.com", "reddit.com", "amazon.com", "ebay.com"]
+
+# --- DICTIONARY & PHRASE SEEDS FOR AUTONOMY ---
+POPULAR_PREFIXES = [
+    "how to", "best", "future of", "trends in", "guide to", "latest", 
+    "review of", "why is", "top 10", "new", "advanced", "history of"
+]
+
+DICTIONARY_NOUNS = [
+    "technology", "science", "coding", "medicine", "space", "finance", "cooking",
+    "engineering", "philosophy", "history", "gaming", "sustainability", "art",
+    "architecture", "psychology", "marketing", "biology", "physics", "automation",
+    "cryptography", "ecology", "robotics", "agriculture", "astronomy", "sociology"
+]
+
+def generate_random_seed_query():
+    """Generates a random query using dictionary words and popular patterns."""
+    prefix = random.choice(POPULAR_PREFIXES)
+    noun = random.choice(DICTIONARY_NOUNS)
+    # 50% chance to add a year for 'freshness'
+    year = " 2026" if random.random() > 0.5 else ""
+    return f"{prefix} {noun}{year}"
+
+def get_autonomous_seeds(count=5):
+    """Generates real-world trending seeds starting from random dictionary words."""
+    final_seeds = []
+    for _ in range(count):
+        spark = generate_random_seed_query()
+        # Tap into Google to turn our random word into a popular phrase
+        suggestions = get_google_suggestions(spark)
+        if suggestions:
+            final_seeds.append(random.choice(suggestions))
+        else:
+            final_seeds.append(spark)
+    return final_seeds
 
 SEARCH_TOPICS = [
     # --- Career & Digital Economy ---
@@ -114,9 +149,27 @@ url_queue = Queue()
 visited = set()         
 runtime_indexed = [] 
 domain_counts = {}  
+domain_image_counts = {}
 active_workers = 0 
 data_lock = threading.Lock()
 pbar = None 
+
+# --- GOOGLE SUGGESTIONS ENGINE ---
+def get_google_suggestions(query):
+    """Taps into live Google Search trends to find new indexing paths."""
+    try:
+        # Using the chrome client returns a clean JSON list of suggestions
+        url = f"http://suggestqueries.google.com/complete/search?client=chrome&q={query}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0'}
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            suggestions = data[1] # The list of suggestion strings
+            return [s for s in suggestions if len(s) > 3]
+        return []
+    except Exception as e:
+        tqdm.write(f"⚠️ Google Suggest API failed: {e}")
+        return []
 
 # --- AI TOPIC GENERATOR ---
 def generate_ai_topics(existing_topics, recent_finds):
@@ -183,14 +236,6 @@ def crawler_worker():
         clean_url = url.lower().strip().rstrip('/')
         parsed_current = urlparse(clean_url)
         domain = parsed_current.netloc
-        
-        # --- 1. CLIMB UP FIX: Ensure we index the Homepage too ---
-        # If we are on a subpage (e.g. site.com/blog), make sure site.com is queued
-        if parsed_current.path not in ["", "/"]:
-            root_url = f"{parsed_current.scheme}://{domain}"
-            with data_lock:
-                if root_url not in visited and domain_counts.get(domain, 0) < DOMAIN_LIMIT:
-                    url_queue.put(root_url)
 
         with data_lock:
             if clean_url in visited or not is_high_quality(clean_url):
@@ -199,60 +244,78 @@ def crawler_worker():
                 continue
             visited.add(clean_url)
 
+        # --- 1. CLIMB UP FIX: Ensure we index the Homepage too ---
+        if parsed_current.path not in ["", "/"]:
+            root_url = f"{parsed_current.scheme}://{domain}"
+            with data_lock:
+                if root_url not in visited and domain_counts.get(domain, 0) < DOMAIN_LIMIT:
+                    url_queue.put(root_url)
+
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0'}
             resp = session.get(url, headers=headers, timeout=12, verify=False)
-            
+
             if resp.status_code == 200:
+                # --- IMAGE INDEXING: Max 3 per site, requiring Alt Text ---
+                try:
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    for img in soup.find_all('img', alt=True):
+                        alt_text = img.get('alt', '').strip()
+                        src = img.get('src', '')
+                        # Only index if alt text is meaningful (avoid icons/spacers)
+                        if len(alt_text) > 5 and src:
+                            img_url = urljoin(url, src).split('?')[0].rstrip('/')
+                            if any(img_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                                if not any(bad in img_url for bad in BLACKLIST):
+                                    with data_lock:
+                                        if domain_image_counts.get(domain, 0) < 3 and img_url not in visited:
+                                            if index_to_pinecone(img_url, alt_text, domain):
+                                                visited.add(img_url)
+                                                domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
+                                                tqdm.write(f"🖼️ [{t_name}] IMAGE INDEXED: {img_url}")
+                except Exception: pass
+
                 text = trafilatura.extract(resp.text) or ""
-                
+
                 # --- 2. MAIN DOMAIN FIX: Lower thresholds & Metadata fallback ---
                 is_root = parsed_current.path in ["", "/"]
-                
-                # If homepage text is thin (common on landing pages), try to salvage metadata
                 if is_root and len(text) < 300:
                     meta_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', resp.text, re.I)
                     desc = meta_match.group(1) if meta_match else ""
                     text = f"{desc}\n{text}".strip()
-                
+
                 # Lower barrier for Root Domains (100 chars) vs Articles (400 chars)
-                if len(text) > (100 if is_root else 400): 
+                if len(text) > (100 if is_root else 400):
                     if index_to_pinecone(url, text, domain):
                         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         tqdm.write(f"✅ [{now}] [{t_name}] INDEXED: {url}")
-                        
+
                         with data_lock:
                             runtime_indexed.append(clean_url)
                             domain_counts[domain] = domain_counts.get(domain, 0) + 1
                             pbar.update(1)
 
                 # --- ROBUST DEEP-CRAWL ENGINE ---
-                # Find all links on the page
                 raw_links = re.findall(r'href=["\'](https?://[^\s"\']+|/[^\s"\']+)["\']', resp.text)
-                
+
                 new_sub_links = 0
                 for l in raw_links:
-                    # Resolve relative links (e.g., "/about" -> "https://site.com/about")
                     full_link = urljoin(url, l).split('#')[0].rstrip('/')
                     l_parsed = urlparse(full_link)
                     l_domain = l_parsed.netloc
 
                     with data_lock:
-                        # Check if it's the SAME domain for deep crawling, OR a new domain for discovery
                         if l_domain and full_link not in visited:
-                            # If it's the same domain, we are more aggressive
                             if l_domain == domain:
                                 if domain_counts.get(l_domain, 0) < DOMAIN_LIMIT:
                                     url_queue.put(full_link)
                                     new_sub_links += 1
                             else:
-                                # If it's a new domain, we add it as a new seed
                                 if domain_counts.get(l_domain, 0) < 5: # Limit initial discovery
                                     url_queue.put(full_link)
-                
+
                 if new_sub_links > 0:
                     tqdm.write(f"📂 [{t_name}] Deep-Dive: Found {new_sub_links} secondary pages on {domain}")
-
         except Exception:
             pass
         finally:
@@ -269,7 +332,8 @@ def run_komu_autonomous():
                     try: visited.add(line.split("] ")[1].strip().lower())
                     except: pass
 
-    current_topics = SEARCH_TOPICS.copy()
+    # Start with a mix of static topics and purely random autonomous seeds
+    current_topics = SEARCH_TOPICS.copy() + get_autonomous_seeds(10)
     seeds = get_seeds_robust(current_topics)
     for url in seeds: url_queue.put(url)
 
@@ -283,13 +347,28 @@ def run_komu_autonomous():
         while True:
             time.sleep(15)
             
-            # AI Evolution
+            # --- EVOLUTION ENGINE: AI + GOOGLE + DICTIONARY ---
             if url_queue.qsize() < 15:
-                recent_samples = [urlparse(u).netloc for u in list(visited)[-10:]]
-                new_topics = generate_ai_topics(current_topics[-5:], recent_samples)
-                current_topics.extend(new_topics)
-                new_seeds = get_seeds_robust(new_topics)
-                for s in new_seeds: url_queue.put(s)
+                recent_domains = [urlparse(u).netloc for u in list(visited)[-5:]]
+                
+                # 1. Stay Relevant: Get Google Suggestions for a successful recent topic
+                base_topic = random.choice(current_topics[-15:])
+                trending_topics = get_google_suggestions(base_topic)
+                
+                # 2. Stay Smart: Augment with AI for hyper-specific 2026 niches
+                ai_topics = generate_ai_topics(current_topics[-3:], recent_domains)
+                
+                # 3. Stay Random: Inject 2 purely random dictionary-based trending topics
+                random_injects = get_autonomous_seeds(2)
+                
+                combined_new = list(set(trending_topics + ai_topics + random_injects))
+                
+                if combined_new:
+                    tqdm.write(f"🌟 Evolution: Found {len(combined_new)} new paths (Google + AI + Dictionary)")
+                    current_topics.extend(combined_new)
+                    new_seeds = get_seeds_robust(combined_new[:8])
+                    for s in new_seeds: url_queue.put(s)
+                
                 if len(current_topics) > 100: current_topics = current_topics[-50:]
 
             # Save progress

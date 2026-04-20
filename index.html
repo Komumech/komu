@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Komu Scout</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="is-home">
+    <div class="home-background"></div>
+
+    <header class="header home-header">
+        <div class="header-left">
+            <div class="logo" id="home-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right: 8px;">
+                    <rect width="11" height="11" fill="#F25022"/>
+                    <rect x="13" width="11" height="11" fill="#7FBA00"/>
+                    <rect y="13" width="11" height="11" fill="#00A4EF"/>
+                    <rect x="13" y="13" width="11" height="11" fill="#FFB900"/>
+                </svg>
+                Komu Scout
+            </div>
+            <nav class="top-nav-links">
+                <a href="#">Copilot</a>
+                <a href="#">Images</a>
+                <a href="#">Videos</a>
+                <a href="#">Maps</a>
+                <a href="#">News</a>
+                <a href="#">...</a>
+            </nav>
+        </div>
+        <div class="header-center">
+            <div class="search-box-container home-search">
+                <div class="search-icon"></div>
+                <input type="text" id="search-input" placeholder="Search the web, build clean code..." autocomplete="off">
+                <button id="clear-btn" class="hidden">✕</button>
+                
+                <div class="search-actions">
+                    <div class="voice-icon"></div>
+                    <div class="lens-icon"></div>
+                    <div class="ai-copilot-btn"></div>
+                </div>
+
+                <!-- "Before you search" Suggestion Overlay -->
+                <div id="search-suggestions" class="search-suggestions hidden">
+                    <div class="suggestions-left">
+                        <div class="suggestion-item"><span>🔍</span> wikipedia <b>search</b></div>
+                        <div class="suggestion-item"><span>🔍</span> <b>new</b> wikipedia</div>
+                        <div class="suggestion-item"><span>🔍</span> wikipedia <b>history</b></div>
+                        <div class="suggestion-item"><span>🔍</span> wikipedia <b>app</b></div>
+                        <div class="suggestion-item"><span>🔍</span> <b>imdb</b></div>
+                    </div>
+                    <div class="suggestions-right">
+                        <div class="suggestion-section">
+                            <div class="section-label">People also ask</div>
+                            <div class="chip-group">
+                                <div class="ask-chip">What is the Wikipedia used for?</div>
+                                <div class="ask-chip">Is there a wiki app?</div>
+                            </div>
+                        </div>
+                        <div class="suggestion-section">
+                            <div class="section-label">People also search for</div>
+                            <div class="search-for-grid">
+                                <div class="search-for-item"><div class="sf-icon wiki"></div><span>Wiki</span></div>
+                                <div class="search-for-item"><div class="sf-icon news"></div><span>Wikinews</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="user-controls">
+                <span class="user-name">Komu</span>
+                <div class="profile-btn">K</div>
+                <div class="rewards-counter">1152 <span class="reward-icon">🏆</span></div>
+                <div class="hamburger-menu">≡</div>
+            </div>
+        </div>
+    </header>
+
+    <main class="home-main">
+        <div class="quick-actions">
+            <button class="action-pill">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zm-5.04-6.71l-2.75 3.54-1.96-2.36L6.5 17h11l-3.54-4.71z"/></svg>
+                Image creator
+            </button>
+            <button class="action-pill">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-2zM8 14H6v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2z"/></svg>
+                Video creator
+            </button>
+        </div>
+    </main>
+
+    <nav class="tabs-container">
+        <div class="tabs-wrapper">
+            <div class="tabs">
+                <button class="tab active" data-tab="all">All</button>
+                <button class="tab" data-tab="images">Images</button>
+                <button class="tab" data-tab="news">News</button>
+                <button class="tab" data-tab="videos">Videos</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <!-- AI Overview Section -->
+        <section id="ai-overview" class="ai-overview">
+            <div class="ai-header">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20 10.5V6.5C20 5.39543 19.1046 4.5 18 4.5H6C4.89543 4.5 4 5.39543 4 6.5V17.5C4 18.6046 4.89543 19.5 6 19.5H14.5" stroke="url(#paint0_linear)" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M16 16.5L18.5 19L22 13" stroke="url(#paint1_linear)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <defs>
+                        <linearGradient id="paint0_linear" x1="4" y1="4.5" x2="20" y2="19.5" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#4285F4"/>
+                            <stop offset="1" stop-color="#D96570"/>
+                        </linearGradient>
+                        <linearGradient id="paint1_linear" x1="16" y1="16" x2="22" y2="19" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#34A853"/>
+                            <stop offset="1" stop-color="#34A853"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                AI Overview
+            </div>
+            <div class="ai-body" id="ai-content"></div>
+            <div class="ai-sources" id="ai-sources"></div>
+            <button id="ai-show-more" class="hidden">Show more</button>
+        </section>
+
+        <!-- Web Results Section -->
+        <div id="results-list" class="results-list">
+        </div>
+
+        <!-- Image Results Section -->
+        <div id="images-list" class="image-grid hidden">
+        </div>
+    </main>
+
+    <div class="bottom-widgets">
+        <button class="widget-pill"><span class="pin-icon">📍</span> Info</button>
+        <button class="widget-icon">⟨</button>
+        <button class="widget-icon">⟩</button>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
