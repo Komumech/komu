@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -7,10 +6,14 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-
-import { pipeline } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
 
 dotenv.config();
+
+// Configure Xenova for Serverless (Vercel)
+// We must use /tmp as it is the only writable directory
+env.allowLocalModels = false;
+env.cacheDir = '/tmp';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,14 +22,15 @@ const __dirname = path.dirname(__filename);
 let embedder: any = null;
 const getEmbedder = async () => {
   if (!embedder) {
+    // WARNING: This model is 400MB+. 
+    // Vercel Serverless Functions have a 10s-60s timeout and memory limits.
+    // If this fails, consider using an external embedding API.
     embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
   }
   return embedder;
 };
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
 
   app.use(express.json());
   app.use(cors());
@@ -293,24 +297,12 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // --- VITE MIDDLEWARE ---
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+// Remove Vite middleware and the manual app.listen call.
+// Vercel handles static routing via vercel.json and runs the app instance.
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  const PORT = 3000;
+  app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 }
 
-startServer().catch(console.error);
+// CRITICAL: Export for Vercel
+export default app;
