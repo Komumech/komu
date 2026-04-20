@@ -15,6 +15,9 @@ View your app in AI Studio: https://ai.studio/apps/76ad9fff-559b-4f9b-9a43-2b13e
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Create a `.env` file in the root directory and add the following keys:
+   - `GEMINI_API_KEY`: Your Google Gemini API key
+   - `PINECONE_KEY`: Your Pinecone API key
+   - `PINECONE_INDEX`: Your Pinecone index name (defaults to `plex-index` if not set)
 3. Run the app:
    `npm run dev`

@@ -11,7 +11,8 @@ import { GoogleGenAI } from "@google/genai";
 import { SearchResult, AIOverview } from './types';
 
 // Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -215,6 +216,13 @@ export default function App() {
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[]) => {
     setAiLoading(true);
     setIsOverviewExpanded(false);
+
+    if (!ai) {
+      console.warn("AI Overview skipped: GEMINI_API_KEY is not configured.");
+      setAiLoading(false);
+      return;
+    }
+
     try {
       const context = contextResults.slice(0, 5).map(r => r.snippet).join("\n");
       const prompt = `Query: "${queryText}"\nContext:\n${context}\nProvide a comprehensive, high-quality, professional overview of the search topic. Use rich Markdown formatting:
@@ -239,6 +247,8 @@ export default function App() {
   };
 
   const generateFAQ = async (queryText: string, contextResults: SearchResult[]) => {
+    if (!ai) return;
+
     try {
       const context = contextResults.slice(0, 5).map(r => r.snippet).join("\n");
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 FAQs as JSON: [{"question": "...", "answer": "..."}]`;
