@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -17,6 +16,17 @@ const __dirname = path.dirname(__filename);
 // Initialize Gemini (using stable SDK)
 const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim());
 const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// Local Embedding Helper (Xenova/Transformers)
+let embedder: any = null;
+async function getEmbedder() {
+  if (!embedder) {
+    const { pipeline } = await import('@xenova/transformers');
+    // Using all-mpnet-base-v2 to match the 768-dim index used in your Python crawler
+    embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+  }
+  return embedder;
+}
 
 // Local Intent Detection Helper (Simplified for Vercel/Efficiency)
 async function detectLocalIntent(query: string) {
@@ -103,6 +113,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.set('trust proxy', 1); // Required for secure cookies on Vercel
   app.use(express.json());
   app.use(cors());
   
@@ -584,7 +595,8 @@ If the entity is not real or well-known, return null.`;
 
   // --- VITE MIDDLEWARE ---
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    const { createServer } = await import('vite');
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
