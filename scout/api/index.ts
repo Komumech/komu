@@ -161,11 +161,11 @@ function prettifyTitle(title: string, url: string) {
   return title;
 }
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-  app.use(express.json());
+app.use(express.json());
+  app.set('trust proxy', 1); // Required for secure cookies behind proxies
   app.use(cors());
   
   // SECURE COOKIES FOR IFRAME
@@ -199,7 +199,11 @@ app.get('/api/suggestions', async (req, res) => {
   const { q } = req.query;
   if (!q) return res.json([]);
   try {
-    const response = await axios.get(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q as string)}`);
+      const response = await axios.get(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q as string)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0'
+        }
+      });
     res.json(response.data[1] || []);
   } catch (error) {
     res.json([]);
@@ -367,7 +371,7 @@ app.post('/api/search', async (req, res) => {
         includeMetadata: true,
         namespace
       }),
-      index.query({
+        index.query({
         vector: Array(vector.length).fill(0),
         filter: {
           ...filter,
@@ -386,7 +390,7 @@ app.post('/api/search', async (req, res) => {
         includeMetadata: true,
         namespace
       }).catch(() => ({ matches: [] }))
-    ]);
+      ]).catch(err => { console.error("Pinecone query error:", err); return [ { matches: [] }, { matches: [] } ] });
     vectorResults = vRes;
     keywordResults = kRes;
   }
@@ -404,7 +408,14 @@ app.post('/api/search', async (req, res) => {
     const allResults = uniqueMatches.map(match => {
       const meta = match.metadata as any;
       const url = meta.url || '';
-      const dom = url ? new URL(url).hostname : 'unknown';
+        let dom = 'unknown';
+        try {
+          if (url && url.startsWith('http')) {
+            dom = new URL(url).hostname;
+          }
+        } catch (e) {
+          console.warn("Invalid URL in metadata:", url);
+        }
 
       // Filter out non-English wikipedia to reduce noise
       if (dom.includes('.wikipedia.org') && !dom.startsWith('en.wikipedia.org')) {
@@ -699,12 +710,11 @@ Generate a high-quality Knowledge Panel JSON: {"title": "...", "subtitle": "..."
 
 // --- VITE MIDDLEWARE ---
 if (process.env.NODE_ENV !== 'production') {
-    const { createServer } = await import('vite');
-    const vite = await createServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
+  // Dynamically loading Vite to keep production startup light
+  import('vite').then(async ({ createServer }) => {
+    const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
+  });
 } else {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
