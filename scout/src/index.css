@@ -1,6 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 @import "tailwindcss";
-@plugin "@tailwindcss/typography";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -16,11 +15,7 @@
 
 @layer utilities {
   .glass {
-    @apply backdrop-blur-xl bg-white/60 border border-white/30;
-  }
-  
-  .glass-white {
-    @apply backdrop-blur-2xl bg-white/40 border border-white/50 shadow-2xl;
+    @apply backdrop-blur-md bg-white/70 border border-white/20;
   }
   
   .glass-dark {
@@ -35,78 +30,4 @@
 
 .ai-gradient-bg {
   @apply bg-linear-to-br from-blue-50/50 via-purple-50/50 to-rose-50/50;
-}
-
-/* Apps Launcher Styles */
-.apps-wrapper {
-  position: relative;
-  z-index: 100;
-}
-
-.apps-btn {
-  background: none;
-  border: none;
-  padding: 10px;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.apps-btn:hover {
-  @apply bg-white/10;
-}
-
-.apps-btn svg {
-  width: 24px;
-  height: 24px;
-  fill: #5f6368;
-}
-
-.apps-menu {
-  position: absolute;
-  top: 50px;
-  right: 0;
-  width: 340px;
-  @apply backdrop-blur-3xl bg-white/90 border border-white/40;
-  border-radius: 32px;
-  box-shadow: 0 20px 80px rgba(0,0,0,0.15);
-  padding: 24px;
-  z-index: 2000;
-}
-
-.apps-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.app-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px 8px;
-  text-decoration: none;
-  border-radius: 16px;
-  transition: all 0.2s ease;
-}
-
-.app-item:hover {
-  @apply bg-slate-50;
-}
-
-.app-item img {
-  width: 44px;
-  height: 44px;
-  margin-bottom: 8px;
-  object-fit: contain;
-}
-
-.app-item span {
-  font-size: 13px;
-  color: #3c4043;
-  text-align: center;
-  font-weight: 500;
 }

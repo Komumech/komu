@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
@@ -493,51 +494,14 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
         <div className="absolute inset-0 bg-linear-to-b from-black/20 via-transparent to-black/80" />
       </div>
 
-      <header className="absolute top-0 left-0 right-0 p-4 md:p-6 flex items-center justify-between z-50">
-        <div className="flex items-center gap-4 text-white font-display font-bold text-xl">
-           <img src="https://komuhost.vercel.app/logo3.png" className="w-6 h-6 object-contain" />
-           Scout
+      <header className="absolute top-0 left-0 right-0 p-6 md:p-10 flex items-center justify-between z-50">
+        <div className="flex items-center gap-4">
+           <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-white drop-shadow-lg">Scout</span>
         </div>
         <div className="flex items-center gap-4">
-          <div className="relative">
-            {user ? (
-               <div className="relative">
-                 <img 
-                   src={user.picture} 
-                   className="w-10 h-10 rounded-full ring-2 ring-white/20 cursor-pointer hover:ring-white/40 transition-all" 
-                   onClick={() => setIsSignoutOpen(!isSignoutOpen)}
-                 />
-                 <AnimatePresence>
-                   {isSignoutOpen && (
-                     <motion.div 
-                       initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                       animate={{ opacity: 1, scale: 1, y: 0 }}
-                       exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                       className="absolute top-12 right-0 w-64 bg-white rounded-2xl shadow-2xl p-4 z-50 text-slate-800"
-                     >
-                       <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-100">
-                         <img src={user.picture} className="w-10 h-10 rounded-full" />
-                         <div className="min-w-0">
-                           <p className="font-bold text-sm truncate">{user.name}</p>
-                           <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                         </div>
-                       </div>
-                       <button 
-                         onClick={onLogout}
-                         className="w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium text-sm"
-                       >
-                         <LogOut size={16} /> Sign out
-                       </button>
-                     </motion.div>
-                   )}
-                 </AnimatePresence>
-               </div>
-            ) : (
-              <button onClick={onLogin} className="bg-white/10 hover:bg-white/20 px-5 py-2 rounded-full text-white text-sm font-bold border border-white/20 transition-all">Sign in</button>
-            )}
-          </div>
+          <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} isHome={true} />
           <div ref={appsRef}>
-            <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
+            <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} isWhite={true} />
           </div>
         </div>
       </header>
@@ -549,7 +513,14 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           transition={{ delay: 0.2 }}
           className="text-3xl md:text-4xl font-display font-black text-white drop-shadow-xl tracking-tight"
         >
-          Ask Anything.
+          <motion.h1 
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="text-4xl md:text-6xl font-display font-black text-white drop-shadow-2xl tracking-tighter"
+          >
+            Ask Anything.
+          </motion.h1>
         </motion.h1>
 
         <motion.div 
@@ -575,7 +546,13 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
             <div className="flex items-center gap-3">
               {query && <X size={18} className="text-slate-400 cursor-pointer" onClick={() => setQuery('')} />}
               <div className="w-px h-5 bg-slate-200 hidden sm:block" />
-              <button onClick={onMicClick} type="button" className="p-2 hover:bg-slate-100 rounded-full text-blue-600"><Mic size={22} /></button>
+              <button 
+                onClick={onMicClick} 
+                type="button" 
+                className="p-2.5 bg-slate-50 hover:bg-white hover:shadow-md rounded-full text-purple-600 transition-all active:scale-95"
+              >
+                <Mic size={20} />
+              </button>
             </div>
           </form>
           
@@ -645,19 +622,36 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col h-screen bg-white">
-      <header className="bg-white border-b border-slate-100 sticky top-0 z-50">
-        <div className="flex items-center gap-3 md:gap-10 p-3 md:p-5 md:px-12 max-w-[1700px] mx-auto">
-          <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0">
-             <img src="https://komuhost.vercel.app/logo3.png" className="w-5 h-5 object-contain" />
-             <span className="font-display font-bold text-xl hidden sm:inline text-slate-900">Scout</span>
+      <header className="bg-white border-b border-slate-50 sticky top-0 z-50">
+        <div className="flex flex-col sm:flex-row items-center gap-4 md:gap-12 py-6 sm:py-8 px-4 md:px-12 max-w-[1700px] mx-auto transition-all">
+          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-4">
+            <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0">
+               <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
+            </div>
+            
+            <div className="flex sm:hidden items-center gap-4">
+              <div ref={appsRef}>
+                <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
+              </div>
+              <div className="flex-shrink-0">
+                <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} />
+              </div>
+            </div>
           </div>
-          <div className="flex-1 max-w-3xl relative" ref={searchContainerRef}>
-            <form onSubmit={onSearch} className={`flex items-center gap-2 px-6 h-11 bg-slate-50 border border-slate-200 focus-within:bg-white focus-within:shadow-lg focus-within:border-blue-200 transition-all ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl border-b-transparent' : 'rounded-full'}`}>
+          
+          <div className="flex-1 w-full max-w-2xl relative" ref={searchContainerRef}>
+            <form onSubmit={onSearch} className={`flex items-center gap-2 px-6 h-12 soft-ui transition-all ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`}>
               <input value={query} onFocus={() => setShowSuggestions(true)} onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} className="flex-1 bg-transparent border-none outline-none text-slate-800 font-medium text-sm md:text-base min-w-0" />
-              <div className="flex items-center gap-2">
-                <Mic size={18} className="text-slate-400 hover:text-blue-500 cursor-pointer" onClick={onMicClick} />
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button" 
+                  onClick={onMicClick}
+                  className="p-2 hover:bg-white hover:shadow-sm rounded-full text-purple-600 transition-all active:scale-95"
+                >
+                  <Mic size={18} />
+                </button>
                 <div className="w-px h-4 bg-slate-200 mx-1" />
-                <Search size={18} className="text-blue-500 cursor-pointer" onClick={() => onSearch()} />
+                <Search size={18} className="text-purple-600 cursor-pointer hover:scale-110 transition-transform" onClick={() => onSearch()} />
               </div>
             </form>
             <AnimatePresence>
@@ -668,7 +662,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   exit={{ height: 0, opacity: 0 }}
                   className="absolute top-11 left-0 right-0 border border-slate-200 border-t-0 rounded-b-2xl shadow-xl z-[2100] overflow-hidden glass"
                 >
-                  {suggestions.map((s: string, i: number) => (
+                  {suggestions.map && suggestions.map((s: string, i: number) => (
                     <button 
                       key={i} 
                       onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }}
@@ -682,50 +676,16 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               )}
             </AnimatePresence>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="hidden sm:flex items-center gap-4">
             <div ref={appsRef}>
               <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
             </div>
             <div className="flex-shrink-0">
-              {user ? (
-                <div className="relative">
-                  <img 
-                    src={user.picture} 
-                    className="w-9 h-9 rounded-full border border-slate-100 cursor-pointer shadow-sm hover:ring-2 hover:ring-blue-100 transition-all" 
-                    onClick={() => setIsSignoutOpen(!isSignoutOpen)}
-                  />
-                  <AnimatePresence>
-                    {isSignoutOpen && (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                        className="absolute top-11 right-0 w-64 bg-white rounded-2xl shadow-2xl p-4 z-50 text-slate-800 border border-slate-100"
-                      >
-                        <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-100">
-                          <img src={user.picture} className="w-10 h-10 rounded-full" />
-                          <div className="min-w-0">
-                            <p className="font-bold text-sm truncate">{user.name}</p>
-                            <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={onLogout}
-                          className="w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium text-sm"
-                        >
-                          <LogOut size={16} /> Sign out
-                        </button>
-                      </motion.div>
-                    )}
-                   </AnimatePresence>
-                </div>
-              ) : (
-                <button onClick={onLogin} className="text-sm font-bold text-blue-600">Login</button>
-              )}
+              <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} />
             </div>
           </div>
         </div>
-        <div className="px-3 md:px-[170px] max-w-[1700px] border-t border-slate-50 overflow-x-auto scrollbar-hide">
+        <div className="px-4 md:px-8 lg:px-24 xl:px-[170px] max-w-[1700px] border-t border-slate-50 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-8 pt-4">
             {['All', 'Images', 'News'].map(tab => (
               <button key={tab} className={`pb-3 text-sm font-bold border-b-2 transition-all ${activeTab === tab.toLowerCase() ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-transparent hover:text-slate-700'}`} onClick={() => setActiveTab(tab.toLowerCase())}>{tab}</button>
@@ -735,7 +695,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className={`flex flex-col lg:flex-row gap-12 p-4 md:p-8 lg:px-[170px] max-w-[1700px]`}>
+        <div className={`flex flex-col lg:flex-row gap-12 p-4 md:p-8 lg:px-24 xl:px-[170px] max-w-[1700px]`}>
           {activeTab === 'all' && knowledgePanel && (
             <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[400px]">
                <motion.div 
@@ -759,7 +719,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                      </div>
                      
                      <div className="space-y-4">
-                       {knowledgePanel.details?.map((detail: any, i: number) => (
+                       {knowledgePanel.details && knowledgePanel.details.map && knowledgePanel.details.map((detail: any, i: number) => (
                          <div key={i} className="flex gap-4">
                            <span className="font-bold text-slate-400 min-w-[80px]">{detail.label}:</span>
                            <span className="text-slate-900">{detail.value}</span>
@@ -833,7 +793,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
                     {/* Source Attribution Cards (Imitating Google Search style cards) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      {aiOverview.sources?.slice(0, 3)?.map((source: any, i: number) => (
+                      {aiOverview.sources?.map && aiOverview.sources.slice(0, 3).map((source: any, i: number) => (
                         <a 
                           key={i} 
                           href={source.url} 
@@ -848,7 +808,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                           <h4 className="text-[14px] font-bold text-slate-800 line-clamp-2 leading-snug group-hover:text-blue-700 transition-colors">{source.title}</h4>
                         </a>
                       ))}
-                      {(aiOverview.sources?.length || 0) > 3 && (
+                      {aiOverview.sources && aiOverview.sources.length > 3 && (
                         <button className="flex flex-col items-center justify-center gap-2 p-4 bg-slate-50/80 rounded-2xl border border-transparent hover:border-slate-200 hover:bg-slate-100/80 transition-all font-bold text-[13px] text-blue-600">
                            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-blue-600 shadow-sm border border-slate-100">
                              <ChevronRight size={16} />
@@ -1017,6 +977,47 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   );
 }
 
+function QuickSummary({ text }: { text: string }) {
+  const [summary, setSummary] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const resp = await axios.post('/api/ai/summarize', { text, max_tokens: 45 });
+        if (isMounted) setSummary(resp.data.summary);
+      } catch {
+        if (isMounted) setSummary(text); // Fallback to snippet
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [text]);
+
+  return (
+    <div className="mt-4 p-5 bg-[#f8fbff] rounded-2xl border border-blue-50/50 hover:bg-blue-50 transition-colors max-w-sm shrink-0 shadow-xs min-h-[100px] flex flex-col">
+      <div className="flex items-center justify-between mb-3 leading-none">
+        <div className="flex items-center gap-2 text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em]">
+          Quick Summary
+        </div>
+        {loading && <div className="w-4 h-4 rounded-full border-2 border-blue-400/20 border-t-blue-500 animate-spin" />}
+      </div>
+      {loading ? (
+        <div className="space-y-2">
+          <div className="h-4 bg-blue-100/50 rounded w-full animate-pulse" />
+          <div className="h-4 bg-blue-100/50 rounded w-5/6 animate-pulse" />
+        </div>
+      ) : (
+        <p className="text-[13px] text-slate-700 leading-relaxed line-clamp-3 italic">
+          {summary || text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ImageStrip({ results, onMore }: { results: SearchResult[], onMore: () => void }) {
   const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
   if (imagesWithMeta.length < 3) return null;
@@ -1055,7 +1056,7 @@ function ImageStrip({ results, onMore }: { results: SearchResult[], onMore: () =
   );
 }
 
-function AppsLauncher({ isOpen, setIsOpen }: { isOpen: boolean, setIsOpen: (v: boolean) => void }) {
+function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOpen: (v: boolean) => void, isWhite?: boolean }) {
   const apps = [
     { name: 'Search', url: 'https://komu-search.streamlit.app/', icon: 'https://komuhost.vercel.app/favicon.ico' },
     { name: 'Dashboard', url: 'https://komuthemedashboard.vercel.app/', icon: 'https://komuhost.vercel.app/favicon.ico' },
@@ -1066,7 +1067,7 @@ function AppsLauncher({ isOpen, setIsOpen }: { isOpen: boolean, setIsOpen: (v: b
 
   return (
     <div className="apps-wrapper">
-      <button className="apps-btn" onClick={() => setIsOpen(!isOpen)} title="Komu Apps">
+      <button className={`apps-btn ${isWhite ? 'text-white hover:bg-white/10' : 'text-slate-600 hover:bg-slate-100'}`} onClick={() => setIsOpen(!isOpen)} title="Komu Apps">
         <LayoutGrid size={24} />
       </button>
 
@@ -1092,6 +1093,57 @@ function AppsLauncher({ isOpen, setIsOpen }: { isOpen: boolean, setIsOpen: (v: b
     </div>
   );
 }
+
+function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen, isHome }: any) {
+  return (
+    <div className="relative">
+      {user ? (
+        <div className="relative">
+          <img 
+            src={user.picture} 
+            className={`w-9 h-9 md:w-10 md:h-10 rounded-full cursor-pointer transition-all ${isHome ? 'ring-2 ring-white/20 hover:ring-white/40' : 'border border-slate-100 shadow-sm hover:ring-2 hover:ring-blue-100 font-bold'}`} 
+            onClick={() => setIsSignoutOpen(!isSignoutOpen)}
+          />
+          <AnimatePresence>
+            {isSignoutOpen && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className={`absolute top-12 right-0 w-64 bg-white rounded-2xl shadow-2xl p-4 z-[100] text-slate-800 border ${isHome ? 'border-transparent' : 'border-slate-100'}`}
+              >
+                <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-100">
+                  <img src={user.picture} className="w-10 h-10 rounded-full" />
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm truncate">{user.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{user.email}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={onLogout}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium text-sm"
+                >
+                  <LogOut size={16} /> Sign out
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      ) : (
+        <button 
+          onClick={onLogin} 
+          className={isHome 
+            ? "bg-white/10 hover:bg-white/20 px-5 py-2 rounded-full text-white text-sm font-bold border border-white/20 transition-all whitespace-nowrap" 
+            : "text-sm md:text-base font-bold text-blue-600 hover:underline px-2 whitespace-nowrap"
+          }
+        >
+          Sign in
+        </button>
+      )}
+    </div>
+  );
+}
+
 function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   return (
     <div className="py-6 border-y border-slate-100 animate-in fade-in duration-500">
@@ -1158,7 +1210,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
   const displaySiteName = siteName.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 
   return (
-    <article className="group py-5 transition-all border-b border-slate-100 last:border-0 pl-0">
+    <article className="group py-5 transition-all border-b border-slate-100 last:border-0 pl-0 overflow-hidden">
       {isPreviouslyClicked && (
         <div className="flex items-center gap-2 text-xs font-bold text-blue-600 mb-3 px-1">
           <Sparkles size={12} strokeWidth={3} />
@@ -1166,8 +1218,8 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
         </div>
       )}
       <div className="flex flex-col sm:flex-row gap-6 items-start">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-2">
+        <div className="flex-1 min-w-0 w-full">
+          <div className="flex items-center gap-3 mb-2 overflow-hidden">
             <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border border-slate-100 bg-slate-50 flex items-center justify-center p-1.5 shadow-sm">
               <img 
                 src={res.sourceIcon} 
@@ -1176,10 +1228,10 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 onError={(e:any) => { e.target.src=`https://www.google.com/s2/favicons?domain=${res.displayUrl}&sz=64`; }} 
               />
             </div>
-            <div className="flex flex-col">
-              <span className="text-[13px] text-slate-800 font-medium leading-tight">{displaySiteName}</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-[13px] text-slate-800 font-medium leading-tight truncate">{displaySiteName}</span>
               <div className="flex items-center gap-1 text-[12px] text-slate-500 leading-tight max-w-full overflow-hidden">
-                <span className="truncate break-all">
+                <span className="truncate">
                   {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
                 </span>
                 <ChevronRight size={12} className="shrink-0" />
@@ -1201,14 +1253,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
 
           {/* Site Summary for specific sources */}
           {(res.displayUrl.includes('wikipedia.org') || res.isNews || res.displayUrl.includes('medium.com') || res.displayUrl.includes('nytimes.com') || res.displayUrl.includes('bbc.com') || res.displayUrl.includes('theguardian.com')) && (
-            <div className="mt-4 p-5 bg-[#f8fbff] rounded-2xl border border-blue-50/50 hover:bg-blue-50 transition-colors max-w-sm shrink-0 shadow-xs">
-              <div className="flex items-center gap-2 mb-3 text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em] leading-none">
-                Quick Summary
-              </div>
-              <p className="text-[13px] text-slate-700 leading-relaxed line-clamp-3 italic">
-                {res.snippet}
-              </p>
-            </div>
+             <QuickSummary text={res.snippet} />
           )}
 
           {/* Inline miniature strip */}

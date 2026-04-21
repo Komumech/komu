@@ -104,6 +104,7 @@ def index_to_pinecone(url, text, domain, t_name):
                 }
             }],
             namespace=NAMESPACE
+            namespace="default"
         )
         return True
     except Exception as e:

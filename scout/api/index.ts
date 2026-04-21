@@ -1,5 +1,5 @@
 import express from 'express';
-// Removed: import { createServer as createViteServer } from 'vite';
+import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -9,36 +9,75 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+import { pipeline } from '@xenova/transformers';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Gemini (using stable SDK)
-const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim());
-const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-// Helper to extract JSON from AI text that might contain markdown blocks
-function safeJsonParse(text: string, fallback: any = []) {
-  try {
-    if (!text) return fallback;
-    // Remove markdown code blocks if present
-    const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(clean);
-  } catch (e) {
-    return fallback;
-  }
-}
-
-// Local Embedding Helper (Xenova/Transformers)
+// Initialize Embedding Model locally (matches Indexer logic)
 let embedder: any = null;
+let summarizer: any = null;
+
 async function getEmbedder() {
   if (!embedder) {
-    const { pipeline } = await import('@xenova/transformers');
-    // Using all-mpnet-base-v2 to match the 768-dim index used in your Python crawler
-    embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    try {
+      console.log("Loading local embedding model: all-mpnet-base-v2...");
+      embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+      console.log("✅ Local embedding model loaded.");
+    } catch (err) {
+      console.error("Failed to load local embedding model:", err);
+    }
   }
   return embedder;
+}
+
+async function getSummarizer() {
+  if (!summarizer) {
+    try {
+      console.log("Loading local summarization model: bart-large-cnn...");
+      // Using a larger model for significantly better synthesis and coherence
+      summarizer = await pipeline('summarization', 'Xenova/bart-large-cnn');
+      console.log("✅ Local summarizer loaded.");
+    } catch (err) {
+      console.error("Failed to load local summarizer:", err);
+    }
+  }
+  return summarizer;
+}
+
+// Initialize Gemini (using stable SDK)
+const rawKey = (process.env.GEMINI_API_KEY || '').trim();
+
+if (!rawKey) {
+  console.warn("⚠️ GEMINI_API_KEY is missing from environment variables.");
+} else if (rawKey.length < 20) {
+  console.warn("⚠️ GEMINI_API_KEY looks unusually short. Check your .env configuration.");
+} else {
+  console.log(`✅ Gemini initialized with key: ${rawKey.substring(0, 4)}...${rawKey.substring(rawKey.length - 4)}`);
+}
+
+const genAI = new GoogleGenerativeAI(rawKey);
+const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// Helper to get embeddings locally (Matching Indexer Logic)
+async function getEmbedding(text: string): Promise<number[] | null> {
+  if (!text) return null;
+  try {
+    const pipe = await getEmbedder();
+    if (!pipe) return null;
+
+    const output = await pipe(text, {
+      pooling: 'mean',
+      normalize: true,
+    });
+
+    return Array.from(output.data);
+  } catch (err: any) {
+    console.error("Local Embedding generation failed:", err.message);
+    return null;
+  }
 }
 
 // Local Intent Detection Helper (Simplified for Vercel/Efficiency)
@@ -122,24 +161,24 @@ function prettifyTitle(title: string, url: string) {
   return title;
 }
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
 
-app.set('trust proxy', 1); // Required for secure cookies on Vercel
-app.use(express.json());
-app.use(cors());
+  app.use(express.json());
+  app.use(cors());
   
-// SECURE COOKIES FOR IFRAME
-app.use(cookieSession({
-  name: 'session',
-  keys: [process.env.COOKIE_SECRET || 'scout-secret'],
-  maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-  secure: true,
-  sameSite: 'none',
-  httpOnly: true,
-}));
+  // SECURE COOKIES FOR IFRAME
+  app.use(cookieSession({
+    name: 'session',
+    keys: [process.env.COOKIE_SECRET || 'scout-secret'],
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    secure: true,
+    sameSite: 'none',
+    httpOnly: true,
+  }));
 
-// PINECONE INIT
+  // PINECONE INIT
 let pinecone: Pinecone | null = null;
 const getPinecone = () => {
   if (!pinecone) {
@@ -178,11 +217,11 @@ app.post('/api/search', async (req, res) => {
   const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
   const namespace = process.env.PINECONE_NAMESPACE || '';
 
-  // 0. Autocorrect (Spell check) via Gemini
+  // 0. Autocorrect (Spell check) fallback logic
   let correction = null;
   let finalQuery = query;
   try {
-    if (process.env.GEMINI_API_KEY) {
+    if (rawKey && rawKey.length > 20) {
       const prompt = `Act as a search engine spell checker. Check if "${query}" has obvious typos. 
       If it has an obvious typo, return ONLY the corrected string. 
       If it is likely correct or a brand name, return the exact same string.
@@ -197,7 +236,8 @@ app.post('/api/search', async (req, res) => {
       }
     }
   } catch (e) {
-    console.error("Autocorrect error:", e);
+    // Quietly fail for autocorrect, keep original query
+    console.log("Gemini Autocorrect skipped (Key error or model busy)");
   }
 
   // 1. Process Intent (LOCAL MODELS - NO API LIMITS)
@@ -283,13 +323,12 @@ app.post('/api/search', async (req, res) => {
     let vector = providedVector;
 
     if (!vector && query) {
-      try {
-        const pipe = await getEmbedder();
-        const output = await pipe(cleanQuery || query, { pooling: 'mean', normalize: true });
-        vector = Array.from(output.data);
-      } catch (err: any) {
-        console.error('Embedding error:', err.message);
-        return res.status(500).json({ error: 'Failed to generate search vector locally' });
+      // Try to get real embeddings first
+      vector = await getEmbedding(finalQuery);
+      
+      // Fallback to zeros if embedding fails (to allow keyword filter to still work)
+      if (!vector) {
+        vector = Array(768).fill(0);
       }
     }
 
@@ -300,24 +339,25 @@ app.post('/api/search', async (req, res) => {
     // Dynamic filter
     let filter: any = {};
     if (type === 'images') {
-      filter["$or"] = [
-        { image: { "$exists": true } },
-        { thumbnail: { "$exists": true } },
-        { ogImage: { "$exists": true } },
-        { imageUrl: { "$exists": true } }
-      ];
+      filter = { is_image: { "$eq": true } };
+    } else {
+      // Exclude direct image vectors from general site search to avoid duplicates
+      filter = { is_image: { "$ne": true } };
     }
+
     if (filterDomain) {
       const domainF = { domain: { "$in": domainVariations } };
-      filter = filter["$or"] 
-        ? { "$and": [domainF, { "$or": filter["$or"] }] }
-        : domainF;
+      filter = { "$and": [filter, domainF] };
     }
     if (newsFilter) {
-      filter = Object.keys(filter).length > 0
-        ? { "$and": [filter, newsFilter] }
-        : newsFilter;
+      filter = { "$and": [filter, newsFilter] };
     }
+
+    // Prepare keyword variations for better filtering
+    const qLower = cleanQuery.toLowerCase();
+    const qUpper = qLower.charAt(0).toUpperCase() + qLower.slice(1);
+    const qBrand = qLower.toUpperCase();
+    const variations = [...new Set([cleanQuery, qLower, qUpper, qBrand])];
 
     const [vRes, kRes] = await Promise.all([
       index.query({
@@ -332,12 +372,14 @@ app.post('/api/search', async (req, res) => {
         filter: {
           ...filter,
           "$or": [
-            { title: { "$eq": cleanQuery } },
-            { name: { "$eq": cleanQuery } },
-            { brand: { "$eq": cleanQuery } },
-            { url: { "$eq": cleanQuery } },
-            { domain: { "$eq": cleanQuery } },
-            { domain: { "$eq": filterDomain } }
+            { title: { "$in": variations } },
+            { alt: { "$in": variations } },
+            { text: { "$in": variations } },
+            { name: { "$in": variations } },
+            { brand: { "$in": variations } },
+            { url: { "$in": variations } },
+            { domain: { "$in": variations } },
+            { domain: { "$in": domainVariations || [] } }
           ]
         },
         topK: 100,
@@ -399,42 +441,63 @@ app.post('/api/search', async (req, res) => {
         const titleA = (a.title || '').toLowerCase();
         const titleB = (b.title || '').toLowerCase();
 
-        if (domainA.startsWith(q)) scoreA += 2.0;
-        if (domainB.startsWith(q)) scoreB += 2.0;
-        if (domainA.includes(q)) scoreA += 1.0;
-        if (domainB.includes(q)) scoreB += 1.0;
+        if (domainA.startsWith(q) || domainA.includes(`.${q}`)) scoreA += 4.0;
+        if (domainB.startsWith(q) || domainB.includes(`.${q}`)) scoreB += 4.0;
+        if (domainA.includes(q)) scoreA += 2.0;
+        if (domainB.includes(q)) scoreB += 2.0;
 
-        if (titleA === q) scoreA += 0.8;
-        if (titleB === q) scoreB += 0.8;
-        if (titleA.includes(q)) scoreA += 0.4;
-        if (titleB.includes(q)) scoreB += 0.4;
+        if (titleA === q || titleA.startsWith(q) || titleA.includes(q)) scoreA += 2.0;
+        if (titleB === q || titleB.startsWith(q) || titleB.includes(q)) scoreB += 2.0;
 
         keywords.forEach(kw => {
           if (titleA.includes(kw)) scoreA += 0.2;
           if (titleB.includes(kw)) scoreB += 0.2;
           if (a.snippet?.toLowerCase().includes(kw)) scoreA += 0.1;
           if (b.snippet?.toLowerCase().includes(kw)) scoreB += 0.1;
+          if (a.alt?.toLowerCase().includes(kw)) scoreA += 0.3;
+          if (b.alt?.toLowerCase().includes(kw)) scoreB += 0.3;
         });
       }
 
       // Global Authority boost
-      const authorityDomains = ['wikipedia.org', 'reuters.com', 'gov', 'edu', 'nyt.com', 'bbc.co.uk'];
-      if (authorityDomains.some(d => a.url?.includes(d))) scoreA += 0.15;
-      if (authorityDomains.some(d => b.url?.includes(d))) scoreB += 0.15;
+      const authorityDomains = ['reuters.com', 'gov', 'edu', 'nyt.com', 'bbc.co.uk'];
+      const isWiki = (a.url || a.displayUrl || '').includes('wikipedia.org');
+      const isWikiB = (b.url || b.displayUrl || '').includes('wikipedia.org');
+
+      if (authorityDomains.some(d => a.url?.includes(d))) scoreA += 0.35;
+      if (authorityDomains.some(d => b.url?.includes(d))) scoreB += 0.35;
+
+      // Wikipedia boost nearly eliminated
+      if (isWiki) scoreA += 0.01;
+      if (isWikiB) scoreB += 0.01;
+
+      // Heavy penalty for Wikipedia if it's a direct brand search for something else
+      if (q && q.length > 2) {
+        const brands = ['google', 'apple', 'amazon', 'microsoft', 'tesla', 'meta', 'spotify', 'netflix', 'disney', 'nvidia'];
+        if (brands.some(b => q.includes(b))) {
+          if (isWiki) scoreA -= 2.5;
+          if (isWikiB) scoreB -= 2.5;
+        }
+      }
 
       return scoreB - scoreA;
     });
 
-    // Pagination with Throttled Sitelinks
+    // Normalization and Diversity logic
     const finalResults: any[] = [];
     const domainCountMap = new Map();
 
     reranked.forEach(res => {
-      const dom = res.displayUrl;
-      const count = domainCountMap.get(dom) || 0;
-      if (count < 1) { // Only allow 1 main result from each domain in the primary list
+      const url = res.url || '';
+      let domainKey = res.displayUrl || 'unknown';
+      
+      // Improve diversity: Allow subdomains (books.google.com, news.google.com) to be distinct
+      // but limit repetitions of exact same sub-site to 2 entries in total list
+      const subSiteCount = domainCountMap.get(domainKey) || 0;
+      
+      if (subSiteCount < 2) { 
         finalResults.push(res);
-        domainCountMap.set(dom, count + 1);
+        domainCountMap.set(domainKey, subSiteCount + 1);
       }
     });
 
@@ -534,86 +597,114 @@ app.post('/api/logout', (req, res) => {
 // --- AI ENDPOINTS ---
 app.post('/api/ai/overview', async (req, res) => {
   const { query, context, isLinguisticHelp } = req.body;
-  try {
-    const prompt = isLinguisticHelp 
-      ? `The user is asking for English language help (grammar, spelling, usage, or synonyms).
-         Query: "${query}"
-         Provide a helpful, educational response. Explain the rules clearly. 
-         Include multiple sentence examples for clarity showing correct usage.
-         Format with Markdown:
-         - Use rich formatting (bolding, lists).
-         - If it's a grammar check, explain why it's correct/incorrect.
-         - If it's a spelling check, provide the correct spelling and similar words.`
-      : `Query: "${query}"\nContext:\n${context}\nProvide a comprehensive, high-quality, professional overview of the search topic. Use rich Markdown formatting:
-- Use bold Level 3 headers (###) for sections.
-- Use bulleted lists for key facts.
-- Use numbered lists for steps or chronological events.
-- Use Markdown tables if comparing multiple data points or entities.
-- Ensure the tone is informative and authoritative.`;
+    
+    // Always consider local first if key is missing or explicitly requested
+    const hasValidKey = rawKey && rawKey.length > 20;
 
-    const result = await aiModel.generateContent(prompt);
-    res.json({ text: result.response.text() });
-  } catch (e: any) {
-    console.error("AI Overview error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
+    if (!isLinguisticHelp) {
+      try {
+        const pipe = await getSummarizer();
+        if (pipe) {
+          const summary = await pipe(context.substring(0, 3000), {
+            max_new_tokens: 250,
+            repetition_penalty: 1.2,
+          });
+          return res.json({ text: `### AI Overview\n\n${summary[0].summary_text}` });
+        }
+      } catch (err) {
+        console.error("Local summarization failed:", err);
+      }
+    }
 
-app.post('/api/ai/faq', async (req, res) => {
-  const { query, context } = req.body;
-  try {
-    const prompt = `Query: "${query}"\nContext: ${context}\nGenerate 5-6 highly relevant FAQs as JSON: [{"question": "...", "answer": "..."}]`;
-    const result = await aiModel.generateContent(prompt);
-    const text = result.response.text();
-    res.json(safeJsonParse(text, []));
-  } catch (e: any) {
-    console.error("AI FAQ error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
+    if (hasValidKey) {
+      try {
+        const prompt = isLinguisticHelp 
+          ? `Grammar/Spelling/Usage guide for: "${query}". Respond in Markdown with examples.`
+          : `Overview of "${query}" based on: ${context}. Use Markdown tables and lists.`;
 
-app.post('/api/ai/knowledge', async (req, res) => {
-  const { entityName, entityType } = req.body;
-  try {
-    const prompt = `Entity: "${entityName}" (${entityType || 'General'})
-Generate a high-quality Knowledge Panel JSON following this exact structure:
-{
-  "title": "Clean Name",
-  "subtitle": "Informative Category",
-  "description": "Engaging 200-300 character summary",
-  "image": "https://picsum.photos/seed/${encodeURIComponent(entityName)}/800/600",
-  "details": [
-    {"label": "...", "value": "..."},
-    {"label": "...", "value": "..."}
-  ],
-  "sections": [
-    {"title": "Section Name", "content": "Brief summary text"},
-    {"title": "Section Name", "content": "Brief summary text"}
-  ]
-}
-If type is country, include Capital and Population. If person, include Born and Occupation. If company, include Founded and Headquarters.
-If the entity is famous/well-known, provide 2-3 extra sections (e.g., 'Formation', 'History', 'Impact').
-If the entity is not real or well-known, return null.`;
+        const result = await aiModel.generateContent(prompt);
+        return res.json({ text: result.response.text() });
+      } catch (e: any) {
+        console.log("Gemini Overview fallback failed");
+      }
+    }
+    
+    res.status(500).json({ error: "AI services unavailable" });
+  });
 
-    const result = await aiModel.generateContent(prompt);
-    const text = result.response.text();
-    if (!text || text.trim() === 'null') return res.json(null);
-    res.json(safeJsonParse(text, null));
-  } catch (e: any) {
-    console.error("AI Knowledge error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
+  app.post('/api/ai/summarize', async (req, res) => {
+    const { text, max_tokens = 60 } = req.body;
+    try {
+      const pipe = await getSummarizer();
+      if (!pipe) return res.status(503).json({ error: "Summarizer not ready" });
+      
+      const result = await pipe(text.substring(0, 1500), {
+        max_new_tokens: max_tokens,
+        repetition_penalty: 1.1,
+      });
+      res.json({ summary: result[0].summary_text });
+    } catch (e: any) {
+      console.error("Summarization error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/ai/faq', async (req, res) => {
+    const { query, context } = req.body;
+    
+    // FAQ can be derived from summary if Gemini fails
+    try {
+      if (rawKey && rawKey.length > 20) {
+        const prompt = `Query: "${query}"\nContext: ${context}\nGenerate 5-6 relevant FAQs as JSON: [{"question": "...", "answer": "..."}]`;
+        const result = await aiModel.generateContent(prompt);
+        const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
+        return res.json(JSON.parse(text || '[]'));
+      }
+    } catch (e) {}
+
+    // Local Fallback: Extract from text
+    res.json([
+      { "question": `What should I know about ${query}?`, "answer": `Explore the search results below to learn more about ${query} across multiple platforms and news sources.` }
+    ]);
+  });
+
+  app.post('/api/ai/knowledge', async (req, res) => {
+    const { entityName, entityType } = req.body;
+    try {
+      if (rawKey && rawKey.length > 20) {
+        const prompt = `Entity: "${entityName}" (${entityType || 'General'})
+Generate a high-quality Knowledge Panel JSON: {"title": "...", "subtitle": "...", "description": "...", "image": "...", "details": [...], "sections": [...]}`;
+
+        const result = await aiModel.generateContent(prompt);
+        const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
+        if (text === 'null') return res.json(null);
+        return res.json(JSON.parse(text));
+      }
+    } catch (e) {}
+
+    // Local Fallback
+    res.json({
+      title: entityName,
+      subtitle: entityType || "General Information",
+      description: `Exploring ${entityName}. Discover more by checking the search results and images provided below.`,
+      image: `https://picsum.photos/seed/${encodeURIComponent(entityName)}/800/600`,
+      details: [
+        { label: "Search Topic", value: entityName }
+      ],
+      sections: [
+        { title: "Quick Fact", content: `Scout has identified "${entityName}" as a relevant topic for your current search.` }
+      ]
+    });
+  });
 
 // --- VITE MIDDLEWARE ---
 if (process.env.NODE_ENV !== 'production') {
-  import('vite').then(async ({ createServer }) => {
+    const { createServer } = await import('vite');
     const vite = await createServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  });
 } else {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));

@@ -73,6 +73,31 @@ def get_autonomous_seeds(count=5):
     return final_seeds
 
 SEARCH_TOPICS = [
+    "online shopping trends and best deals in 2026",
+    "how to start a successful podcast in 2026",
+    "game stores",
+    "app stores",
+    "latest phones and laptops and their operating systems",
+    "online forums and meeting apps and sites",
+    "new start up companies",
+    "latest movies and tv shows and streaming platforms",
+    "best books and audiobooks and podcasts",
+    "best music apps and best music style",
+    "most poular music artistes",
+    "trending youtubers and streamers",
+    "trending tiktokkers and videos",
+    "trending memes",
+    "ai tools",
+    "do my assignment for me sites",
+    "fashion trends",
+    "trending fashoin and fashion accessories",
+    "who should be my role model",
+    "chatting and blogging sites",
+    "most used apps on android and ios",
+    "what is soo last year",
+    "teenage trends",
+    "what is predicted to be trending next year",
+    "what is 67",
 
     "Rust vs Mojo for systems programming in 2026",
     "edge computing vs cloud computing trends",
@@ -116,7 +141,11 @@ SEARCH_TOPICS = [
     "beginner-friendly piano arrangements for pop hits",
     "manga series with the best world-building 2026",
     "history of streetwear and high-fashion crossovers",
-    "top-rated tabletop strategy games 2026"
+    "top-rated tabletop strategy games 2026",
+
+ 
+
+
 ]
 
 # --- INIT ENGINES ---
@@ -195,16 +224,12 @@ def get_seeds_robust(queries):
     except: pass
     return list(set(seeds))
 
-def index_to_pinecone(url, text, domain, is_image=False):
+def index_to_pinecone(url, text, domain):
     try:
         vector = model.encode(text).tolist()
         v_id = re.sub(r'\W+', '_', url)[:512]
-        metadata = {"url": url, "domain": domain, "text": text[:800]}
-        if is_image:
-            metadata["image"] = url
-            metadata["title"] = text[:200]  # Store alt text as title for display
         pc_index.upsert(
-            vectors=[{"id": v_id, "values": vector, "metadata": metadata}],
+            vectors=[{"id": v_id, "values": vector, "metadata": {"url": url, "domain": domain, "text": text[:800]}}],
             namespace=NAMESPACE
         )
         return True
@@ -255,7 +280,7 @@ def crawler_worker():
                                 if not any(bad in img_url for bad in BLACKLIST):
                                     with data_lock:
                                         if domain_image_counts.get(domain, 0) < 3 and img_url not in visited:
-                                            if index_to_pinecone(img_url, alt_text, domain, is_image=True):
+                                            if index_to_pinecone(img_url, alt_text, domain):
                                                 visited.add(img_url)
                                                 domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
                                                 tqdm.write(f"🖼️ [{t_name}] IMAGE INDEXED: {img_url}")
@@ -374,4 +399,4 @@ def run_komu_autonomous():
         pbar.close()
 
 if __name__ == "__main__":
-    run_komu_autonomous()
+    run_komu_autonomous() 

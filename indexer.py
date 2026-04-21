@@ -88,36 +88,45 @@ def index_website(url):
             )
         )
 
-        # Index additional images from the page (up to 3 with alt text)
+        # Index additional images from the page (up to 10 with alt text)
         soup = BeautifulSoup(downloaded, 'html.parser')
+        img_vectors = []
         img_count = 0
         for img in soup.find_all('img', alt=True):
             alt = img.get('alt', '').strip()
             src = img.get('src', '')
-            if len(alt) > 5 and src and img_count < 3:
+            if len(alt) > 5 and src and img_count < 10:
                 img_url = urljoin(url, src).split('?')[0]
                 if any(ext in img_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
-                    # Embed alt text for the image
+                    # Embed alt text for the specific image
                     img_res = client.models.embed_content(
                         model="gemini-embedding-2-preview",
-                        contents=alt,
+                        contents=f"{alt} (found on {meta_data['title']})",
                         config=types.EmbedContentConfig(
                             task_type="RETRIEVAL_DOCUMENT",
                             output_dimensionality=target_dim
                         )
                     )
-                    index.upsert(vectors=[{
-                        "id": img_url,
+                    img_vectors.append({
+                        "id": f"img_{img_url}_{img_count}",
                         "values": img_res.embeddings[0].values,
                         "metadata": {
                             "url": img_url,
-                            "title": alt,
-                            "text": alt,
+                            "parent_url": url,
+                            "title": alt, # Alt text becomes the title
+                            "alt": alt,   # Searchable alt field
+                            "text": alt,  # Searchable text field
+                            "image": img_url,
+                            "is_image": True, # CRITICAL: This allows separate image-only search
                             "domain": urlparse(url).netloc,
-                            "indexed_at": "2026-03-14"
+                            "indexed_at": "2026-04-21"
                         }
-                    }], namespace="default")
+                    })
                     img_count += 1
+
+        # Batch upsert images
+        if img_vectors:
+            index.upsert(vectors=img_vectors, namespace="default")
 
         # Upsert with MORE metadata so the UI doesn't have to guess
         index.upsert(vectors=[{
@@ -126,7 +135,7 @@ def index_website(url):
             "metadata": {
                 "url": url, 
                 "title": meta_data['title'] or "Untitled Result",
-                "image_url": meta_data['image'], # Saved forever now!
+                "image": meta_data['image'], # Changed to 'image' to match server expectations
                 "text": main_text[:600].replace("\n", " "),
                 "indexed_at": "2026-03-14"
             }
