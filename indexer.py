@@ -76,8 +76,8 @@ def index_website(url):
         main_text = trafilatura.extract(downloaded)
         if not main_text or len(main_text) < 400: return False
 
-        stats = index.describe_index_stats()
-        target_dim = stats.get('dimension', 768)
+        stats = index.describe_index_stats().get('namespaces', {}).get('default', {})
+        target_dim = index.describe_index_stats().get('dimension', 768)
 
         res = client.models.embed_content(
             model="gemini-embedding-2-preview",
@@ -116,7 +116,7 @@ def index_website(url):
                             "domain": urlparse(url).netloc,
                             "indexed_at": "2026-03-14"
                         }
-                    }])
+                    }], namespace="default")
                     img_count += 1
 
         # Upsert with MORE metadata so the UI doesn't have to guess
@@ -130,7 +130,7 @@ def index_website(url):
                 "text": main_text[:600].replace("\n", " "),
                 "indexed_at": "2026-03-14"
             }
-        }])
+        }], namespace="default")
         
         return True
 

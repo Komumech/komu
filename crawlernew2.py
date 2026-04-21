@@ -35,7 +35,7 @@ session = requests.Session()
 # --- GLOBAL CONFIG ---
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
-DOMAIN_LIMIT = 150  # 🚀 Increased to capture "most pages" of a site
+DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
 BLACKLIST = ["facebook.com", "twitter.com", "instagram.com", "tiktok.com", "quora.com", "reddit.com", "amazon.com", "ebay.com"]
 
 # --- DICTIONARY & PHRASE SEEDS FOR AUTONOMY ---
@@ -73,25 +73,7 @@ def get_autonomous_seeds(count=5):
     return final_seeds
 
 SEARCH_TOPICS = [
-    # --- Career & Digital Economy ---
-    "top remote work industries 2026",
-    "best side hustles for students in 2026",
-    "freelance tax laws for digital nomads 2026",
-    "high-paying no-degree tech jobs 2026",
-    "global inflation rates and economic forecasts",
-    "how to start a startup with zero capital in 2026",
-    "top coworking spaces in major tech hubs",
 
-    # --- Education & Academic Prep ---
-    "SS2 mathematics practice questions and answers",
-    "physics syllabus for senior secondary 2026",
-    "JAMB 2026 registration dates and requirements",
-    "WAEC past questions and answers for technical drawing",
-    "best online platforms for self-paced learning",
-    "university scholarship opportunities for international students",
-    "how to use AI for academic research without plagiarism",
-
-    # --- Niche Tech & Engineering ---
     "Rust vs Mojo for systems programming in 2026",
     "edge computing vs cloud computing trends",
     "cybersecurity best practices for small agencies",

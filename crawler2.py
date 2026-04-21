@@ -51,7 +51,7 @@ USER_AGENTS = [
 LOG_FILE = "indexed_sites.txt"
 TARGET_COUNT = 1500 
 MAX_THREADS = 5   # Balanced for CPU/Network efficiency
-DOMAIN_LIMIT = 40 # Max pages per single domain
+DOMAIN_LIMIT = 20 # Limit of 20 pages per domain in a single session
 
 SEED_SITES = [
     "https://news.ycombinator.com",

@@ -1,0 +1,22 @@
+{
+  "entities": {
+    "UserHistory": {
+      "title": "User Search History",
+      "description": "Stores user search queries and clicks.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "queries": { "type": "array", "items": { "type": "string" } },
+        "clickedUrls": { "type": "array", "items": { "type": "string" } },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserHistory",
+      "description": "Per-user data including history and clicks."
+    }
+  }
+}

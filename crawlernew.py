@@ -34,7 +34,7 @@ session = requests.Session()
 # --- GLOBAL CONFIG ---
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
-DOMAIN_LIMIT = 150  # 🚀 Increased to capture "most pages" of a site
+DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
 BLACKLIST = ["facebook.com", "twitter.com", "instagram.com", "tiktok.com", "quora.com", "reddit.com", "amazon.com", "ebay.com"]
 
 SEARCH_TOPICS = [
