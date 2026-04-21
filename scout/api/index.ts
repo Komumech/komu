@@ -18,6 +18,18 @@ const __dirname = path.dirname(__filename);
 const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim());
 const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+// Helper to extract JSON from AI text that might contain markdown blocks
+function safeJsonParse(text: string, fallback: any = []) {
+  try {
+    if (!text) return fallback;
+    // Remove markdown code blocks if present
+    const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (e) {
+    return fallback;
+  }
+}
+
 // Local Embedding Helper (Xenova/Transformers)
 let embedder: any = null;
 async function getEmbedder() {
@@ -552,8 +564,8 @@ app.post('/api/ai/faq', async (req, res) => {
   try {
     const prompt = `Query: "${query}"\nContext: ${context}\nGenerate 5-6 highly relevant FAQs as JSON: [{"question": "...", "answer": "..."}]`;
     const result = await aiModel.generateContent(prompt);
-    const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
-    res.json(JSON.parse(text || '[]'));
+    const text = result.response.text();
+    res.json(safeJsonParse(text, []));
   } catch (e: any) {
     console.error("AI FAQ error:", e);
     res.status(500).json({ error: e.message });
@@ -584,9 +596,9 @@ If the entity is famous/well-known, provide 2-3 extra sections (e.g., 'Formation
 If the entity is not real or well-known, return null.`;
 
     const result = await aiModel.generateContent(prompt);
-    const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
-    if (text === 'null') return res.json(null);
-    res.json(JSON.parse(text));
+    const text = result.response.text();
+    if (!text || text.trim() === 'null') return res.json(null);
+    res.json(safeJsonParse(text, null));
   } catch (e: any) {
     console.error("AI Knowledge error:", e);
     res.status(500).json({ error: e.message });

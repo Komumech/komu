@@ -759,7 +759,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                      </div>
                      
                      <div className="space-y-4">
-                       {knowledgePanel.details.map((detail: any, i: number) => (
+                       {knowledgePanel.details?.map((detail: any, i: number) => (
                          <div key={i} className="flex gap-4">
                            <span className="font-bold text-slate-400 min-w-[80px]">{detail.label}:</span>
                            <span className="text-slate-900">{detail.value}</span>
@@ -833,7 +833,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
                     {/* Source Attribution Cards (Imitating Google Search style cards) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      {aiOverview.sources?.slice(0, 3).map((source, i) => (
+                      {aiOverview.sources?.slice(0, 3)?.map((source: any, i: number) => (
                         <a 
                           key={i} 
                           href={source.url} 
@@ -848,7 +848,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                           <h4 className="text-[14px] font-bold text-slate-800 line-clamp-2 leading-snug group-hover:text-blue-700 transition-colors">{source.title}</h4>
                         </a>
                       ))}
-                      {aiOverview.sources.length > 3 && (
+                      {(aiOverview.sources?.length || 0) > 3 && (
                         <button className="flex flex-col items-center justify-center gap-2 p-4 bg-slate-50/80 rounded-2xl border border-transparent hover:border-slate-200 hover:bg-slate-100/80 transition-all font-bold text-[13px] text-blue-600">
                            <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-blue-600 shadow-sm border border-slate-100">
                              <ChevronRight size={16} />
