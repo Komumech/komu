@@ -608,41 +608,57 @@ app.post('/api/logout', (req, res) => {
 
 // --- AI ENDPOINTS ---
 app.post('/api/ai/overview', async (req, res) => {
-  const { query, context, isLinguisticHelp } = req.body;
-    
-    // Always consider local first if key is missing or explicitly requested
-    const hasValidKey = rawKey && rawKey.length > 20;
+  try {
+    const { query, context, isLinguisticHelp } = req.body;
 
-    if (!isLinguisticHelp) {
+    if (!query) {
+      return res.status(400).json({ error: "Query is required" });
+    }
+
+    const hasValidKey = !!(rawKey && rawKey.length > 20);
+
+    // Priority 1: Gemini (Fastest & Best for Serverless)
+    if (hasValidKey) {
+      try {
+        const prompt = isLinguisticHelp
+          ? `Provide a concise grammar, spelling, and usage guide for: "${query}". Respond in Markdown with clear examples.`
+          : `Provide a comprehensive AI Overview for the search query: "${query}". 
+             Use the following search results as context: ${context || 'No specific context available.'}
+             Format your response with Markdown (use bolding, lists, or tables where appropriate).`;
+
+        const result = await aiModel.generateContent(prompt);
+        const text = result.response.text();
+        if (text) return res.json({ text });
+      } catch (e: any) {
+        console.error("Gemini AI Overview failed:", e.message);
+      }
+    }
+
+    // Priority 2: Local Summarizer (Heavily resource intensive, likely to time out on Vercel)
+    if (!isLinguisticHelp && context && context.trim().length > 0) {
       try {
         const pipe = await getSummarizer();
         if (pipe) {
-          const summary = await pipe(context.substring(0, 3000), {
-            max_new_tokens: 250,
+          const summary = await pipe(context.substring(0, 2500), {
+            max_new_tokens: 200,
             repetition_penalty: 1.2,
           });
-          return res.json({ text: `### AI Overview\n\n${summary[0].summary_text}` });
+          return res.json({ text: `### AI Overview (Local)\n\n${summary[0].summary_text}` });
         }
-      } catch (err) {
-        console.error("Local summarization failed:", err);
+      } catch (err: any) {
+        console.error("Local summarization fallback failed:", err.message);
       }
     }
 
-    if (hasValidKey) {
-      try {
-        const prompt = isLinguisticHelp 
-          ? `Grammar/Spelling/Usage guide for: "${query}". Respond in Markdown with examples.`
-          : `Overview of "${query}" based on: ${context}. Use Markdown tables and lists.`;
-
-        const result = await aiModel.generateContent(prompt);
-        return res.json({ text: result.response.text() });
-      } catch (e: any) {
-        console.log("Gemini Overview fallback failed");
-      }
-    }
-    
-    res.status(500).json({ error: "AI services unavailable" });
-  });
+    // Fallback: Return a helpful message instead of a 500 error
+    res.json({ 
+      text: "The AI Overview is currently unavailable. This might be due to heavy traffic or an unconfigured API key. Please refer to the search results below." 
+    });
+  } catch (globalErr: any) {
+    console.error("Critical error in /api/ai/overview:", globalErr);
+    res.status(500).json({ error: "Internal Server Error", message: globalErr.message });
+  }
+});
 
   app.post('/api/ai/summarize', async (req, res) => {
     const { text, max_tokens = 60 } = req.body;
