@@ -7,7 +7,6 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { pipeline } from '@xenova/transformers';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
@@ -16,40 +15,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Gemini (using stable SDK)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim());
 const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Lazy load pipelines
-let embedder: any = null;
-let classifier: any = null;
-
-const getEmbedder = async () => {
-  if (!embedder) {
-    embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
-  }
-  return embedder;
-};
-
-const getClassifier = async () => {
-  if (!classifier) {
-    classifier = await pipeline('zero-shot-classification', 'Xenova/mobilebert-uncased-mnli');
-  }
-  return classifier;
-};
-
-// Local Intent Detection Helper
+// Local Intent Detection Helper (Simplified for Vercel/Efficiency)
 async function detectLocalIntent(query: string) {
   const q = query.toLowerCase().trim();
   
   // 1. Quick RegEx for obvious patterns
-  // Prefix patterns: "define x", "meaning of x"
   const prefixMatch = q.match(/^(define|meaning of|definition of|synonym for|antonym for|what is the meaning of|what is the definition of)\s+(.+)/i);
   if (prefixMatch) {
     const word = prefixMatch[2].trim();
     if (word) return { is_dictionary: true, dictionary_word: word, is_english_help: false, is_entity: false };
   }
 
-  // Suffix patterns: "x meaning", "x definition"
   const suffixMatch = q.match(/^(.+)\s+(meaning|definition)$/i);
   if (suffixMatch) {
     const word = suffixMatch[1].trim();
@@ -61,40 +40,16 @@ async function detectLocalIntent(query: string) {
     return { is_dictionary: false, is_english_help: true, is_entity: false };
   }
 
-  // 2. Local semantic classifier (Totally free, no API limits)
-  try {
-    const pipe = await getClassifier();
-    const result = await pipe(query, [
-      'dictionary lookup', 
-      'english grammar help', 
-      'info about a person or place', 
-      'general'
-    ]);
-
-    const topLabel = result.labels[0];
-    const topScore = result.scores[0];
-
-    if (topScore > 0.35) {
-      if (topLabel === 'dictionary lookup') {
-        const word = query
-          .replace(/^(define|meaning of|definition of|what is the meaning of|what is the definition of|what is|what's)\s*/gi, '')
-          .replace(/\s*(meaning|definition)$/gi, '')
-          .trim();
-        if (word && word.length > 1) {
-          return { is_dictionary: true, dictionary_word: word, is_english_help: false, is_entity: false };
-        }
-      }
-      if (topLabel === 'english grammar help') {
-        return { is_dictionary: false, is_english_help: true, is_entity: false };
-      }
-      if (topLabel === 'info about a person or place') {
-        const entityName = query.replace(/^(who is|what is|where is|tell me about|about)\s+/gi, '').trim();
-        return { is_dictionary: false, is_english_help: false, is_entity: true, entity_name: entityName };
-      }
+  // Fallback for names/entities (Simple heuristics)
+  const entityWords = ['who is', 'what is', 'where is', 'tell me about', 'biography of', 'history of'];
+  const entityMatch = entityWords.find(w => q.startsWith(w));
+  if (entityMatch) {
+    const name = q.replace(entityMatch, '').trim();
+    if (name.length > 2) {
+      return { is_dictionary: false, is_english_help: false, is_entity: true, entity_name: name };
     }
-  } catch (err) {
-    console.error("Local intent error:", err);
   }
+
   return { is_dictionary: false, is_english_help: false, is_entity: false };
 }
 
@@ -553,6 +508,80 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // --- AI ENDPOINTS ---
+  app.post('/api/ai/overview', async (req, res) => {
+    const { query, context, isLinguisticHelp } = req.body;
+    try {
+      const prompt = isLinguisticHelp 
+        ? `The user is asking for English language help (grammar, spelling, usage, or synonyms).
+           Query: "${query}"
+           Provide a helpful, educational response. Explain the rules clearly. 
+           Include multiple sentence examples for clarity showing correct usage.
+           Format with Markdown:
+           - Use rich formatting (bolding, lists).
+           - If it's a grammar check, explain why it's correct/incorrect.
+           - If it's a spelling check, provide the correct spelling and similar words.`
+        : `Query: "${query}"\nContext:\n${context}\nProvide a comprehensive, high-quality, professional overview of the search topic. Use rich Markdown formatting:
+- Use bold Level 3 headers (###) for sections.
+- Use bulleted lists for key facts.
+- Use numbered lists for steps or chronological events.
+- Use Markdown tables if comparing multiple data points or entities.
+- Ensure the tone is informative and authoritative.`;
+
+      const result = await aiModel.generateContent(prompt);
+      res.json({ text: result.response.text() });
+    } catch (e: any) {
+      console.error("AI Overview error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/ai/faq', async (req, res) => {
+    const { query, context } = req.body;
+    try {
+      const prompt = `Query: "${query}"\nContext: ${context}\nGenerate 5-6 highly relevant FAQs as JSON: [{"question": "...", "answer": "..."}]`;
+      const result = await aiModel.generateContent(prompt);
+      const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
+      res.json(JSON.parse(text || '[]'));
+    } catch (e: any) {
+      console.error("AI FAQ error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/ai/knowledge', async (req, res) => {
+    const { entityName, entityType } = req.body;
+    try {
+      const prompt = `Entity: "${entityName}" (${entityType || 'General'})
+Generate a high-quality Knowledge Panel JSON following this exact structure:
+{
+  "title": "Clean Name",
+  "subtitle": "Informative Category",
+  "description": "Engaging 200-300 character summary",
+  "image": "https://picsum.photos/seed/${encodeURIComponent(entityName)}/800/600",
+  "details": [
+    {"label": "...", "value": "..."},
+    {"label": "...", "value": "..."}
+  ],
+  "sections": [
+    {"title": "Section Name", "content": "Brief summary text"},
+    {"title": "Section Name", "content": "Brief summary text"}
+  ]
+}
+If type is country, include Capital and Population. If person, include Born and Occupation. If company, include Founded and Headquarters.
+If the entity is famous/well-known, provide 2-3 extra sections (e.g., 'Formation', 'History', 'Impact').
+If the entity is not real or well-known, return null.`;
+
+      const result = await aiModel.generateContent(prompt);
+      const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
+      if (text === 'null') return res.json(null);
+      res.json(JSON.parse(text));
+    } catch (e: any) {
+      console.error("AI Knowledge error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // --- VITE MIDDLEWARE ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -567,6 +596,12 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // --- ERROR HANDLER ---
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error('SERVER ERROR:', err);
+    res.status(500).json({ error: 'Internal Server Error', message: err.message });
+  });
 
   // Only start listening if not running on Vercel or explicitly called via tsx/node
   if (process.env.NODE_VITE_DEV === 'true' || process.env.NODE_ENV !== 'production') {

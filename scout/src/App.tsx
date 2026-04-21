@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestore";
 import firebaseConfig from '../firebase-applet-config.json';
@@ -17,9 +16,6 @@ import { SearchResult, AIOverview, KnowledgePanel } from './types';
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -334,29 +330,15 @@ export default function App() {
     setIsOverviewExpanded(false);
     try {
       const context = contextResults.slice(0, 5).map(r => r.snippet).join("\n");
-      const basePrompt = linguisticHelp 
-        ? `The user is asking for English language help (grammar, spelling, usage, or synonyms).
-           Query: "${queryText}"
-           Provide a helpful, educational response. Explain the rules clearly. 
-           Include multiple sentence examples for clarity showing correct usage.
-           Format with Markdown:
-           - Use rich formatting (bolding, lists).
-           - If it's a grammar check, explain why it's correct/incorrect.
-           - If it's a spelling check, provide the correct spelling and similar words.`
-        : `Query: "${queryText}"\nContext:\n${context}\nProvide a comprehensive, high-quality, professional overview of the search topic. Use rich Markdown formatting:
-- Use bold Level 3 headers (###) for sections.
-- Use bulleted lists for key facts.
-- Use numbered lists for steps or chronological events.
-- Use Markdown tables if comparing multiple data points or entities.
-- Ensure the tone is informative and authoritative.`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: basePrompt }] }],
+      const res = await fetch('/api/ai/overview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryText, context, isLinguisticHelp: linguisticHelp })
       });
+      const data = await res.json();
       
       setAiOverview({
-        summary: response.text || "No summary available.",
+        summary: data.text || "No summary available.",
         sources: contextResults.slice(0, 3).map(r => ({ title: r.title, url: r.url }))
       });
     } catch (e) {} finally {
@@ -367,49 +349,25 @@ export default function App() {
   const generateFAQ = async (queryText: string, contextResults: SearchResult[]) => {
     try {
       const context = contextResults.slice(0, 10).map(r => r.snippet).join("\n");
-      const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 5-6 highly relevant FAQs as JSON: [{"question": "...", "answer": "..."}]`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: prompt }] }],
+      const res = await fetch('/api/ai/faq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryText, context })
       });
-      
-      const text = response.text?.replace(/```json/g, '').replace(/```/g, '').trim();
-      setFaq(JSON.parse(text || '[]'));
+      const data = await res.json();
+      setFaq(data);
     } catch (e) {}
   };
 
   const generateKnowledgePanel = async (entityName: string, entityType?: string) => {
     try {
-      const prompt = `Entity: "${entityName}" (${entityType || 'General'})
-Generate a high-quality Knowledge Panel JSON following this exact structure:
-{
-  "title": "Clean Name",
-  "subtitle": "Informative Category",
-  "description": "Engaging 200-300 character summary",
-  "image": "https://picsum.photos/seed/${encodeURIComponent(entityName)}/800/600",
-  "details": [
-    {"label": "...", "value": "..."},
-    {"label": "...", "value": "..."}
-  ],
-  "sections": [
-    {"title": "Section Name", "content": "Brief summary text"},
-    {"title": "Section Name", "content": "Brief summary text"}
-  ]
-}
-If type is country, include Capital and Population. If person, include Born and Occupation. If company, include Founded and Headquarters.
-If the entity is famous/well-known, provide 2-3 extra sections (e.g., 'Formation', 'History', 'Impact').
-If the entity is not real or well-known, return null.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: prompt }] }],
+      const res = await fetch('/api/ai/knowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityName, entityType })
       });
-
-      const text = response.text?.replace(/```json/g, '').replace(/```/g, '').trim();
-      if (text !== 'null') {
-        setKnowledgePanel(JSON.parse(text));
-      }
+      const data = await res.json();
+      if (data) setKnowledgePanel(data);
     } catch (e) {}
   };
 
