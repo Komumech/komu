@@ -23,11 +23,12 @@ let summarizer: any = null;
 async function getEmbedder() {
   if (!embedder) {
     try {
-      console.log("Loading local embedding model: all-mpnet-base-v2...");
+      console.log("Initializing local embedding model (Xenova/all-mpnet-base-v2)...");
       embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
       console.log("✅ Local embedding model loaded.");
     } catch (err) {
       console.error("Failed to load local embedding model:", err);
+      return null;
     }
   }
   return embedder;
@@ -36,12 +37,12 @@ async function getEmbedder() {
 async function getSummarizer() {
   if (!summarizer) {
     try {
-      console.log("Loading local summarization model: bart-large-cnn...");
-      // Using a larger model for significantly better synthesis and coherence
+      console.log("Initializing local summarization model (Xenova/bart-large-cnn)...");
       summarizer = await pipeline('summarization', 'Xenova/bart-large-cnn');
       console.log("✅ Local summarizer loaded.");
     } catch (err) {
       console.error("Failed to load local summarizer:", err);
+      return null;
     }
   }
   return summarizer;
