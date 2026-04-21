@@ -1,11 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import startServer from '../server';
-
-let app: any;
+import appPromise from '../server';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!app) {
-    app = await startServer();
-  }
+  const app = await appPromise;
   return app(req, res);
 }

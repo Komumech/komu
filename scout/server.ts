@@ -18,6 +18,17 @@ const __dirname = path.dirname(__filename);
 const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim());
 const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+// Local Embedding Helper (Xenova/Transformers)
+let embedder: any = null;
+async function getEmbedder() {
+  if (!embedder) {
+    const { pipeline } = await import('@xenova/transformers');
+    // Using all-mpnet-base-v2 to match the 768-dim index used in your Python crawler
+    embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+  }
+  return embedder;
+}
+
 // Local Intent Detection Helper (Simplified for Vercel/Efficiency)
 async function detectLocalIntent(query: string) {
   const q = query.toLowerCase().trim();
