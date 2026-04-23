@@ -326,7 +326,7 @@ export default function App() {
         Be conservative. Only correct if you are 95% certain.`;
         
         const r = await genAI.models.generateContent({
-          model: "gemini-1.5-flash",          
+          model: "gemini-1.5-flash",
           contents: autocorrectPrompt
         });
         const text = r.text?.trim() || "";
