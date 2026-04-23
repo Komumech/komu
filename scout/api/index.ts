@@ -15,7 +15,6 @@ import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' 
 dotenv.config();
 
 // --- SERVERLESS OPTIMIZATION ---
-// Ensure Transformers.js uses a writable directory for models in production
 env.allowLocalModels = false;
 if (process.env.NODE_ENV === 'production') {
   env.cacheDir = '/tmp';
@@ -24,26 +23,44 @@ if (process.env.NODE_ENV === 'production') {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin (Server-side)
-let firebaseApp: admin.app.App | undefined;
-if (!admin.apps.length && firebaseConfig.projectId) {
+// --- FIREBASE ADMIN INITIALIZATION ---
+// FIX: Updated type to allow both null and undefined
+let firebaseApp: admin.app.App | null | undefined = undefined;
+
+const apps = admin.apps || [];
+
+if (apps.length === 0) {
   try {
-    firebaseApp = admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
+    if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+      firebaseApp = admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }),
+      });
+      console.log("✅ Firebase Admin initialized via Service Account");
+    } else if (firebaseConfig && firebaseConfig.projectId) {
+      firebaseApp = admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+      });
+      console.log("⚠️ Firebase Admin initialized via Project ID only");
+    }
   } catch (err) {
     console.error("❌ Firebase Init Error:", err);
   }
-} else if (admin.apps.length) {
-  firebaseApp = admin.apps[0] || undefined;
+} else {
+  // apps[0] might be undefined if the array is empty, so we use || null 
+  // to stay consistent with the variable type
+  firebaseApp = apps[0] || null;
 }
 
-const db = firebaseApp ? getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId) : null;
+// Initialize Firestore
+const db = firebaseApp 
+  ? getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId) 
+  : null;
 
-// --- CLEANUP: Removed Gemini initialization from backend ---
-// All AI calls moved to Frontend per security guidelines.
-
-// Scout Semantic Brain (mpnet-base)
+// --- NEURAL ENGINE ---
 let text_pipe: any = null;
 let isModelLoading = false;
 
@@ -55,8 +72,9 @@ async function getPipes() {
     isModelLoading = true;
     console.log("🚀 Warming Scout Semantic Brain (all-mpnet-base-v2)...");
     
-    // Semantic Encoder (768-dim) 
-    if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    if (!text_pipe) {
+      text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    }
 
     console.log("✅ Scout Semantic Brain ready!");
     return { text_pipe };
@@ -67,6 +85,8 @@ async function getPipes() {
     isModelLoading = false;
   }
 }
+
+
 
 async function getEmbedding(text: string): Promise<number[] | null> {
   if (!text) return null;
