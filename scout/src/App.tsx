@@ -314,21 +314,8 @@ export default function App() {
       setSearchStage('vectorizing');
     }
 
-    // GENERATE NEURAL EMBEDDING ON FRONTEND (Adhering to security guidelines)
-    if (finalQuery.trim() && !vector) {
-      try {
-        const result = await genAI.models.embedContent({
-          model: 'gemini-embedding-2-preview',
-          contents: [finalQuery.trim()]
-        });
-        if (result.embeddings?.[0]?.values) {
-          vector = Array.from(result.embeddings[0].values).slice(0, 768);
-          console.log("✅ Scout Brain: Neural embedding generated on Client (768-dim truncated)");
-        }
-      } catch (err) {
-        console.warn("Front-end embedding failed, falling back to server:", err);
-      }
-    }
+    // Vector generation is now handled by the backend to ensure 
+    // compatibility with the CLIP-ViT-L-14 latent space.
 
     // AUTOCORRECT ON FRONTEND (Adhering to rules)
     if (!currentVisualQuery && requestedPage === 1 && finalQuery.length > 3) {
@@ -1727,4 +1714,3 @@ function VisualMathDisplay({ stage, image }: { problem?: any, stage: string, ima
     </motion.div>
   );
 }
-

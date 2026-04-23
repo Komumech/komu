@@ -27,6 +27,7 @@ const __dirname = path.dirname(__filename);
 // Local Multimodal "Scout Vision" Engine (768 dimensions)
 let text_pipe: any = null;
 let vision_pipe: any = null;
+let feature_pipe: any = null;
 let isModelLoading = false;
 async function getPipes() {
   if (text_pipe && vision_pipe) return { text_pipe, vision_pipe };
@@ -36,11 +37,7 @@ async function getPipes() {
     isModelLoading = true;
     console.log("🚀 Warming Multimodal Engines (768-dim)...");
     
-    // Semantic Encoder (768-dim) 
-    if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
-    
-    // Vision pipe (512-dim, we pad to 768)
-    if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
+    // Sdsion_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
 
     console.log("✅ Scout Multimodal Engines ready!");
     return { text_pipe, vision_pipe };
@@ -430,21 +427,13 @@ app.post('/api/search', async (req, res) => {
       let sB = (b.score * 0.7) + (b.boost * 0.3);
 
       // 2. Navigational/Brand Centric Pins (Astronomical boosts to guarantee order)
-      if (a.isExactMatch) sA += 150.0;
-      if (b.isExactMatch) sB += 150.0;
+      if (a.isExactMatch) sA += 10.0;
+      if (b.isExactMatch) sB += 10.0;
       
-      if (a.isOfficialProperty) sA += 80.0;
-      if (b.isOfficialProperty) sB += 80.0;
-
-      if (a.isNavIntent && a.isRootDomain) sA += 10.0;
-      if (b.isNavIntent && b.isRootDomain) sB += 10.0;
-
+      if (a.isOfficialProperty) s += 5.0;
+      
       // Semantic Strength
-      const tA = a.title.toLowerCase();
-      const tB = b.title.toLowerCase();
-      if (tA === qLower) sA += 30.0;
-      if (tB === qLower) sB += 30.0;
-      if (tA.includes(qLower)) sA += 2.0;
+     n
       if (tB.includes(qLower)) sB += 2.0;
 
       if (clickedUrls.includes(a.url)) sA += 5.0;
