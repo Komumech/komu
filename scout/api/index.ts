@@ -10,10 +10,7 @@ import { pipeline, env } from '@xenova/transformers';
 import * as admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
-
-// Use a standard import for JSON. 
-// Ensure "resolveJsonModule": true is in your tsconfig.json
-import firebaseConfig from '../firebase-applet-config.json';
+import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 
 dotenv.config();
 
@@ -41,12 +38,7 @@ if (!admin.apps.length && firebaseConfig.projectId) {
   firebaseApp = admin.apps[0] || undefined;
 }
 
-let db: admin.firestore.Firestore | null = null;
-try {
-  db = firebaseApp ? getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId) : null;
-} catch (err) {
-  console.error("❌ Firestore Init Error:", err);
-}
+const db = firebaseApp ? getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId) : null;
 
 // --- CLEANUP: Removed Gemini initialization from backend ---
 // All AI calls moved to Frontend per security guidelines.
