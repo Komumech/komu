@@ -362,9 +362,9 @@ SEARCH_TOPICS = [
 
 # --- INIT ENGINES ---
 print(f"🛰️  KOMU SCOUT v15.2 - DEEP-DIVE & AI ENABLED")
-# Standardizing to the Scout v3.5 Visual Brain (768-dim CLIP)
-model = SentenceTransformer('clip-ViT-L-14')
-print("✅ Model Loaded: clip-ViT-L-14 (768 Dimensions)")
+# Standardizing to MPNet for maximum text retrieval accuracy (768-dim)
+model = SentenceTransformer('all-mpnet-base-v2')
+print("✅ Model Loaded: all-mpnet-base-v2 (768 Dimensions)")
 # Double check the dimension before starting the crawl
 sample_encoding = model.encode("Verify 768")
 print(f"📐 Verified Vector Size: {len(sample_encoding)}")

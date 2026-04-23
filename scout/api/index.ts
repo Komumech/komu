@@ -24,25 +24,23 @@ const __dirname = path.dirname(__filename);
 // --- CLEANUP: Removed Gemini initialization from backend ---
 // All AI calls moved to Frontend per security guidelines.
 
-// Local Multimodal "Scout Vision" Engine (768 dimensions)
+// Local Neural Search Engines (768 dimensions)
 let text_pipe: any = null;
 let vision_pipe: any = null;
-let feature_pipe: any = null;
 let isModelLoading = false;
 async function getPipes() {
-  if (text_pipe && vision_pipe && feature_pipe) return { text_pipe, vision_pipe, feature_pipe };
+  if (text_pipe && vision_pipe) return { text_pipe, vision_pipe };
   if (isModelLoading) return null;
   
   try {
     isModelLoading = true;
-    console.log("🚀 Warming Multimodal Engines (768-dim)...");
+    console.log("🚀 Warming MPNet Search Engine (768-dim)...");
     
     if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
-    if (!feature_pipe) feature_pipe = await pipeline('feature-extraction', 'Xenova/clip-vit-base-patch32');
-    if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
+    if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-large-patch14');
 
-    console.log("✅ Scout Multimodal Engines ready!");
-    return { text_pipe, vision_pipe, feature_pipe };
+    console.log("✅ Scout Neural Engines ready!");
+    return { text_pipe, vision_pipe };
   } catch (err: any) {
     console.error("❌ Multimodal Engine failure:", err.message);
     return null;
@@ -51,20 +49,13 @@ async function getPipes() {
   }
 }
 
-async function getEmbedding(text: string): Promise<{ mpnetVec: number[], clipVec: number[] } | null> {
+async function getEmbedding(text: string): Promise<number[] | null> {
   if (!text) return null;
   try {
     const pipes = await getPipes();
-    if (pipes?.text_pipe && pipes?.feature_pipe) {
-      // Generate MPNet embedding (768-dim)
-      const mpnetOutput = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
-      const mpnetVec = Array.from(mpnetOutput.data) as number[];
-
-      // Generate CLIP Text embedding (512-dim, padded to 768 to match index)
-      const clipOutput = await pipes.feature_pipe(text, { pooling: 'mean', normalize: true });
-      const clipVec = [...(Array.from(clipOutput.data) as number[]), ...Array(256).fill(0)];
-
-      return { mpnetVec, clipVec };
+    if (pipes?.text_pipe) {
+      const output = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
+      return Array.from(output.data) as number[];
     }
   } catch (err: any) {
     console.warn("⚠️ Local embedding failed:", err.message);
@@ -251,11 +242,6 @@ app.post('/api/search', async (req, res) => {
             const image = await RawImage.read(imageQuery);
             const output = await pipes.vision_pipe(image);
             visualVector = Array.from(output.data);
-            
-            // Pad or interpolate to 768 dimensions if necessary to match index
-            if (visualVector && visualVector.length === 512) {
-               visualVector = [...visualVector, ...Array(256).fill(0)];
-            }
             console.log(`✅ Scout Lens: Vector match generated (${visualVector.length} dims)`);
           } catch (innerErr: any) {
             console.error("Scout Lens: extraction failure:", innerErr.message);
@@ -309,14 +295,13 @@ app.post('/api/search', async (req, res) => {
     } : null;
 
     let mpnetVector: number[] | null = null;
-    let clipVector: number[] | null = null;
 
     if (visualVector) {
-      clipVector = visualVector;
+      mpnetVector = visualVector; // Use the visual vector for image search
     } else if (providedVector) {
       mpnetVector = Array.isArray(providedVector) ? providedVector.slice(0, 768) : null;
     } else if (finalQuery) {
-      console.log("Scout: Generating Dual-Engine embeddings...");
+      console.log("Scout: Generating MPNet embedding...");
       const pipes = await getPipes();
       if (!pipes) {
         return res.status(503).json({
@@ -324,9 +309,8 @@ app.post('/api/search', async (req, res) => {
           message: "Scout's semantic engines are loading. Please try again in a few seconds."
         });
       }
-      const embeddings: any = await getEmbedding(finalQuery);
-      mpnetVector = embeddings?.mpnetVec || null;
-      clipVector = embeddings?.clipVec || null;
+      const embedding = await getEmbedding(finalQuery);
+      mpnetVector = embedding;
     }
 
     let filter: any = {};
@@ -354,16 +338,9 @@ app.post('/api/search', async (req, res) => {
     ])];
 
     // Perform Multi-Vector Retrieval across both possible latent spaces
-    const [mpnetRes, clipRes, kRes] = await Promise.all([
+    const [mpnetRes, kRes] = await Promise.all([
       mpnetVector ? index.namespace(namespace || 'default').query({
         vector: mpnetVector,
-        topK: 250,
-        filter: Object.keys(filter).length > 0 ? filter : undefined,
-        includeMetadata: true,
-      }).catch(() => ({ matches: [] })) : { matches: [] },
-
-      clipVector ? index.namespace(namespace || 'default').query({
-        vector: clipVector,
         topK: 250,
         filter: Object.keys(filter).length > 0 ? filter : undefined,
         includeMetadata: true,
@@ -388,7 +365,7 @@ app.post('/api/search', async (req, res) => {
       })
     ]);
 
-    const allMatches = [...mpnetRes.matches, ...clipRes.matches, ...kRes.matches];
+    const allMatches = [...mpnetRes.matches, ...kRes.matches];
     const seenIds = new Set();
     const uniqueMatches = allMatches.filter(match => {
       if (seenIds.has(match.id)) return false;

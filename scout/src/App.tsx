@@ -326,7 +326,7 @@ export default function App() {
         Be conservative. Only correct if you are 95% certain.`;
         
         const r = await genAI.models.generateContent({
-          model: "gemini-1.5-flash",
+          model: "gemini-1.5-flash-latest",
           contents: autocorrectPrompt
         });
         const text = r.text?.trim() || "";
@@ -470,7 +470,7 @@ export default function App() {
            5. Use Markdown formatting.`;
 
       const result = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-1.5-flash-latest",
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
@@ -491,7 +491,7 @@ export default function App() {
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 5 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
       const response = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-1.5-flash-latest",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -525,7 +525,7 @@ export default function App() {
       details (array of {label, value}), and sections (array of {title, content}).`;
 
       const response = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-1.5-flash-latest",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
