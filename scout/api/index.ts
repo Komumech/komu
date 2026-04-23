@@ -7,7 +7,7 @@ import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
 import { pipeline, env } from '@xenova/transformers';
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
@@ -24,52 +24,57 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- FIREBASE ADMIN INITIALIZATION ---
-// FIX: Updated type to allow both null and undefined
 let firebaseApp: admin.app.App | null | undefined = undefined;
 
-const apps = admin.apps || [];
+try {
+  const apps = admin.apps || [];
 
-if (apps.length === 0) {
-  try {
+  if (apps.length === 0) {
     const privateKey = process.env.FIREBASE_PRIVATE_KEY;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
 
     if (privateKey && clientEmail) {
-      // Fix: Ensure the key actually looks like a key before trying to parse it
-      const formattedKey = privateKey.includes('\\n') 
-        ? privateKey.replace(/\\n/g, '\n') 
-        : privateKey;
+      // Robust key formatting for Vercel
+      const formattedKey = privateKey.replace(/\\n/g, '\n');
 
       firebaseApp = admin.initializeApp({
         credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+          projectId: projectId,
           clientEmail: clientEmail,
           privateKey: formattedKey,
         }),
-        databaseURL: `https://${process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId}.firebaseio.com`
+        databaseURL: `https://${projectId}.firebaseio.com`
       });
-      console.log("✅ Admin SDK: Service Account Mode");
+      console.log("✅ Firebase Admin: Service Account Mode Success");
     } else {
-      // Fallback that doesn't crash the server
+      // Safe fallback for local development or limited access
       firebaseApp = admin.initializeApp({
-        projectId: firebaseConfig.projectId
+        projectId: projectId,
+        databaseURL: `https://${projectId}.firebaseio.com`
       });
-      console.log("⚠️ Admin SDK: Project ID Mode (No Auth)");
+      console.log("⚠️ Firebase Admin: Project ID Mode (Limited)");
     }
-  } catch (err) {
-    console.error("❌ Firebase Init Crash:", err);
-    firebaseApp = null;
+  } else {
+    firebaseApp = apps[0];
   }
-} else {
-  // apps[0] might be undefined if the array is empty, so we use || null 
-  // to stay consistent with the variable type
-  firebaseApp = apps[0] || null;
+} catch (err: any) {
+  console.error("❌ Firebase Admin Critical Init Error:", err.message);
+  firebaseApp = null;
 }
 
-// Initialize Firestore
-const db = firebaseApp 
-  ? getFirestore(firebaseApp, "(default)") 
-  : null;
+// --- FIRESTORE INITIALIZATION ---
+// We wrap this in a getter or a safe check to prevent the 503 crash
+let db: any = null;
+if (firebaseApp) {
+  try {
+    db = getFirestore(firebaseApp, "(default)");
+  } catch (firestoreErr) {
+    console.error("❌ Firestore Setup Error:", firestoreErr);
+  }
+}
+
+
 
 // --- NEURAL ENGINE ---
 let text_pipe: any = null;
