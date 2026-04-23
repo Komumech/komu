@@ -7,7 +7,6 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { GoogleGenerativeAI, TaskType } from "@google/generative-ai";
 import { pipeline, RawImage } from '@xenova/transformers';
 
 dotenv.config();
@@ -15,52 +14,34 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Gemini (For Summaries & AI Overview only)
-const rawKey = (process.env.GEMINI_API_KEY || '').trim();
-const genAI = new GoogleGenerativeAI(rawKey);
-const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+// --- CLEANUP: Removed Gemini initialization from backend ---
+// All AI calls moved to Frontend per security guidelines.
 
 // Local Multimodal "Scout Vision" Engine (768 dimensions)
 let text_pipe: any = null;
 let vision_pipe: any = null;
 let isModelLoading = false;
-
-// PRO-ACTIVE WARMUP: Start loading models immediately
-setTimeout(() => {
-  getPipes().catch(() => {});
-}, 1000);
-
 async function getPipes() {
-  if (text_pipe) return { text_pipe, vision_pipe };
+  if (text_pipe && vision_pipe) return { text_pipe, vision_pipe };
   if (isModelLoading) return null;
   
   try {
     isModelLoading = true;
     console.log("🚀 Warming Multimodal Engines (768-dim)...");
     
-    // Semantic Encoder (768-dim) optimized for speed and accuracy
-    text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    // Semantic Encoder (768-dim) 
+    if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
     
-    // CLIP features - we attempt this in background to avoid blocking if possible
-    getPipesVision().catch(() => {});
+    // Vision pipe (512-dim, we pad to 768)
+    if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
 
-    console.log("✅ Scout Multimodal Engine ready!");
+    console.log("✅ Scout Multimodal Engines ready!");
     return { text_pipe, vision_pipe };
   } catch (err: any) {
     console.error("❌ Multimodal Engine failure:", err.message);
     return null;
   } finally {
     isModelLoading = false;
-  }
-}
-
-async function getPipesVision() {
-  if (vision_pipe) return vision_pipe;
-  try {
-    vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
-    return vision_pipe;
-  } catch (e) {
-    return null;
   }
 }
 
@@ -75,27 +56,13 @@ async function getEmbedding(text: string): Promise<number[] | null> {
   } catch (err: any) {
     console.warn("⚠️ Local embedding failed:", err.message);
   }
-
-  // Backup for deployment (768 matching dimensionality)
-  if (rawKey && rawKey.length > 20) {
-    try {
-      const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-      const result = await embeddingModel.embedContent({
-        content: { parts: [{ text }], role: 'user' },
-        taskType: TaskType.RETRIEVAL_QUERY,
-        outputDimensionality: 768,
-      } as any);
-      if (result?.embedding?.values) return result.embedding.values;
-    } catch (e) {}
-  }
   return null;
 }
 
-// Local Intent Detection Helper (Simplified for Vercel/Efficiency)
+// Local Intent Detection Helper
 async function detectLocalIntent(query: string) {
   const q = query.toLowerCase().trim();
   
-  // 1. Quick RegEx for obvious patterns
   const prefixMatch = q.match(/^(define|meaning of|definition of|synonym for|antonym for|what is the meaning of|what is the definition of)\s+(.+)/i);
   if (prefixMatch) {
     const word = prefixMatch[2].trim();
@@ -113,7 +80,6 @@ async function detectLocalIntent(query: string) {
     return { is_dictionary: false, is_english_help: true, is_entity: false };
   }
 
-  // Fallback for names/entities (Simple heuristics)
   const entityWords = ['who is', 'what is', 'where is', 'tell me about', 'biography of', 'history of'];
   const entityMatch = entityWords.find(w => q.startsWith(w));
   if (entityMatch) {
@@ -129,8 +95,8 @@ async function detectLocalIntent(query: string) {
 function cleanSnippet(text: string) {
   if (!text) return '';
   return text
-    .replace(/\[\d+\]/g, '') // Remove citations like [1]
-    .replace(/(\||\-|─|═){2,}(\s?(\||\-|─|═){2,})*/g, ' ') // Remove noise like || --- ||
+    .replace(/\[\d+\]/g, '') 
+    .replace(/(\||\-|─|═){2,}(\s?(\||\-|─|═){2,})*/g, ' ') 
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -139,33 +105,18 @@ function prettifyTitle(title: string, url: string) {
   if (!url || !title) return title;
   try {
     const parsed = new URL(url);
-    const path = parsed.pathname;
-    
-    // Domain names often have dashes or are lowercase
     const domainPart = parsed.hostname.replace('www.', '').split('.')[0];
     const capitalizedDomain = domainPart.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     
-    // Only prettify if there's a multi-segment path
-    if (path && path !== '/' && path.length > 3) {
-      const segments = path.split('/').filter(s => s && !s.includes('.') && s.length > 2);
-      
+    if (parsed.pathname && parsed.pathname !== '/' && parsed.pathname.length > 3) {
+      const segments = parsed.pathname.split('/').filter(s => s && !s.includes('.') && s.length > 2);
       if (segments.length > 0) {
-        // If the title is generic or just the domain, add context
-        const lowTitle = title.toLowerCase();
         const lastSegment = segments[segments.length - 1]
           .replace(/(_|-)/g, ' ')
           .split(' ')
           .map(w => w.charAt(0).toUpperCase() + w.slice(1))
           .join(' ');
-          
-        if (lowTitle.includes(domainPart.toLowerCase()) || title.length < 5) {
-          return `${capitalizedDomain} | ${lastSegment}`;
-        }
-        
-        // Ensure breadcrumb style: Title | Sub-page
-        if (!lowTitle.includes(lastSegment.toLowerCase())) {
-          return `${title} | ${lastSegment}`;
-        }
+        return `${capitalizedDomain} | ${lastSegment}`;
       }
     }
   } catch (e) {}
@@ -173,14 +124,13 @@ function prettifyTitle(title: string, url: string) {
 }
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
-app.set('trust proxy', 1); // Required for secure cookies behind proxies
+app.set('trust proxy', 1);
 app.use(cors());
   
-  // SECURE COOKIES FOR IFRAME
   app.use(cookieSession({
     name: 'session',
     keys: [process.env.COOKIE_SECRET || 'scout-secret'],
@@ -190,7 +140,6 @@ app.use(cors());
     httpOnly: true,
   }));
 
-  // PINECONE INIT
 let pinecone: Pinecone | null = null;
 const getPinecone = () => {
   if (!pinecone) {
@@ -200,268 +149,229 @@ const getPinecone = () => {
   return pinecone;
 };
 
-// --- API ROUTES ---
-
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// SEARCH SUGGESTIONS PROXY
 app.get('/api/suggestions', async (req, res) => {
-  const { q } = req.query;
-  if (!q) return res.json([]);
   try {
+    const { q } = req.query;
+    if (!q) return res.json([]);
       const response = await axios.get(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q as string)}`, {
         headers: {
           'User-Agent': 'Mozilla/5.0'
-        }
+        },
+        timeout: 2000
       });
     res.json(response.data[1] || []);
   } catch (error) {
+    console.error("Suggestions error:", error);
     res.json([]);
   }
 });
+app.post('/api/feedback', async (req, res) => {
+  try {
+    const { id, type } = req.body; // type: 'success' | 'pogo'
+    if (!id) return res.status(400).json({ error: 'Record ID required' });
 
-// SEARCH VIA PINECONE (Supports direct query, pre-generated vector, or visual image query)
+    const pc = getPinecone();
+    if (!pc) return res.status(503).json({ error: 'Database unavailable' });
+    const index = pc.Index(process.env.PINECONE_INDEX || 'scout');
+    const namespace = process.env.PINECONE_NAMESPACE || 'web';
+
+    // Fetch current state
+    const fetchRes = await index.namespace(namespace).fetch({ ids: [id] });
+    const record = fetchRes.records[id];
+    if (!record) return res.status(404).json({ error: 'Record not found' });
+
+    let currentBoost = parseFloat(record.metadata?.popularity_boost as string) || 1.0;
+
+    // Adjust based on signal
+    if (type === 'success') {
+      currentBoost = Math.min(3.0, currentBoost + 0.05); // Cap at 3x
+    } else if (type === 'pogo') {
+      currentBoost = Math.max(0.5, currentBoost - 0.05); // Floor at 0.5x
+    }
+
+    // Update asynchronously
+    await index.namespace(namespace).update({
+      id,
+      metadata: { ...record.metadata, popularity_boost: String(currentBoost) }
+    });
+
+    res.json({ success: true, boost: currentBoost });
+  } catch (error) {
+    console.error("Feedback error:", error);
+    res.status(500).json({ error: 'Feedback loop failed' });
+  }
+});
 app.post('/api/search', async (req, res) => {
-  const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
-  const pageSize = 10;
-  const skip = (page - 1) * pageSize;
-  
-  const pc = getPinecone();
-  if (!pc) return res.status(503).json({ error: 'Pinecone not configured' });
-  const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
-  const namespace = process.env.PINECONE_NAMESPACE || '';
+  try {
+    const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
+    const pageSize = 10;
+    const skip = (page - 1) * pageSize;
+    
+    const pc = getPinecone();
+    if (!pc) return res.status(503).json({ error: 'Pinecone not configured' });
+    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
+    const namespace = process.env.PINECONE_NAMESPACE || '';
 
-  let finalQuery = query;
-  let correction = null;
+    let finalQuery = query;
 
-  // VISUAL SEARCH LOGIC (Google-Grade Similarity Search)
-  let visualVector: number[] | null = null;
-  let visualMathProblem: any = null;
-  if (imageQuery && imageQuery.startsWith('data:image')) {
-    try {
-      console.log("Scout Vision: Stage 1 - Feature Extraction...");
-      const [mime, base64] = imageQuery.split(',');
-      const mimeType = mime.split(':')[1].split(';')[0];
-      
-      const visionPrompt = `Act as a visual analyzer for a search engine. Break this image into a 'Mathematical Fingerprint'.
-      Be extremely specific. Focus on: Primary Objects, Colors, Textures, Geometric Shapes, and Style.
-      Output ONLY a dense string of 50 descriptive tokens/keywords. NO sentences.`;
-      
-      let visualDescription = "";
-      if (rawKey && rawKey.length > 20) {
-        const visionResult = await aiModel.generateContent([
-          visionPrompt,
-          { inlineData: { data: base64, mimeType } }
-        ] as any);
-        visualDescription = visionResult.response.text().trim();
-        visualMathProblem = {
-          features: visualDescription.split(',').map(s => s.trim()).slice(0, 12),
-          timestamp: new Date().toISOString()
-        };
-      }
-
-      // Stage 2: Vectorization
-      if (visualDescription) {
-        visualVector = await getEmbedding(visualDescription);
-        console.log(`✅ Scout Vision: Stage 2 - Vectorization Complete (${visualVector?.length} dims)`);
-      } else {
+    // VISUAL SEARCH LOGIC (Local CLIP Vectorization)
+    let visualVector: number[] | null = null;
+    if (imageQuery && imageQuery.startsWith('data:image')) {
+      try {
+        console.log("Scout Lens: Process started...");
         const pipes = await getPipes();
+        
+        if (!pipes) {
+          return res.status(503).json({ 
+            error: "Neural Engines Warming Up", 
+            message: "Scout Lens is currently loading its neural models. This usually takes 30-60 seconds on first start. Please try again in a moment." 
+          });
+        }
+
         if (pipes?.vision_pipe) {
           try {
-            // Direct Data URL ingestion is highly robust for RawImage
-            const image = await RawImage.read(imageQuery);
+            // Use RawImage.read for stable data URL processing
+            const image = await RawImage.read(imageQuery); 
             const output = await pipes.vision_pipe(image);
             visualVector = Array.from(output.data);
-            if (visualVector.length === 512) visualVector = [...visualVector, ...Array(256).fill(0)];
+            
+            // Pad or interpolate to 768 dimensions if necessary to match index
+            if (visualVector.length === 512) {
+               visualVector = [...visualVector, ...Array(256).fill(0)];
+            }
+            console.log(`✅ Scout Lens: Vector match generated (${visualVector.length} dims)`);
           } catch (innerErr: any) {
-             console.warn("Local Vision extraction failure (Falling back):", innerErr.message);
+            console.error("Scout Lens: extraction failure:", innerErr.message);
           }
         }
+      } catch (err: any) {
+        console.warn("Scout Lens: system failure:", err.message);
       }
-    } catch (err: any) {
-      console.warn("Scout Vision extraction failure (Metadata fallback enabled):", err.message);
     }
-  }
 
-  // 0. Autocorrect (Only if not a visual search)
-  if (!imageQuery) {
-    try {
-      if (rawKey && rawKey.length > 20) {
-        const prompt = `Act as a search engine spell checker. Check if "${query}" has obvious typos. 
-        If it has an obvious typo, return ONLY the corrected string. 
-        If it is likely correct or a brand name, return the exact same string.
-        Be conservative. Only correct if you are 95% certain (e.g. "icy veinds" -> "icy veins").`;
-        
-        const r = await aiModel.generateContent(prompt);
-        const text = r.response.text()?.trim() || "";
-        
-        if (text.toLowerCase() !== query.toLowerCase() && text.length > 0 && text.length < 100) {
-          correction = text;
-          finalQuery = text;
+    const intentData = await detectLocalIntent(finalQuery);
+    let dictionaryResult = null;
+    let suggestKnowledgePanel = intentData?.is_entity || false;
+    let detectedEntity = intentData?.is_entity ? { name: intentData.entity_name, type: null } : null;
+    let isEnglishHelp = intentData?.is_english_help || false;
+
+    if (intentData?.is_dictionary && intentData.dictionary_word) {
+      try {
+        const word = intentData.dictionary_word.trim();
+        const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
+        const dictRes = await axios.get(dictUrl);
+        const data = dictRes.data[0];
+        if (data) {
+          dictionaryResult = {
+            word: data.word,
+            phonetic: data.phonetic || data.phonetics?.[0]?.text || '',
+            audio: data.phonetics.find((p: any) => p.audio)?.audio || '',
+            class: data.meanings[0]?.partOfSpeech || '',
+            definition: data.meanings[0]?.definitions[0]?.definition || '',
+            example: data.meanings[0]?.definitions[0]?.example || '',
+            synonyms: data.meanings[0]?.synonyms?.slice(0, 5) || [],
+            antonyms: data.meanings[0]?.antonyms?.slice(0, 5) || []
+          };
         }
-      }
-    } catch (e) {
-      console.log("Gemini Autocorrect skipped");
+      } catch (err) {}
     }
-  }
 
-  // 1. Process Intent (LOCAL MODELS - NO API LIMITS)
-  const intentData = await detectLocalIntent(finalQuery);
-  let dictionaryResult = null;
-  let suggestKnowledgePanel = intentData?.is_entity || false;
-  let detectedEntity = intentData?.is_entity ? { name: intentData.entity_name, type: null } : null;
-  let isEnglishHelp = intentData?.is_english_help || false;
+    const siteMatch = query?.match(/site:\s*([a-zA-Z0-9.-]+)/i);
+    const filterDomain = siteMatch ? siteMatch[1].toLowerCase() : null;
+    const cleanQuery = filterDomain ? query.replace(/site:\s*[a-zA-Z0-9.-]+/i, '').trim() : query;
+    const domainVariations = filterDomain ? [filterDomain, `www.${filterDomain}`] : null;
 
-  if (intentData?.is_dictionary && intentData.dictionary_word) {
-    try {
-      const word = intentData.dictionary_word.trim();
-      const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
-      const dictRes = await axios.get(dictUrl);
-      const data = dictRes.data[0];
-      if (data) {
-        const audio = data.phonetics.find((p: any) => p.audio)?.audio || '';
-        dictionaryResult = {
-          word: data.word,
-          phonetic: data.phonetic || data.phonetics?.[0]?.text || '',
-          audio: audio,
-          class: data.meanings[0]?.partOfSpeech || '',
-          definition: data.meanings[0]?.definitions[0]?.definition || '',
-          example: data.meanings[0]?.definitions[0]?.example || '',
-          synonyms: data.meanings[0]?.synonyms?.slice(0, 5) || [],
-          antonyms: data.meanings[0]?.antonyms?.slice(0, 5) || []
-        };
-      }
-    } catch (err) {
-      console.error("Dictionary lookup failed:", err);
-    }
-  }
+    let vectorResults: any = { matches: [] };
+    let keywordResults: any = { matches: [] };
 
-  // 2. Sitelink & Domain Logic
-  const siteMatch = query?.match(/site:\s*([a-zA-Z0-9.-]+)/i);
-  const filterDomain = siteMatch ? siteMatch[1].toLowerCase() : null;
-  const cleanQuery = filterDomain ? query.replace(/site:\s*[a-zA-Z0-9.-]+/i, '').trim() : query;
-
-  const domainVariations = filterDomain ? [
-    filterDomain,
-    filterDomain.startsWith('www.') ? filterDomain.replace('www.', '') : `www.${filterDomain}`
-  ] : null;
-
-  let vectorResults: any = { matches: [] };
-  let keywordResults: any = { matches: [] };
-
-  // News Filter
-  const newsFilter = type === 'news' ? {
-    "$or": [
-      { domain: { "$in": ['nytimes.com', 'bbc.co.uk', 'reuters.com', 'theverge.com', 'cnn.com', 'theguardian.com', 'bloomberg.com', 'wsj.com'] } },
-      { isNews: { "$eq": true } }
-    ]
-  } : null;
-
-  if (filterDomain && !cleanQuery) {
-    // CASE: Only site:domain -> Pure filter search
-    const domainFilter: any = { domain: { "$in": domainVariations } };
-    
-    const vFilter = type === 'images' ? {
-      "$and": [
-        domainFilter,
-        {
-          "$or": [
-            { image: { "$exists": true } },
-            { thumbnail: { "$exists": true } },
-            { ogImage: { "$exists": true } },
-            { imageUrl: { "$exists": true } }
-          ]
-        }
+    const newsFilter = type === 'news' ? {
+      "$or": [
+        { domain: { "$in": ['nytimes.com', 'bbc.co.uk', 'reuters.com', 'theverge.com', 'cnn.com', 'theguardian.com'] } },
+        { isNews: { "$eq": true } }
       ]
-    } : domainFilter;
+    } : null;
 
-    const domainRes = await index.query({
-      vector: Array(768).fill(0),
-      topK: 500,
-      filter: vFilter,
-      includeMetadata: true,
-      namespace
-    });
-    keywordResults = domainRes;
-  } else {
-    // NORMAL HYBRID SEARCH
     let vector = providedVector || visualVector;
-
-    if (!vector) {
-      if (finalQuery || query) {
-        vector = await getEmbedding(finalQuery || query);
-      }
-      
-      // Safety Fallback: Use zero vector if all encodings fail
-      if (!vector) {
-        vector = Array(768).fill(0);
-      }
+    
+    // Safety check: Truncate to 768 if it's from a higher-dim model (like Gemini 3 defaults)
+    if (vector && vector.length > 768) {
+      vector = vector.slice(0, 768);
     }
 
-    if (!Array.isArray(vector)) {
-      return res.status(400).json({ error: 'Search vector generation failed' });
+    if (!vector && finalQuery) {
+      const pipes = await getPipes();
+      if (!pipes) {
+        return res.status(503).json({ 
+          error: "Neural Engines Warming Up", 
+          message: "Scout's semantic embedding engine is loading. Please try again in a few seconds." 
+        });
+      }
+      vector = await getEmbedding(finalQuery);
     }
+    
+    if (!vector) vector = Array(768).fill(0);
 
-    // Dynamic filter
     let filter: any = {};
-    if (type === 'images') {
-      filter = { is_image: { "$eq": true } };
-    } else {
-      // Exclude direct image vectors from general site search to avoid duplicates
-      filter = { is_image: { "$ne": true } };
-    }
+    if (type === 'images') filter = { is_image: { "$eq": true } };
+    else filter = { is_image: { "$ne": true } };
 
-    if (filterDomain) {
-      const domainF = { domain: { "$in": domainVariations } };
-      filter = { "$and": [filter, domainF] };
-    }
-    if (newsFilter) {
-      filter = { "$and": [filter, newsFilter] };
-    }
+    if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
+    if (newsFilter) filter = { "$and": [filter, newsFilter] };
 
-    // Prepare keyword variations for better filtering
     const qLower = cleanQuery.toLowerCase();
-    const qUpper = qLower.charAt(0).toUpperCase() + qLower.slice(1);
-    const qBrand = qLower.toUpperCase();
-    const variations = [...new Set([cleanQuery, qLower, qUpper, qBrand])];
+    const brands = ['google', 'apple', 'facebook', 'microsoft', 'amazon', 'github', 'openai', 'anthropic'];
+    const activeBrand = brands.find(b => qLower.includes(b));
+
+    const variations = [...new Set([
+      cleanQuery, 
+      qLower, 
+      qLower.toUpperCase(),
+      `${qLower}.com`,
+      `${qLower}.org`,
+      `${qLower}.net`,
+      `www.${qLower}.com`,
+      `www.${qLower}`,
+      `${qLower} search`,
+      `${qLower} official`
+    ])];
 
     const [vRes, kRes] = await Promise.all([
       index.query({
         vector,
         topK: 500,
-        filter: Object.keys(filter).length > 0 ? filter : undefined,
         includeMetadata: true,
         namespace
+      }).catch(err => {
+        console.error("Vector query failed:", err);
+        return { matches: [] };
       }),
-        index.query({
+      index.query({
         vector: Array(vector.length).fill(0),
         filter: {
           ...filter,
           "$or": [
             { title: { "$in": variations } },
-            { alt: { "$in": variations } },
             { text: { "$in": variations } },
-            { name: { "$in": variations } },
-            { brand: { "$in": variations } },
-            { url: { "$in": variations } },
-            { domain: { "$in": variations } },
-            { domain: { "$in": domainVariations || [] } }
+            { domain: { "$in": variations || [] } }
           ]
         },
         topK: 100,
         includeMetadata: true,
         namespace
-      }).catch(() => ({ matches: [] }))
-      ]).catch(err => { console.error("Pinecone query error:", err); return [ { matches: [] }, { matches: [] } ] });
+      }).catch(err => {
+        console.error("Keyword query failed:", err);
+        return { matches: [] };
+      })
+    ]);
+
     vectorResults = vRes;
     keywordResults = kRes;
-  }
 
-  try {
     const allMatches = [...vectorResults.matches, ...keywordResults.matches];
-    
     const seenIds = new Set();
     const uniqueMatches = allMatches.filter(match => {
       if (seenIds.has(match.id)) return false;
@@ -472,24 +382,29 @@ app.post('/api/search', async (req, res) => {
     const allResults = uniqueMatches.map(match => {
       const meta = match.metadata as any;
       const url = meta.url || '';
-        let dom = 'unknown';
-        try {
-          if (url && url.startsWith('http')) {
-            dom = new URL(url).hostname;
-          }
-        } catch (e) {
-          console.warn("Invalid URL in metadata:", url);
-        }
+      let dom = 'unknown';
+      try { if (url) dom = new URL(url).hostname; } catch (e) {}
 
-      // Filter out non-English wikipedia to reduce noise
-      if (dom.includes('.wikipedia.org') && !dom.startsWith('en.wikipedia.org')) {
-        return null;
-      }
+      // Identify Navigational Intent
+      const cleanDom = dom.toLowerCase().replace('www.', '');
+      const isNavIntent = cleanDom.includes(qLower.replace(/\s+/g, '')) && (cleanDom.length <= qLower.length + 8);
+      const isExactMatch = cleanDom === `${qLower.replace(/\s+/g, '')}.com` || cleanDom === `${qLower.replace(/\s+/g, '')}.org`;
+      
+      // Is it an official property of the detected brand?
+      const isOfficialProperty = activeBrand && cleanDom.endsWith(`${activeBrand}.com`);
+      
+      const isRootDomain = dom.split('.').length <= 3 && !dom.includes('github') && !dom.includes('theverge'); 
+      const boost = parseFloat(meta.popularity_boost) || 1.0;
 
       return {
         ...meta,
         id: match.id,
-        score: match.score,
+        score: match.score || 0,
+        boost,
+        isNavIntent,
+        isExactMatch,
+        isRootDomain,
+        isOfficialProperty,
         title: prettifyTitle(meta.title || meta.name || '', url),
         url: url,
         displayUrl: dom,
@@ -497,82 +412,55 @@ app.post('/api/search', async (req, res) => {
         image: meta.image || meta.thumbnail || meta.ogImage || meta.imageUrl || null,
         sourceIcon: `https://icons.duckduckgo.com/ip3/${dom}.ico`,
       };
-    }).filter((r): r is any => r !== null);
-
-    const q = (query || '').toLowerCase().trim();
-    const keywords = q.split(/\s+/).filter(k => k.length > 2);
-
-    const reranked = allResults.sort((a: any, b: any) => {
-      let scoreA = a.score || 0;
-      let scoreB = b.score || 0;
-
-      // "YOU VISITED THIS PREVIOUSLY" Boosting
-      if (clickedUrls.includes(a.url)) scoreA += 5.0;
-      if (clickedUrls.includes(b.url)) scoreB += 5.0;
-
-      if (q) {
-        const domainA = (a.displayUrl || '').toLowerCase();
-        const domainB = (b.displayUrl || '').toLowerCase();
-        const titleA = (a.title || '').toLowerCase();
-        const titleB = (b.title || '').toLowerCase();
-
-        if (domainA.startsWith(q) || domainA.includes(`.${q}`)) scoreA += 4.0;
-        if (domainB.startsWith(q) || domainB.includes(`.${q}`)) scoreB += 4.0;
-        if (domainA.includes(q)) scoreA += 2.0;
-        if (domainB.includes(q)) scoreB += 2.0;
-
-        if (titleA === q || titleA.startsWith(q) || titleA.includes(q)) scoreA += 2.0;
-        if (titleB === q || titleB.startsWith(q) || titleB.includes(q)) scoreB += 2.0;
-
-        keywords.forEach(kw => {
-          if (titleA.includes(kw)) scoreA += 0.2;
-          if (titleB.includes(kw)) scoreB += 0.2;
-          if (a.snippet?.toLowerCase().includes(kw)) scoreA += 0.1;
-          if (b.snippet?.toLowerCase().includes(kw)) scoreB += 0.1;
-          if (a.alt?.toLowerCase().includes(kw)) scoreA += 0.3;
-          if (b.alt?.toLowerCase().includes(kw)) scoreB += 0.3;
-        });
-      }
-
-      // Global Authority boost
-      const authorityDomains = ['reuters.com', 'gov', 'edu', 'nyt.com', 'bbc.co.uk'];
-      const isWiki = (a.url || a.displayUrl || '').includes('wikipedia.org');
-      const isWikiB = (b.url || b.displayUrl || '').includes('wikipedia.org');
-
-      if (authorityDomains.some(d => a.url?.includes(d))) scoreA += 0.35;
-      if (authorityDomains.some(d => b.url?.includes(d))) scoreB += 0.35;
-
-      // Wikipedia boost nearly eliminated
-      if (isWiki) scoreA += 0.01;
-      if (isWikiB) scoreB += 0.01;
-
-      // Heavy penalty for Wikipedia if it's a direct brand search for something else
-      if (q && q.length > 2) {
-        const brands = ['google', 'apple', 'amazon', 'microsoft', 'tesla', 'meta', 'spotify', 'netflix', 'disney', 'nvidia'];
-        if (brands.some(b => q.includes(b))) {
-          if (isWiki) scoreA -= 2.5;
-          if (isWikiB) scoreB -= 2.5;
-        }
-      }
-
-      return scoreB - scoreA;
     });
 
-    // Normalization and Diversity logic
+    const reranked = allResults.sort((a, b) => {
+      // 1. Start with User Intent Hybrid Score
+      let sA = (a.score * 0.7) + (a.boost * 0.3);
+      let sB = (b.score * 0.7) + (b.boost * 0.3);
+
+      // 2. Navigational/Brand Centric Pins (Astronomical boosts to guarantee order)
+      if (a.isExactMatch) sA += 150.0;
+      if (b.isExactMatch) sB += 150.0;
+      
+      if (a.isOfficialProperty) sA += 80.0;
+      if (b.isOfficialProperty) sB += 80.0;
+
+      if (a.isNavIntent && a.isRootDomain) sA += 10.0;
+      if (b.isNavIntent && b.isRootDomain) sB += 10.0;
+
+      // Semantic Strength
+      const tA = a.title.toLowerCase();
+      const tB = b.title.toLowerCase();
+      if (tA === qLower) sA += 30.0;
+      if (tB === qLower) sB += 30.0;
+      if (tA.includes(qLower)) sA += 2.0;
+      if (tB.includes(qLower)) sB += 2.0;
+
+      if (clickedUrls.includes(a.url)) sA += 5.0;
+      if (clickedUrls.includes(b.url)) sB += 5.0;
+
+      // Penalize deep links for generic searches
+      if (a.url.length > 70 && !a.isExactMatch && !a.isOfficialProperty) sA -= 1.0;
+      if (b.url.length > 70 && !b.isExactMatch && !b.isOfficialProperty) sB -= 1.0;
+
+      return sB - sA;
+    });
+
+    // Smart Diversity: Group official sites together, but demote secondary domains
     const finalResults: any[] = [];
     const domainCountMap = new Map();
-
     reranked.forEach(res => {
-      const url = res.url || '';
-      let domainKey = res.displayUrl || 'unknown';
+      const domainKey = res.displayUrl || 'unknown';
+      const count = domainCountMap.get(domainKey) || 0;
       
-      // Improve diversity: Allow subdomains (books.google.com, news.google.com) to be distinct
-      // but limit repetitions of exact same sub-site to 2 entries in total list
-      const subSiteCount = domainCountMap.get(domainKey) || 0;
-      
-      if (subSiteCount < 2) { 
+      // Allow many results for official properties (e.g. show many Google sites for "Google")
+      // But restrict third-party sites (e.g. limit github items to 2 when searching Google)
+      const limit = res.isOfficialProperty ? 8 : 2; 
+
+      if (count < limit) { 
         finalResults.push(res);
-        domainCountMap.set(domainKey, subSiteCount + 1);
+        domainCountMap.set(domainKey, count + 1);
       }
     });
 
@@ -585,16 +473,16 @@ app.post('/api/search', async (req, res) => {
       suggestKnowledgePanel,
       detectedEntity,
       isEnglishHelp,
-      correction,
-      originalQuery: correction ? query : null,
+      correction: null, 
+      originalQuery: null,
       page,
       totalPages,
       totalResults: finalResults.length,
-      visualMathProblem
+      visualMathProblem: null 
     });
-  } catch (error: any) {
-    console.error('Pinecone search error:', error);
-    res.status(500).json({ error: error.message });
+  } catch (err: any) {
+    console.error("Search API Error:", err);
+    res.status(500).json({ error: "Internal search engine error", message: err.message });
   }
 });
 
@@ -665,138 +553,18 @@ app.get('/api/me', (req, res) => {
   res.json({ user: req.session?.user || null });
 });
 
-app.post('/api/logout', (req, res) => {
-  req.session = null;
-  res.json({ success: true });
-});
+app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: true }); });
 
-// --- AI ENDPOINTS ---
-app.post('/api/ai/overview', async (req, res) => {
-  try {
-    const { query, context, isLinguisticHelp } = req.body;
-
-    if (!query) {
-      return res.status(400).json({ error: "Query is required" });
-    }
-
-    const hasValidKey = !!(rawKey && rawKey.length > 20);
-
-    // Priority 1: Gemini (Fastest & Best for Serverless)
-    if (hasValidKey) {
-      try {
-        const prompt = isLinguisticHelp
-          ? `Provide a concise grammar, spelling, and usage guide for: "${query}". Respond in Markdown with clear examples.`
-          : `Provide a comprehensive AI Overview for the search query: "${query}". 
-             Use the following search results as context: ${context || 'No specific context available.'}
-             Format your response with Markdown (use bolding, lists, or tables where appropriate).`;
-
-        const result = await aiModel.generateContent(prompt);
-        const text = result.response.text();
-        if (text) return res.json({ text });
-      } catch (e: any) {
-        console.error("Gemini AI Overview failed:", e.message);
-      }
-    }
-
-    // Fallback: If context is present but Gemini failed, we can't do local summary anymore (to stay light)
-    res.json({ 
-      text: "The AI Overview is currently unavailable. This might be due to a missing API key or heavy traffic. Please check the search results below." 
-    });
-  } catch (globalErr: any) {
-    console.error("Critical error in /api/ai/overview:", globalErr);
-    res.status(500).json({ error: "Internal Server Error", message: globalErr.message });
-  }
-});
-
-app.post('/api/ai/summarize', async (req, res) => {
-  const { text, max_tokens = 60 } = req.body;
-  try {
-    if (rawKey && rawKey.length > 20) {
-      const prompt = `Summarize the following text in about ${max_tokens} words:\n\n${text.substring(0, 3000)}`;
-      const result = await aiModel.generateContent(prompt);
-      return res.json({ summary: result.response.text() });
-    }
-    res.status(503).json({ error: "Summarizer unavailable (API Key missing)" });
-  } catch (e: any) {
-    console.error("Summarization error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-  app.post('/api/ai/faq', async (req, res) => {
-    const { query, context } = req.body;
-    
-    // FAQ can be derived from summary if Gemini fails
-    try {
-      if (rawKey && rawKey.length > 20) {
-        const prompt = `Query: "${query}"\nContext: ${context}\nGenerate 5-6 relevant FAQs as JSON: [{"question": "...", "answer": "..."}]`;
-        const result = await aiModel.generateContent(prompt);
-        const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
-        return res.json(JSON.parse(text || '[]'));
-      }
-    } catch (e) {}
-
-    // Local Fallback: Extract from text
-    res.json([
-      { "question": `What should I know about ${query}?`, "answer": `Explore the search results below to learn more about ${query} across multiple platforms and news sources.` }
-    ]);
-  });
-
-  app.post('/api/ai/knowledge', async (req, res) => {
-    const { entityName, entityType } = req.body;
-    try {
-      if (rawKey && rawKey.length > 20) {
-        const prompt = `Entity: "${entityName}" (${entityType || 'General'})
-Generate a high-quality Knowledge Panel JSON: {"title": "...", "subtitle": "...", "description": "...", "image": "...", "details": [...], "sections": [...]}`;
-
-        const result = await aiModel.generateContent(prompt);
-        const text = result.response.text()?.replace(/```json/g, '').replace(/```/g, '').trim();
-        if (text === 'null') return res.json(null);
-        return res.json(JSON.parse(text));
-      }
-    } catch (e) {}
-
-    // Local Fallback
-    res.json({
-      title: entityName,
-      subtitle: entityType || "General Information",
-      description: `Exploring ${entityName}. Discover more by checking the search results and images provided below.`,
-      image: `https://picsum.photos/seed/${encodeURIComponent(entityName)}/800/600`,
-      details: [
-        { label: "Search Topic", value: entityName }
-      ],
-      sections: [
-        { title: "Quick Fact", content: `Scout has identified "${entityName}" as a relevant topic for your current search.` }
-      ]
-    });
-  });
-
-// --- VITE MIDDLEWARE ---
+// Vite Middleware
 if (process.env.NODE_ENV !== 'production') {
-  // Dynamically loading Vite to keep production startup light
-  import('vite').then(async ({ createServer }) => {
-    const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
-    app.use(vite.middlewares);
-  });
+  const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+  app.use(vite.middlewares);
 } else {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
+  app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
-// --- ERROR HANDLER ---
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error('SERVER ERROR:', err);
-  res.status(500).json({ error: 'Internal Server Error', message: err.message });
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
-
-// Only start listening if not running on Vercel or explicitly called via tsx/node
-if (process.env.NODE_VITE_DEV === 'true' || process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-export default app;
