@@ -26,21 +26,18 @@ const __dirname = path.dirname(__filename);
 
 // Local Neural Search Engines (768 dimensions)
 let text_pipe: any = null;
-let vision_pipe: any = null;
 let isModelLoading = false;
 async function getPipes() {
-  if (text_pipe && vision_pipe) return { text_pipe, vision_pipe };
+  if (text_pipe) return { text_pipe };
   if (isModelLoading) return null;
   
   try {
     isModelLoading = true;
-    console.log("🚀 Warming MPNet Search Engine (768-dim)...");
+    console.log("🚀 Loading MPNet Search Engine...");
     
     if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
-    if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-large-patch14');
 
-    console.log("✅ Scout Neural Engines ready!");
-    return { text_pipe, vision_pipe };
+    return { text_pipe };
   } catch (err: any) {
     console.error("❌ Multimodal Engine failure:", err.message);
     return null;
@@ -224,32 +221,12 @@ app.post('/api/search', async (req, res) => {
 
     // VISUAL SEARCH LOGIC (Local CLIP Vectorization)
     let visualVector: number[] | null = null;
-    if (imageQuery && imageQuery.startsWith('data:image')) {
-      try {
-        console.log("Scout Lens: Process started...");
-        const pipes = await getPipes();
-        
-        if (!pipes) {
-          return res.status(503).json({ 
-            error: "Neural Engines Warming Up", 
-            message: "Scout Lens is currently loading its neural models. This usually takes 30-60 seconds on first start. Please try again in a moment." 
-          });
-        }
-
-        if (pipes?.vision_pipe) {
-          try {
-            // Use RawImage.read for stable data URL processing
-            const image = await RawImage.read(imageQuery);
-            const output = await pipes.vision_pipe(image);
-            visualVector = Array.from(output.data);
-            console.log(`✅ Scout Lens: Vector match generated (${visualVector.length} dims)`);
-          } catch (innerErr: any) {
-            console.error("Scout Lens: extraction failure:", innerErr.message);
-          }
-        }
-      } catch (err: any) {
-        console.warn("Scout Lens: system failure:", err.message);
-      }
+    if (imageQuery) {
+      console.warn("Visual search disabled in serverless mode to prevent memory crashes.");
+      return res.status(400).json({ 
+        error: "Feature Unavailable", 
+        message: "Visual search requires a high-memory environment not available in this tier." 
+      });
     }
 
     const intentData = await detectLocalIntent(finalQuery);
