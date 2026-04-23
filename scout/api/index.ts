@@ -30,7 +30,7 @@ let vision_pipe: any = null;
 let feature_pipe: any = null;
 let isModelLoading = false;
 async function getPipes() {
-  if (text_pipe && vision_pipe) return { text_pipe, vision_pipe };
+  if (text_pipe && vision_pipe && feature_pipe) return { text_pipe, vision_pipe, feature_pipe };
   if (isModelLoading) return null;
   
   try {
@@ -42,7 +42,7 @@ async function getPipes() {
     if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
 
     console.log("✅ Scout Multimodal Engines ready!");
-    return { text_pipe, vision_pipe };
+    return { text_pipe, vision_pipe, feature_pipe };
   } catch (err: any) {
     console.error("❌ Multimodal Engine failure:", err.message);
     return null;
@@ -51,17 +51,17 @@ async function getPipes() {
   }
 }
 
-async function getEmbedding(text: string): Promise<number[] | null> {
+async function getEmbedding(text: string): Promise<{ mpnetVec: number[], clipVec: number[] } | null> {
   if (!text) return null;
   try {
     const pipes = await getPipes();
-    if (pipes?.text_pipe) {
+    if (pipes?.text_pipe && pipes?.feature_pipe) {
       // Generate MPNet embedding (768-dim)
       const mpnetOutput = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
       const mpnetVec = Array.from(mpnetOutput.data);
 
       // Generate CLIP Text embedding (512-dim, padded to 768 to match index)
-      const clipOutput = await feature_pipe(text, { pooling: 'mean', normalize: true });
+      const clipOutput = await pipes.feature_pipe(text, { pooling: 'mean', normalize: true });
       const clipVec = [...Array.from(clipOutput.data), ...Array(256).fill(0)];
 
       return { mpnetVec, clipVec };
