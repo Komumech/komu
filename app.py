@@ -21,6 +21,7 @@ except AttributeError: pass
 from pinecone import Pinecone
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
+from PIL import Image
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import InferenceClient
 
@@ -335,7 +336,10 @@ def get_komu_engines():
         if not PINECONE_KEY: return None, None
         pc = Pinecone(api_key=PINECONE_KEY)
         index = pc.Index("plex-index")
-        embed_model = SentenceTransformer('all-mpnet-base-v2')
+        
+        # Load Scout v3.5's shared latent space (768-dim Visual Brain)
+        # This allows searching images via text or other images.
+        embed_model = SentenceTransformer('clip-ViT-L-14')
         return index, embed_model
     except Exception as e:
         print(f"CONSOLE ERROR: Engine Init failed: {e}", file=sys.stderr)
@@ -496,7 +500,7 @@ def get_instant_answer(query):
     return None
 
 # --- 5. SEARCH LOGIC ---
-def run_search(query):
+def run_search(query, visual_vector=None):
     if not index or not embed_model:
         st.error("Search engine not connected.")
         return
@@ -511,9 +515,11 @@ def run_search(query):
     with st.spinner("Searching Komu Index..."):
         try:
             # Save to history
-            if st.session_state.user_info: save_history(st.session_state.user_info.get('email'), query)
+            if st.session_state.user_info and not visual_vector: 
+                save_history(st.session_state.user_info.get('email'), query)
             
-            vector = embed_model.encode(query).tolist()
+            # Use visual vector if provided (Image-to-Image), otherwise encode text
+            vector = visual_vector if visual_vector is not None else embed_model.encode(query).tolist()
             query_res = index.query(vector=vector, top_k=80, include_metadata=True)
             matches = rerank_results(query_res.get('matches', []), query)
 
@@ -637,6 +643,19 @@ if is_home:
     st.markdown("<div class='komu-logo-large'>Komu</div>", unsafe_allow_html=True)
     _, col_s, _ = st.columns([1, 4, 1])
     with col_s:
+        # --- SCOUT V3.5 MEMORY STAGE: Visual Upload ---
+        with st.expander("📷 Search by Image", expanded=False):
+            uploaded_img = st.file_uploader("Upload to analyze shapes, colors, and edges", type=['png', 'jpg', 'jpeg', 'webp'])
+            if uploaded_img:
+                try:
+                    img_input = Image.open(uploaded_img).convert('RGB')
+                    v_fingerprint = embed_model.encode(img_input).tolist()
+                    st.session_state.query = f"Visual Search: {uploaded_img.name}"
+                    run_search(st.session_state.query, visual_vector=v_fingerprint)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Visual fingerprint failed: {e}")
+
         # Search input with an integrated X button logic
         s_col1, s_col2 = st.columns([0.9, 0.1])
         with s_col1:

@@ -7,78 +7,88 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-import { pipeline } from '@xenova/transformers';
+import { GoogleGenerativeAI, TaskType } from "@google/generative-ai";
+import { pipeline, RawImage } from '@xenova/transformers';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Embedding Model locally (matches Indexer logic)
-let embedder: any = null;
-let summarizer: any = null;
-
-async function getEmbedder() {
-  if (!embedder) {
-    try {
-      console.log("Initializing local embedding model (Xenova/all-mpnet-base-v2)...");
-      embedder = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
-      console.log("✅ Local embedding model loaded.");
-    } catch (err) {
-      console.error("Failed to load local embedding model:", err);
-      return null;
-    }
-  }
-  return embedder;
-}
-
-async function getSummarizer() {
-  if (!summarizer) {
-    try {
-      console.log("Initializing local summarization model (Xenova/bart-large-cnn)...");
-      summarizer = await pipeline('summarization', 'Xenova/bart-large-cnn');
-      console.log("✅ Local summarizer loaded.");
-    } catch (err) {
-      console.error("Failed to load local summarizer:", err);
-      return null;
-    }
-  }
-  return summarizer;
-}
-
-// Initialize Gemini (using stable SDK)
+// Initialize Gemini (For Summaries & AI Overview only)
 const rawKey = (process.env.GEMINI_API_KEY || '').trim();
-
-if (!rawKey) {
-  console.warn("⚠️ GEMINI_API_KEY is missing from environment variables.");
-} else if (rawKey.length < 20) {
-  console.warn("⚠️ GEMINI_API_KEY looks unusually short. Check your .env configuration.");
-} else {
-  console.log(`✅ Gemini initialized with key: ${rawKey.substring(0, 4)}...${rawKey.substring(rawKey.length - 4)}`);
-}
-
 const genAI = new GoogleGenerativeAI(rawKey);
 const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Helper to get embeddings locally (Matching Indexer Logic)
+// Local Multimodal "Scout Vision" Engine (768 dimensions)
+let text_pipe: any = null;
+let vision_pipe: any = null;
+let isModelLoading = false;
+
+// PRO-ACTIVE WARMUP: Start loading models immediately
+setTimeout(() => {
+  getPipes().catch(() => {});
+}, 1000);
+
+async function getPipes() {
+  if (text_pipe) return { text_pipe, vision_pipe };
+  if (isModelLoading) return null;
+  
+  try {
+    isModelLoading = true;
+    console.log("🚀 Warming Multimodal Engines (768-dim)...");
+    
+    // Semantic Encoder (768-dim) optimized for speed and accuracy
+    text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    
+    // CLIP features - we attempt this in background to avoid blocking if possible
+    getPipesVision().catch(() => {});
+
+    console.log("✅ Scout Multimodal Engine ready!");
+    return { text_pipe, vision_pipe };
+  } catch (err: any) {
+    console.error("❌ Multimodal Engine failure:", err.message);
+    return null;
+  } finally {
+    isModelLoading = false;
+  }
+}
+
+async function getPipesVision() {
+  if (vision_pipe) return vision_pipe;
+  try {
+    vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
+    return vision_pipe;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function getEmbedding(text: string): Promise<number[] | null> {
   if (!text) return null;
   try {
-    const pipe = await getEmbedder();
-    if (!pipe) return null;
-
-    const output = await pipe(text, {
-      pooling: 'mean',
-      normalize: true,
-    });
-
-    return Array.from(output.data);
+    const pipes = await getPipes();
+    if (pipes?.text_pipe) {
+      const output = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
+      return Array.from(output.data);
+    }
   } catch (err: any) {
-    console.error("Local Embedding generation failed:", err.message);
-    return null;
+    console.warn("⚠️ Local embedding failed:", err.message);
   }
+
+  // Backup for deployment (768 matching dimensionality)
+  if (rawKey && rawKey.length > 20) {
+    try {
+      const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+      const result = await embeddingModel.embedContent({
+        content: { parts: [{ text }], role: 'user' },
+        taskType: TaskType.RETRIEVAL_QUERY,
+        outputDimensionality: 768,
+      } as any);
+      if (result?.embedding?.values) return result.embedding.values;
+    } catch (e) {}
+  }
+  return null;
 }
 
 // Local Intent Detection Helper (Simplified for Vercel/Efficiency)
@@ -165,9 +175,10 @@ function prettifyTitle(title: string, url: string) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-  app.set('trust proxy', 1); // Required for secure cookies behind proxies
-  app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.set('trust proxy', 1); // Required for secure cookies behind proxies
+app.use(cors());
   
   // SECURE COOKIES FOR IFRAME
   app.use(cookieSession({
@@ -211,9 +222,9 @@ app.get('/api/suggestions', async (req, res) => {
   }
 });
 
-// SEARCH VIA PINECONE (Supports direct query, pre-generated vector, or site: filters)
+// SEARCH VIA PINECONE (Supports direct query, pre-generated vector, or visual image query)
 app.post('/api/search', async (req, res) => {
-  const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [] } = req.body;
+  const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
   const pageSize = 10;
   const skip = (page - 1) * pageSize;
   
@@ -222,27 +233,78 @@ app.post('/api/search', async (req, res) => {
   const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
   const namespace = process.env.PINECONE_NAMESPACE || '';
 
-  // 0. Autocorrect (Spell check) fallback logic
-  let correction = null;
   let finalQuery = query;
-  try {
-    if (rawKey && rawKey.length > 20) {
-      const prompt = `Act as a search engine spell checker. Check if "${query}" has obvious typos. 
-      If it has an obvious typo, return ONLY the corrected string. 
-      If it is likely correct or a brand name, return the exact same string.
-      Be conservative. Only correct if you are 95% certain (e.g. "icy veinds" -> "icy veins").`;
+  let correction = null;
+
+  // VISUAL SEARCH LOGIC (Google-Grade Similarity Search)
+  let visualVector: number[] | null = null;
+  let visualMathProblem: any = null;
+  if (imageQuery && imageQuery.startsWith('data:image')) {
+    try {
+      console.log("Scout Vision: Stage 1 - Feature Extraction...");
+      const [mime, base64] = imageQuery.split(',');
+      const mimeType = mime.split(':')[1].split(';')[0];
       
-      const r = await aiModel.generateContent(prompt);
-      const text = r.response.text()?.trim() || "";
+      const visionPrompt = `Act as a visual analyzer for a search engine. Break this image into a 'Mathematical Fingerprint'.
+      Be extremely specific. Focus on: Primary Objects, Colors, Textures, Geometric Shapes, and Style.
+      Output ONLY a dense string of 50 descriptive tokens/keywords. NO sentences.`;
       
-      if (text.toLowerCase() !== query.toLowerCase() && text.length > 0 && text.length < 100) {
-        correction = text;
-        finalQuery = text;
+      let visualDescription = "";
+      if (rawKey && rawKey.length > 20) {
+        const visionResult = await aiModel.generateContent([
+          visionPrompt,
+          { inlineData: { data: base64, mimeType } }
+        ] as any);
+        visualDescription = visionResult.response.text().trim();
+        visualMathProblem = {
+          features: visualDescription.split(',').map(s => s.trim()).slice(0, 12),
+          timestamp: new Date().toISOString()
+        };
       }
+
+      // Stage 2: Vectorization
+      if (visualDescription) {
+        visualVector = await getEmbedding(visualDescription);
+        console.log(`✅ Scout Vision: Stage 2 - Vectorization Complete (${visualVector?.length} dims)`);
+      } else {
+        const pipes = await getPipes();
+        if (pipes?.vision_pipe) {
+          try {
+            // Direct Data URL ingestion is highly robust for RawImage
+            const image = await RawImage.read(imageQuery);
+            const output = await pipes.vision_pipe(image);
+            visualVector = Array.from(output.data);
+            if (visualVector.length === 512) visualVector = [...visualVector, ...Array(256).fill(0)];
+          } catch (innerErr: any) {
+             console.warn("Local Vision extraction failure (Falling back):", innerErr.message);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn("Scout Vision extraction failure (Metadata fallback enabled):", err.message);
     }
-  } catch (e) {
-    // Quietly fail for autocorrect, keep original query
-    console.log("Gemini Autocorrect skipped (Key error or model busy)");
+  }
+
+  // 0. Autocorrect (Only if not a visual search)
+  if (!imageQuery) {
+    try {
+      if (rawKey && rawKey.length > 20) {
+        const prompt = `Act as a search engine spell checker. Check if "${query}" has obvious typos. 
+        If it has an obvious typo, return ONLY the corrected string. 
+        If it is likely correct or a brand name, return the exact same string.
+        Be conservative. Only correct if you are 95% certain (e.g. "icy veinds" -> "icy veins").`;
+        
+        const r = await aiModel.generateContent(prompt);
+        const text = r.response.text()?.trim() || "";
+        
+        if (text.toLowerCase() !== query.toLowerCase() && text.length > 0 && text.length < 100) {
+          correction = text;
+          finalQuery = text;
+        }
+      }
+    } catch (e) {
+      console.log("Gemini Autocorrect skipped");
+    }
   }
 
   // 1. Process Intent (LOCAL MODELS - NO API LIMITS)
@@ -325,20 +387,21 @@ app.post('/api/search', async (req, res) => {
     keywordResults = domainRes;
   } else {
     // NORMAL HYBRID SEARCH
-    let vector = providedVector;
+    let vector = providedVector || visualVector;
 
-    if (!vector && query) {
-      // Try to get real embeddings first
-      vector = await getEmbedding(finalQuery);
+    if (!vector) {
+      if (finalQuery || query) {
+        vector = await getEmbedding(finalQuery || query);
+      }
       
-      // Fallback to zeros if embedding fails (to allow keyword filter to still work)
+      // Safety Fallback: Use zero vector if all encodings fail
       if (!vector) {
         vector = Array(768).fill(0);
       }
     }
 
-    if (!vector || !Array.isArray(vector)) {
-      return res.status(400).json({ error: 'Vector or Query is required' });
+    if (!Array.isArray(vector)) {
+      return res.status(400).json({ error: 'Search vector generation failed' });
     }
 
     // Dynamic filter
@@ -526,7 +589,8 @@ app.post('/api/search', async (req, res) => {
       originalQuery: correction ? query : null,
       page,
       totalPages,
-      totalResults: finalResults.length
+      totalResults: finalResults.length,
+      visualMathProblem
     });
   } catch (error: any) {
     console.error('Pinecone search error:', error);
@@ -634,25 +698,9 @@ app.post('/api/ai/overview', async (req, res) => {
       }
     }
 
-    // Priority 2: Local Summarizer (Heavily resource intensive, likely to time out on Vercel)
-    if (!isLinguisticHelp && context && context.trim().length > 0) {
-      try {
-        const pipe = await getSummarizer();
-        if (pipe) {
-          const summary = await pipe(context.substring(0, 2500), {
-            max_new_tokens: 200,
-            repetition_penalty: 1.2,
-          });
-          return res.json({ text: `### AI Overview (Local)\n\n${summary[0].summary_text}` });
-        }
-      } catch (err: any) {
-        console.error("Local summarization fallback failed:", err.message);
-      }
-    }
-
-    // Fallback: Return a helpful message instead of a 500 error
+    // Fallback: If context is present but Gemini failed, we can't do local summary anymore (to stay light)
     res.json({ 
-      text: "The AI Overview is currently unavailable. This might be due to heavy traffic or an unconfigured API key. Please refer to the search results below." 
+      text: "The AI Overview is currently unavailable. This might be due to a missing API key or heavy traffic. Please check the search results below." 
     });
   } catch (globalErr: any) {
     console.error("Critical error in /api/ai/overview:", globalErr);
@@ -660,22 +708,20 @@ app.post('/api/ai/overview', async (req, res) => {
   }
 });
 
-  app.post('/api/ai/summarize', async (req, res) => {
-    const { text, max_tokens = 60 } = req.body;
-    try {
-      const pipe = await getSummarizer();
-      if (!pipe) return res.status(503).json({ error: "Summarizer not ready" });
-      
-      const result = await pipe(text.substring(0, 1500), {
-        max_new_tokens: max_tokens,
-        repetition_penalty: 1.1,
-      });
-      res.json({ summary: result[0].summary_text });
-    } catch (e: any) {
-      console.error("Summarization error:", e);
-      res.status(500).json({ error: e.message });
+app.post('/api/ai/summarize', async (req, res) => {
+  const { text, max_tokens = 60 } = req.body;
+  try {
+    if (rawKey && rawKey.length > 20) {
+      const prompt = `Summarize the following text in about ${max_tokens} words:\n\n${text.substring(0, 3000)}`;
+      const result = await aiModel.generateContent(prompt);
+      return res.json({ summary: result.response.text() });
     }
-  });
+    res.status(503).json({ error: "Summarizer unavailable (API Key missing)" });
+  } catch (e: any) {
+    console.error("Summarization error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
   app.post('/api/ai/faq', async (req, res) => {
     const { query, context } = req.body;

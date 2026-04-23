@@ -1,9 +1,11 @@
 import os
+import io
 import time
 import requests
 import trafilatura
 import urllib3
 from bs4 import BeautifulSoup
+from PIL import Image
 import re
 import random
 import threading
@@ -36,7 +38,7 @@ session = requests.Session()
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
-BLACKLIST = ["facebook.com", "twitter.com", "instagram.com", "tiktok.com", "quora.com", "reddit.com", "amazon.com", "ebay.com"]
+BLACKLIST = ["nothing.com"]
 
 # --- DICTIONARY & PHRASE SEEDS FOR AUTONOMY ---
 POPULAR_PREFIXES = [
@@ -73,7 +75,80 @@ def get_autonomous_seeds(count=5):
     return final_seeds
 
 SEARCH_TOPICS = [
-
+"https://www.amazon.com",
+"https://aws.amazon.com",
+"https://www.amazon.com/firetv",
+"https://maps.google.com",
+"https://www.instagram.com",
+"https://www.facebook.com",
+    "youtube",
+"facebook",
+"whatsapp web",
+"google",
+"gmail",
+"amazon",
+"weather",
+"chatgpt",
+"instagram",
+"roblox",
+"netflix",
+"canva",
+"google maps",
+"translator",
+    "youtube",
+"facebook",
+"whatsapp web",
+"google",
+"gmail",
+"amazon",
+"weather",
+"chatgpt",
+"instagram",
+"roblox",
+"netflix",
+"canva",
+"google maps",
+"translator",
+"komumech",
+"komutheme",
+"komunote",
+"komucalendar",
+"wordle",
+"what time is it",
+"what is my ip",
+"how to tie a tie",
+"calculator",
+"temu",
+"shein",
+"zillow",
+"gemini",
+"espn",
+"ebay",
+"walmart",
+"twitter",
+"twitch",
+"duckduckgo",
+"character ai",
+"pinterest",
+"linkedin",
+"tiktok",
+"spotify",
+"bing homepage quiz",
+"gold price",
+"stock market today",
+"how to screenshot on mac",
+"how to delete facebook account",
+"what to watch",
+"restaurants near me",
+"flights to london",
+"nfl scores",
+"premier league table",
+"ai image generator",
+"claude ai",
+"outlook",
+"yahoo mail",
+"hotstar",
+"cricbuzz",
     "Rust vs Mojo for systems programming in 2026",
     "edge computing vs cloud computing trends",
     "cybersecurity best practices for small agencies",
@@ -89,7 +164,132 @@ SEARCH_TOPICS = [
     "biohacking trends for better focus and sleep",
     "home workout routines for busy students",
     "sustainable and vegan protein sources",
-
+"DStv",
+"GOtv",
+"StarTimes",
+"DStv Stream",
+"Showmax",
+"MultiChoice",
+"Cartoon Network",
+"Warner Bros. Animation",
+"DC Studios",
+"Hanna-Barbera Studios Europe",
+"Cartoon Network Studios",
+"The Amazing World of Gumball",
+"Teen Titans Go!",
+"Justice League Action",
+"Ben 10",
+"Craig of the Creek",
+"Disney Junior",
+"Disney Channel",
+"Disney Television Animation",
+"Marvel Studios",
+"Pixar Animation Studios",
+"Bluey",
+"Ludo Studio",
+"BBC Studios",
+"Pupstruction",
+"Ariel",
+"Alice’s Wonderland Bakery",
+"The Owl House",
+"Wizards Beyond Waverly Place",
+"Kiff",
+"Miraculous: Tales of Ladybug & Cat Noir",
+"Zagtoon",
+"Method Animation",
+"Nickelodeon",
+"Nick Jr.",
+"Nicktoons",
+"Nickelodeon Animation Studio",
+"Paramount Global",
+"The Loud House",
+"SpongeBob SquarePants",
+"Avatar: Seven Havens",
+"The Thundermans Undercover",
+"PAW Patrol",
+"Spin Master Entertainment",
+"Baby Shark’s Big Show",
+"Pinkfong",
+"The Tiny Chef Show",
+"Imagine Entertainment",
+"The Casagrandes",
+"Henry Danger",
+"Danger Force",
+"Moonbug Kids",
+"Moonbug Entertainment",
+"CoComelon",
+"Blippi",
+"Little Angel",
+"Supa Strikas",
+"Lebone Media",
+"DreamWorks",
+"DreamWorks Animation",
+"Universal Pictures",
+"How to Train Your Dragon: The Hidden World",
+"The Epic Tales of Captain Underpants",
+"Trolls: The Beat Goes On!",
+"Kung Fu Panda",
+"Bad Guys: The Series",
+"Puss in Boots: The Last Wish",
+"Forgotten Island",
+"Illumination",
+"Nintendo",
+"The Super Mario Galaxy Movie",
+"Minions: The Rise of Gru",
+"Sony Pictures Animation",
+"Columbia Pictures",
+"Spider-Man: Across the Spider-Verse",
+"Goat",
+"K-Pop Demon Hunters",
+"Hoppers",
+"Elemental",
+"Toy Story 5",
+"Cartoonito",
+"Tom & Jerry",
+"Masha and the Bear",
+"Animaccord Animation Studio",
+"Grizzy & the Lemmings",
+"Studio Hari",
+"CBeebies",
+"Mojo Swoptops",
+"Playtime Towers",
+"Hey Duggee",
+"Studio AKA",
+"JimJam",
+"Ricky Zoom",
+"Entertainment One",
+"Da Vinci Kids",
+"Operation Ouch",
+"PinCode",
+"PBS Kids",
+"Wild Kratts",
+"Arthur",
+"Daniel Tiger’s Neighborhood",
+"Fred Rogers Productions",
+"Toonami",
+"Toei Animation",
+"Dragon Ball Super",
+"ST Kids",
+"The Adventures of Little Penguin",
+"Kartoon",
+"Angry Birds",
+"Rovio Entertainment",
+"Stan Lee’s Superhero Kindergarten",
+"Netflix Animation",
+"The Sea Beast",
+"Steps",
+"Narnia",
+"Walden Media",
+"Nemsia Studios",
+"Supernowa",
+"Mattel",
+"Barbie’s Dog Adventure",
+"Jay Jay: The Chosen One",
+"Tim Burton’s Corpse Bride",
+"Harry Potter",
+"Heyday Films",
+"Wildwood",
+"Laika Studios",
     # --- Sports & E-sports ---
     "upcoming world cup 2026 qualifying schedules",
     "top E-sports tournaments and prize pools 2026",
@@ -121,7 +321,13 @@ SEARCH_TOPICS = [
 
 # --- INIT ENGINES ---
 print(f"🛰️  KOMU SCOUT v15.2 - DEEP-DIVE & AI ENABLED")
-model = SentenceTransformer('all-mpnet-base-v2')
+# Standardizing to the Scout v3.5 Visual Brain (768-dim CLIP)
+model = SentenceTransformer('clip-ViT-L-14')
+print("✅ Model Loaded: clip-ViT-L-14 (768 Dimensions)")
+# Double check the dimension before starting the crawl
+sample_encoding = model.encode("Verify 768")
+print(f"📐 Verified Vector Size: {len(sample_encoding)}")
+
 pc = Pinecone(api_key=PINECONE_KEY)
 pc_index = pc.Index(INDEX_NAME)
 
@@ -195,20 +401,34 @@ def get_seeds_robust(queries):
     except: pass
     return list(set(seeds))
 
-def index_to_pinecone(url, text, domain, is_image=False):
+def index_to_pinecone(url, content, domain, is_image=False, alt_text="", t_name="Unknown"):
     try:
-        vector = model.encode(text).tolist()
+        # Encoding content (truncating text to maintain performance)
+        input_data = content[:1000] if isinstance(content, str) else content
+        vector = model.encode(input_data).tolist()
         v_id = re.sub(r'\W+', '_', url)[:512]
-        metadata = {"url": url, "domain": domain, "text": text[:800]}
+        
         if is_image:
-            metadata["image"] = url
-            metadata["title"] = text[:200]  # Store alt text as title for display
+            metadata = {
+                "url": url, 
+                "domain": domain, 
+                "text": alt_text[:800],
+                "image": url,
+                "title": alt_text[:200],
+                "is_image": True
+            }
+        else:
+            # content is text string
+            metadata = {"url": url, "domain": domain, "text": str(content)[:800]}
+
         pc_index.upsert(
             vectors=[{"id": v_id, "values": vector, "metadata": metadata}],
             namespace=NAMESPACE
         )
         return True
-    except: return False
+    except Exception as e:
+        tqdm.write(f"❌ [{t_name}] Pinecone Error: {str(e)[:100]}")
+        return False
 
 def crawler_worker():
     global active_workers
@@ -254,11 +474,19 @@ def crawler_worker():
                             if any(img_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp']):
                                 if not any(bad in img_url for bad in BLACKLIST):
                                     with data_lock:
-                                        if domain_image_counts.get(domain, 0) < 3 and img_url not in visited:
-                                            if index_to_pinecone(img_url, alt_text, domain, is_image=True):
-                                                visited.add(img_url)
-                                                domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
-                                                tqdm.write(f"🖼️ [{t_name}] IMAGE INDEXED: {img_url}")
+                                        needs_indexing = domain_image_counts.get(domain, 0) < 3 and img_url not in visited
+                                    
+                                    if needs_indexing:
+                                        try:
+                                            img_resp = session.get(img_url, timeout=10, verify=False)
+                                            if img_resp.status_code == 200:
+                                                img_obj = Image.open(io.BytesIO(img_resp.content)).convert('RGB')
+                                                if index_to_pinecone(img_url, img_obj, domain, is_image=True, alt_text=alt_text, t_name=t_name):
+                                                    with data_lock:
+                                                        visited.add(img_url)
+                                                        domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
+                                                        tqdm.write(f"🖼️ [{t_name}] PIXEL INDEXED: {img_url}")
+                                        except Exception: pass
                 except Exception: pass
 
                 text = trafilatura.extract(resp.text) or ""
@@ -272,7 +500,7 @@ def crawler_worker():
 
                 # Lower barrier for Root Domains (100 chars) vs Articles (400 chars)
                 if len(text) > (100 if is_root else 400):
-                    if index_to_pinecone(url, text, domain):
+                    if index_to_pinecone(url, text, domain, is_image=False, t_name=t_name):
                         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         tqdm.write(f"✅ [{now}] [{t_name}] INDEXED: {url}")
 

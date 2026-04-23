@@ -1,10 +1,14 @@
 import trafilatura
 import re
+import requests
+import io
 from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 from pinecone import Pinecone
 from urllib.parse import urlparse, urljoin
+from PIL import Image
+from sentence_transformers import SentenceTransformer
 
 # --- IMPORT FROM CONFIG ---
 try:
@@ -16,6 +20,10 @@ except ImportError:
     print("🚨 [Config Error] config.py not found!")
     GEMINI_KEY = None
     PINECONE_KEY = None
+
+# --- INITIALIZE SCOUT V3.5 VISUAL BRAIN ---
+# CLIP-ViT-L-14 provides a shared 768-dim latent space for visual and textual data.
+visual_engine = SentenceTransformer('clip-ViT-L-14')
 
 def get_metadata(html, url):
     """Rigorous extraction of Title and Preview Image."""
@@ -79,14 +87,8 @@ def index_website(url):
         stats = index.describe_index_stats().get('namespaces', {}).get('default', {})
         target_dim = index.describe_index_stats().get('dimension', 768)
 
-        res = client.models.embed_content(
-            model="gemini-embedding-2-preview",
-            contents=main_text[:8000],
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT",
-                output_dimensionality=target_dim
-            )
-        )
+        # Vectorize main text content into the shared latent space
+        text_vector = visual_engine.encode(main_text[:5000]).tolist()
 
         # Index additional images from the page (up to 10 with alt text)
         soup = BeautifulSoup(downloaded, 'html.parser')
@@ -98,18 +100,19 @@ def index_website(url):
             if len(alt) > 5 and src and img_count < 10:
                 img_url = urljoin(url, src).split('?')[0]
                 if any(ext in img_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
-                    # Embed alt text for the specific image
-                    img_res = client.models.embed_content(
-                        model="gemini-embedding-2-preview",
-                        contents=f"{alt} (found on {meta_data['title']})",
-                        config=types.EmbedContentConfig(
-                            task_type="RETRIEVAL_DOCUMENT",
-                            output_dimensionality=target_dim
-                        )
-                    )
+                    try:
+                        # 1. Fetch the actual image data
+                        img_resp = requests.get(img_url, timeout=5)
+                        if img_resp.status_code != 200: continue
+                        
+                        # 2. Vectorize visual features (edges, shapes, colors)
+                        img_obj = Image.open(io.BytesIO(img_resp.content)).convert('RGB')
+                        img_vector = visual_engine.encode(img_obj).tolist()
+                    except Exception: continue
+
                     img_vectors.append({
                         "id": f"img_{img_url}_{img_count}",
-                        "values": img_res.embeddings[0].values,
+                        "values": img_vector,
                         "metadata": {
                             "url": img_url,
                             "parent_url": url,
@@ -131,7 +134,7 @@ def index_website(url):
         # Upsert with MORE metadata so the UI doesn't have to guess
         index.upsert(vectors=[{
             "id": url, 
-            "values": res.embeddings[0].values, 
+            "values": text_vector, 
             "metadata": {
                 "url": url, 
                 "title": meta_data['title'] or "Untitled Result",
