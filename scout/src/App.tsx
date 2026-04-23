@@ -13,7 +13,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestore";
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI, Type } from "@google/genai";
-import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
+import { SearchResult, AIOverview, KnowledgePanel } from './types';
 
 // Initialize Gemini on the Frontend
 const genAI = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '') });
@@ -50,7 +50,7 @@ export default function App() {
   const [isAppsOpen, setIsAppsOpen] = useState(false);
   const [isEnglishHelp, setIsEnglishHelp] = useState(false);
   const [imageQuery, setImageQuery] = useState<string | null>(null);
-  const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
+  const [visualAnalysis, setVisualAnalysis] = useState<any | null>(null);
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
@@ -854,7 +854,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
   // Group images by domain for the carousel
-  const carouselImages = results.filter((res: any) => isImageUrl(res.url));
+  const carouselImages = results.filter((r: any) => isImageUrl(r.url));
 
   const filteredResults = activeTab === 'images' 
     ? results.filter((res: any) => isImageUrl(res.url) || res.image)
@@ -1659,7 +1659,7 @@ function VisualMathDisplay({ stage, image }: { problem?: any, stage: string, ima
             <>
               {/* Subtle Scanning Points */}
               <motion.div className="absolute inset-0 z-20 pointer-events-none">
-                 {[...Array(8)].map((_, i) => (
+                 {[...Array(8)].map((_: any, i: number) => (
                    <motion.div
                      key={i}
                      initial={{ opacity: 0, scale: 0 }}
