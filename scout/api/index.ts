@@ -668,11 +668,22 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
+// Helper to get the consistent Redirect URI
+const getRedirectUri = (req: any) => {
+  // Use APP_URL if set, otherwise fallback to the current request host
+  const host = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+  // Ensure this matches EXACTLY what you put in Google Cloud Console
+  return `${host}/api/auth/callback`;
+};
+
 // OAUTH: GET AUTH URL
 app.get('/api/auth/url', (req, res) => {
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
-  const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/callback`;
-  if (!googleClientId) return res.status(503).json({ error: 'Google Client ID missing' });
+  const redirectUri = getRedirectUri(req);
+
+  if (!googleClientId) {
+    return res.status(503).json({ error: 'Google Client ID missing' });
+  }
 
   const params = new URLSearchParams({
     client_id: googleClientId,
@@ -687,25 +698,52 @@ app.get('/api/auth/url', (req, res) => {
 });
 
 // OAUTH: CALLBACK
-app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
+// Added /api/ prefix to match Vercel's default routing for /api/index.ts
+app.get('/api/auth/callback', async (req, res) => {
   const { code } = req.query;
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = getRedirectUri(req);
+
   if (!code) return res.status(400).send('No code provided');
 
   try {
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
       code,
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: `${process.env.APP_URL || 'http://localhost:3000'}/auth/callback`,
+      client_id: googleClientId,
+      client_secret: googleClientSecret,
+      redirect_uri: redirectUri,
       grant_type: 'authorization_code'
     });
+
     const { access_token } = tokenResponse.data;
     const userResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
       headers: { Authorization: `Bearer ${access_token}` }
     });
-    req.session!.user = userResponse.data;
-    res.send('<html><body><script>if(window.opener){window.opener.postMessage({type:"OAUTH_AUTH_SUCCESS"}, "*");window.close();}else{window.location.href="/";}</script></body></html>');
-  } catch (error) {
+
+    // Save user to session
+    if (req.session) {
+      req.session.user = userResponse.data;
+    }
+
+    // Success script: close popup and notify parent
+    res.send(`
+      <html>
+        <body>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: "OAUTH_AUTH_SUCCESS" }, "*");
+              window.close();
+            } else {
+              window.location.href = "/";
+            }
+          </script>
+          <p>Authentication successful! You can close this window.</p>
+        </body>
+      </html>
+    `);
+  } catch (error: any) {
+    console.error("❌ OAuth Callback Error:", error.response?.data || error.message);
     res.status(500).send('Authentication failed');
   }
 });
