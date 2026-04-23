@@ -810,7 +810,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 exit={{ height: 0, opacity: 0 }}
                 className="absolute top-[3.5rem] left-4 right-4 rounded-b-[1.75rem] shadow-2xl border-t border-slate-100 py-4 z-50 text-left overflow-hidden glass"
               >
-                {suggestions.map((s, i) => (
+                {suggestions.map((s: string, i: number) => (
                   <button key={i} onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }} className="w-full px-8 py-3 flex items-center gap-4 text-slate-700 hover:bg-slate-50 transition-colors">
                     <Search size={18} className="text-slate-300" /> <span className="font-medium truncate">{s}</span>
                   </button>
@@ -870,7 +870,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       const groupKey = res.displayUrl.toLowerCase().replace(/^www\./, '');
       
       // Check if this domain has multiple entries in the results
-      const domainMatches = filteredResults.filter(r => 
+      const domainMatches = filteredResults.filter((r: SearchResult) => 
         r.displayUrl.toLowerCase().replace(/^www\./, '') === groupKey
       );
       
@@ -888,7 +888,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
     });
   } else {
     // For other tabs, don't group or use simple list
-    filteredResults.forEach(res => groupedResults.push({ type: 'single', result: res }));
+    filteredResults.forEach((res: SearchResult) => groupedResults.push({ type: 'single', result: res }));
   }
 
   return (
@@ -1616,7 +1616,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
 
             {domainImages.length > 1 && (
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full">
-                {domainImages.slice(0, 5).map((_, i) => (
+                {domainImages.slice(0, 5).map((_unused: any, i: number) => (
                   <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${currentImgIndex === i ? 'bg-white scale-125' : 'bg-white/40'}`} />
                 ))}
               </div>

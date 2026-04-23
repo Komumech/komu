@@ -58,11 +58,11 @@ async function getEmbedding(text: string): Promise<{ mpnetVec: number[], clipVec
     if (pipes?.text_pipe && pipes?.feature_pipe) {
       // Generate MPNet embedding (768-dim)
       const mpnetOutput = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
-      const mpnetVec = Array.from(mpnetOutput.data);
+      const mpnetVec = Array.from(mpnetOutput.data) as number[];
 
       // Generate CLIP Text embedding (512-dim, padded to 768 to match index)
       const clipOutput = await pipes.feature_pipe(text, { pooling: 'mean', normalize: true });
-      const clipVec = [...Array.from(clipOutput.data), ...Array(256).fill(0)];
+      const clipVec = [...(Array.from(clipOutput.data) as number[]), ...Array(256).fill(0)];
 
       return { mpnetVec, clipVec };
     }
