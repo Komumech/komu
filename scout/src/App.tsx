@@ -1360,7 +1360,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   </div>
                 </div>
               </motion.div>
-            ) }: aiRateLimited ? (
+            )}
+
+            {aiRateLimited && (
               <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
                 <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
                   <Zap size={20} />
@@ -1370,7 +1372,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
                 </div>
               </div>
-            )
+            )}
 
             {loading ? (
               <div className="space-y-6">
@@ -2092,7 +2094,7 @@ function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
                           <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
                              <TrendingUp size={18} className="text-blue-500" /> Interaction Volume
                           </h4>
-                          <div className="flex-1 min-h-0">
+                          <div className="flex-1 h-[350px]">
                             <ResponsiveContainer width="100%" height="100%">
                                <AreaChart data={trendData}>
                                   <defs>
@@ -2112,7 +2114,7 @@ function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
                           <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
                              <Target size={18} className="text-purple-500" /> Event Distribution
                           </h4>
-                          <div className="flex-1 min-h-0">
+                          <div className="flex-1 h-[350px]">
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
@@ -2141,7 +2143,7 @@ function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                      <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm h-[500px] flex flex-col">
                         <h4 className="font-bold text-slate-900 mb-8">Top 10 Resonant Queries</h4>
-                        <div className="flex-1 min-h-0">
+                        <div className="flex-1 h-[350px]">
                            <ResponsiveContainer width="100%" height="100%">
                               <BarChart data={queryData} layout="vertical">
                                  <XAxis type="number" hide />
