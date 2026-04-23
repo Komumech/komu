@@ -7,16 +7,9 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { pipeline, env } from '@xenova/transformers';
+import { pipeline } from '@xenova/transformers';
 
 dotenv.config();
-
-// --- SERVERLESS OPTIMIZATION ---
-// Prevent Transformers.js from trying to write to read-only directories
-env.allowLocalModels = false;
-if (process.env.NODE_ENV === 'production') {
-  env.cacheDir = '/tmp';
-}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,9 +17,10 @@ const __dirname = path.dirname(__filename);
 // --- CLEANUP: Removed Gemini initialization from backend ---
 // All AI calls moved to Frontend per security guidelines.
 
-// Local Neural Search Engines (768 dimensions)
+// Scout Semantic Brain (mpnet-base)
 let text_pipe: any = null;
 let isModelLoading = false;
+
 async function getPipes() {
   if (text_pipe) return { text_pipe };
   if (isModelLoading) return null;
@@ -41,7 +35,7 @@ async function getPipes() {
     console.log("✅ Scout Semantic Brain ready!");
     return { text_pipe };
   } catch (err: any) {
-    console.error("❌ Multimodal Engine failure:", err.message);
+    console.error("❌ Neural Engine failure:", err.message);
     return null;
   } finally {
     isModelLoading = false;
@@ -105,25 +99,59 @@ function cleanSnippet(text: string) {
 }
 
 function prettifyTitle(title: string, url: string) {
-  if (!url || !title) return title;
+  let cleanTitle = title?.trim()?.replace(/\s+/g, ' ') || "";
+  const genericTerms = ['home', 'index', 'support', 'help', 'page', 'untitled', 'welcome', 'login', 'signup', 'account', 'main', 'start', 'navbar', 'articles', 'news'];
+  
   try {
     const parsed = new URL(url);
-    const domainPart = parsed.hostname.replace('www.', '').split('.')[0];
-    const capitalizedDomain = domainPart.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    
-    if (parsed.pathname && parsed.pathname !== '/' && parsed.pathname.length > 3) {
-      const segments = parsed.pathname.split('/').filter(s => s && !s.includes('.') && s.length > 2);
-      if (segments.length > 0) {
-        const lastSegment = segments[segments.length - 1]
-          .replace(/(_|-)/g, ' ')
-          .split(' ')
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' ');
-        return `${capitalizedDomain} | ${lastSegment}`;
-      }
+    const domainParts = parsed.hostname.toLowerCase().replace('www.', '').split('.');
+    // Better Brand Extraction: ignore common prefixes, take the recognizable "middle" part
+    let domainName = domainParts[0];
+    if (domainParts.length > 2 && (domainParts[0] === 'support' || domainParts[0] === 'api' || domainParts[0] === 'dev' || domainParts[0] === 'docs' || domainParts[0] === 'news' || domainParts[0] === 'blog')) {
+      domainName = domainParts[1];
     }
-  } catch (e) {}
-  return title;
+    
+    const brand = domainName.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+    // 1. If title is placeholder/empty or generically titled
+    if (!cleanTitle || /^(untitled|document|page|home|index|welcome|untitled page|web page)$/i.test(cleanTitle) || cleanTitle.length < 2) {
+      if (parsed.pathname && parsed.pathname !== '/') {
+        const segments = parsed.pathname.split('/').filter(s => s && s.length > 2 && !s.includes('.'));
+        if (segments.length > 0) {
+           const page = segments[segments.length - 1].replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+           // Ensure we don't just return ":" if brand is empty
+           return brand ? `${brand}: ${page}` : page;
+        }
+      }
+      return brand || "Web Page";
+    }
+
+    // 2. If title is too generic (e.g. "Support")
+    const lowerTitle = cleanTitle.toLowerCase();
+    const isGeneric = genericTerms.some(term => lowerTitle === term) || 
+                      (cleanTitle.length < 10 && genericTerms.some(term => lowerTitle.includes(term)));
+
+    if (isGeneric) {
+      const segments = parsed.pathname.split('/').filter(s => s && s.length > 2 && !s.includes('.'));
+      if (segments.length > 1) {
+         const specific = segments[segments.length - 1].replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+         // Avoid repeating the same word twice
+         if (specific.toLowerCase() !== lowerTitle) {
+            return `${brand}: ${cleanTitle} - ${specific}`;
+         }
+      }
+      return `${brand}: ${cleanTitle}`;
+    }
+
+    // 3. Ensure Brand is represented for shorter titles to provide context
+    if (!lowerTitle.includes(brand.toLowerCase()) && cleanTitle.length < 40) {
+      return `${brand}: ${cleanTitle}`;
+    }
+
+    return cleanTitle;
+  } catch (e) {
+    return cleanTitle || "Web Page";
+  }
 }
 
 const app = express();
@@ -135,13 +163,13 @@ app.set('trust proxy', 1);
 app.use(cors());
   
   app.use(cookieSession({
-    name: 'session',
-    keys: [process.env.COOKIE_SECRET || 'scout-secret'],
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    secure: true,
-    sameSite: 'none',
-    httpOnly: true,
-  }));
+  name: 'session',
+  keys: [process.env.COOKIE_SECRET || 'scout-secret'],
+  maxAge: 30 * 24 * 60 * 60 * 1000, 
+  secure: true,
+  sameSite: 'none',
+  httpOnly: true,
+}));
 
 let pinecone: Pinecone | null = null;
 const getPinecone = () => {
@@ -160,12 +188,12 @@ app.get('/api/suggestions', async (req, res) => {
   try {
     const { q } = req.query;
     if (!q) return res.json([]);
-      const response = await axios.get(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q as string)}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0'
-        },
-        timeout: 2000
-      });
+    const response = await axios.get(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q as string)}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0'
+      },
+      timeout: 2000
+    });
     res.json(response.data[1] || []);
   } catch (error) {
     console.error("Suggestions error:", error);
@@ -236,7 +264,7 @@ app.post('/api/feedback', async (req, res) => {
 
     const pc = getPinecone();
     if (!pc) return res.status(503).json({ error: 'Database unavailable' });
-    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
+    const index = pc.Index(process.env.PINECONE_INDEX || 'scout');
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     // Fetch current state
@@ -282,14 +310,6 @@ app.post('/api/search', async (req, res) => {
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     let finalQuery = query;
-
-    if (imageQuery) {
-      console.warn("Visual search disabled in serverless mode to prevent memory crashes.");
-      return res.status(400).json({ 
-        error: "Feature Unavailable", 
-        message: "Visual search requires a high-memory environment not available in this tier." 
-      });
-    }
 
     const intentData = await detectLocalIntent(finalQuery);
     let dictionaryResult = null;
@@ -571,8 +591,11 @@ app.post('/api/search', async (req, res) => {
     const totalPagesCount = Math.ceil(finalOrdered.length / pageSize);
 
     // If 'all' tab, we mix in some top images so the ImageStrip always works on page 1
+    // We add them at the end of the results array for the frontend to handle
     let resultsWithOptionalImages = paginatedResults;
     if (type === 'all' && imageResults.length > 0) {
+       // Only add images to the payload if they aren't already represented 
+       // This ensures ResultsView has image data for the strip without breaking pagination
        resultsWithOptionalImages = [...paginatedResults, ...imageResults.slice(0, 10)];
     }
 
@@ -599,10 +622,7 @@ app.post('/api/search', async (req, res) => {
 app.get('/api/auth/url', (req, res) => {
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
   const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/callback`;
-
-  if (!googleClientId) {
-    return res.status(503).json({ error: 'Google Client ID not configured' });
-  }
+  if (!googleClientId) return res.status(503).json({ error: 'Google Client ID missing' });
 
   const params = new URLSearchParams({
     client_id: googleClientId,
@@ -629,54 +649,29 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
       redirect_uri: `${process.env.APP_URL || 'http://localhost:3000'}/auth/callback`,
       grant_type: 'authorization_code'
     });
-
     const { access_token } = tokenResponse.data;
     const userResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
       headers: { Authorization: `Bearer ${access_token}` }
     });
-
     req.session!.user = userResponse.data;
-
-    res.send(`
-      <html>
-        <body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-              window.close();
-            } else {
-              window.location.href = '/';
-            }
-          </script>
-          <p>Authentication successful. This window should close automatically.</p>
-        </body>
-      </html>
-    `);
-  } catch (error: any) {
-    console.error('OAuth callback error:', error.response?.data || error.message);
+    res.send('<html><body><script>if(window.opener){window.opener.postMessage({type:"OAUTH_AUTH_SUCCESS"}, "*");window.close();}else{window.location.href="/";}</script></body></html>');
+  } catch (error) {
     res.status(500).send('Authentication failed');
   }
 });
 
-app.get('/api/me', (req, res) => {
-  res.json({ user: req.session?.user || null });
-});
-
+app.get('/api/me', (req, res) => res.json({ user: req.session?.user || null }));
 app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: true }); });
 
 // Vite Middleware
 if (process.env.NODE_ENV !== 'production') {
-  // Use dynamic import to prevent Vite from crashing production environments
-  import('vite').then(async ({ createServer }) => {
-    const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
-    app.use(vite.middlewares);
-  });
+  const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+  app.use(vite.middlewares);
 } else {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
   app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
-
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

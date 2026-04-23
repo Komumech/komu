@@ -459,7 +459,10 @@ export default function App() {
     setAiLoading(true);
     setIsOverviewExpanded(false);
     try {
-      const context = contextResults.slice(0, 5).map(r => `Title: ${r.title}\nSnippet: ${r.snippet}`).join("\n---\n");
+      // Include image URLs in the context for the LLM to use
+      const context = contextResults.slice(0, 5).map(r => 
+        `Title: ${r.title}\nSnippet: ${r.snippet}\nSource: ${r.url}${r.image ? `\nImage_URL: ${r.image}` : ''}`
+      ).join("\n---\n");
       
       const prompt = linguisticHelp
         ? `Act as an expert linguist. Provide a concise grammar, spelling, and usage guide for: "${queryText}". Respond in Markdown with clear examples.`
@@ -470,8 +473,7 @@ export default function App() {
            
            Instructions:
            1. Start with a direct answer.
-           2. Use bullet points for key facts.
-           3. Use bolding for emphasis.
+           2. Use bullet points for key facts.           3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown !title if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
            4. Be objective and professional.
            5. Use Markdown formatting.`;
 
@@ -714,6 +716,8 @@ export default function App() {
         {selectedImage && (
           <ImageDetailView 
             image={selectedImage} 
+            // Pass all results to ImageDetailView to find related images
+            // This avoids re-fetching and keeps the data consistent
             allResults={results} 
             onClose={() => setSelectedImage(null)} 
             onSelect={(img: any) => setSelectedImage(img)}
@@ -1561,8 +1565,9 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
     return () => clearInterval(timer);
   }, [domainImages.length]);
 
-  // Better site name extraction
-  const parts = res.displayUrl.toLowerCase().split('.');
+  // Better site name extraction (handle subdomains like blog.example.com)
+  const hostname = new URL(res.url).hostname;
+  const parts = hostname.toLowerCase().replace('www.', '').split('.');
   const siteName = parts[0] === 'www' ? parts[1] || parts[0] : parts[0];
   const displaySiteName = siteName.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 
@@ -1592,7 +1597,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 <span className="text-[13px] text-slate-800 font-medium leading-tight truncate">{displaySiteName}</span>
                 <div className="flex items-center gap-1 text-[12px] text-slate-500 leading-tight max-w-full overflow-hidden">
                   <span className="truncate">
-                    {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                    {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')} {/* Display full URL without protocol */}
                   </span>
                   <ChevronRight size={12} className="shrink-0" />
                 </div>
@@ -1639,7 +1644,11 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
               {domainImages.slice(0, 8).map((img: any, i: number) => (
                 <button 
                   key={img.id} 
-                  onClick={() => setCurrentImgIndex(i)}
+                  onClick={() => {
+                    setCurrentImgIndex(i);
+                    // Optionally, if you want to open the image detail view on click of a thumbnail:
+                    // onImageClick?.(img);
+                  }}
                   className={`shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-all ${currentImgIndex === i ? 'border-blue-500 scale-105 shadow-md z-10' : 'border-transparent opacity-60 hover:opacity-100'}`}
                 >
                   <img src={img.url || img.image} title={img.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -1665,7 +1674,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.5 }}
+                transition={{ duration: 0.5 }} // Smooth transition for image change
                 className="w-full h-full object-cover transition-transform hover:scale-105" 
                 referrerPolicy="no-referrer" 
               />

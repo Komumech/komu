@@ -117,6 +117,8 @@ def get_autonomous_seeds(count=5):
 
 SEARCH_TOPICS = [   "youtube",
 "facebook",
+"https://www.primevideo.com/",
+"https://integra.ng/",
 "whatsapp web",
 "google",
 "gmail",
