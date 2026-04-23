@@ -6,15 +6,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestore";
 import firebaseConfig from '../firebase-applet-config.json';
-import { SearchResult, AIOverview, KnowledgePanel } from './types';
+import { GoogleGenAI, Type } from "@google/genai";
+import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
 
-// Initialize Firebase
+// Initialize Gemini on the Frontend
+const genAI = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '') });
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -47,7 +49,14 @@ export default function App() {
   const [knowledgePanel, setKnowledgePanel] = useState<KnowledgePanel | null>(null);
   const [isAppsOpen, setIsAppsOpen] = useState(false);
   const [isEnglishHelp, setIsEnglishHelp] = useState(false);
+  const [imageQuery, setImageQuery] = useState<string | null>(null);
+  const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
+  const [isVisualSearching, setIsVisualSearching] = useState(false);
+  const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
+  const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
+  const lastClickRef = useRef<{ id: string; url: string; time: number } | null>(null);
   const appsRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -63,8 +72,27 @@ export default function App() {
         setIsAppsOpen(false);
       }
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && lastClickRef.current) {
+        const now = Date.now();
+        const durationSeconds = (now - lastClickRef.current.time) / 1000;
+        
+        // Pogo-sticking: if return < 30 seconds
+        const type = durationSeconds < 30 ? 'pogo' : 'success';
+        console.log(`User Signal: ${type} after ${durationSeconds.toFixed(1)}s`);
+        
+        axios.post('/api/feedback', { id: lastClickRef.current.id, type }).catch(() => {});
+        lastClickRef.current = null;
+      }
+    };
+
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Random Background for Home
@@ -170,6 +198,10 @@ export default function App() {
           .slice(0, 3);
 
         const res = await fetch(`/api/suggestions?q=${encodeURIComponent(query)}`);
+        if (!res.ok) throw new Error("Failed suggestions");
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) throw new Error("Non-JSON");
+        
         const data = await res.json();
         
         // Merge history and global, with history appearing first
@@ -186,20 +218,40 @@ export default function App() {
 
   // AUTH CHECK
   useEffect(() => {
-    fetch('/api/me')
-      .then(res => res.json())
-      .then(data => setUser(data.user))
-      .catch(console.error);
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return;
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+           const data = await res.json();
+           setUser(data.user);
+        }
+      } catch (e) {
+        console.warn("Auth check failed", e);
+      }
+    };
+
+    checkAuth();
 
     const handleOAuthSuccess = (event: MessageEvent) => {
       const origin = event.origin;
       if (!origin.endsWith('.run.app') && !origin.includes('localhost')) return;
       
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        fetch('/api/me')
-          .then(res => res.json())
-          .then(data => setUser(data.user))
-          .catch(console.error);
+        const recheckAuth = async () => {
+          try {
+            const res = await fetch('/api/me');
+            if (res.ok) {
+              const contentType = res.headers.get("content-type");
+              if (contentType && contentType.includes("application/json")) {
+                const data = await res.json();
+                setUser(data.user);
+              }
+            }
+          } catch (e) {}
+        };
+        recheckAuth();
       }
     };
 
@@ -210,6 +262,10 @@ export default function App() {
   const handleLogin = async () => {
     try {
       const res = await fetch('/api/auth/url');
+      if (!res.ok) throw new Error("Login failed");
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) throw new Error("Non-JSON");
+      
       const { url } = await res.json();
       const width = 600, height = 700;
       const left = window.screenX + (window.outerWidth - width) / 2;
@@ -225,13 +281,19 @@ export default function App() {
     setUser(null);
   };
 
-  const handleSearch = async (e?: React.FormEvent | string, requestedPage = 1) => {
+  const handleSearch = async (e?: React.FormEvent | string, requestedPage = 1, visualQuery?: string) => {
     if (e && typeof e !== 'string') e.preventDefault();
-    const finalQuery = typeof e === 'string' ? e : query;
-    if (!finalQuery.trim()) return;
+    let finalQuery = typeof e === 'string' ? e : query;
+    const currentVisualQuery = visualQuery || imageQuery;
+    
+    if (!finalQuery.trim() && !currentVisualQuery) return;
 
     setLoading(true);
     setIsSearching(true);
+    setResults([]); 
+    setSearchStage(currentVisualQuery ? 'extracting' : 'ranking');
+    setVisualMathProblem(null);
+    setVisualAnalysis(null);
     setAiOverview(null);
     setDictionary(null);
     setKnowledgePanel(null);
@@ -243,12 +305,50 @@ export default function App() {
     setCorrection(null);
     setOriginalQuery(null);
 
-    // Save query to history if logged in
-    if (user?.sub && requestedPage === 1) {
-      setDoc(doc(db, "users", user.sub), {
-        queries: arrayUnion(finalQuery),
-        updatedAt: new Date().toISOString()
-      }, { merge: true }).catch(console.error);
+    let vector = null;
+
+    // PERFORM FRONTEND VISUAL ANALYSIS IF IMAGE IS PRESENT
+    if (currentVisualQuery && requestedPage === 1) {
+      setSearchStage('extracting');
+      await new Promise(r => setTimeout(r, 800)); // Show scanning start
+      setSearchStage('vectorizing');
+    }
+
+    // GENERATE NEURAL EMBEDDING ON FRONTEND (Adhering to security guidelines)
+    if (finalQuery.trim() && !vector) {
+      try {
+        const result = await genAI.models.embedContent({
+          model: 'gemini-embedding-2-preview',
+          contents: [finalQuery.trim()]
+        });
+        if (result.embeddings?.[0]?.values) {
+          vector = Array.from(result.embeddings[0].values).slice(0, 768);
+          console.log("✅ Scout Brain: Neural embedding generated on Client (768-dim truncated)");
+        }
+      } catch (err) {
+        console.warn("Front-end embedding failed, falling back to server:", err);
+      }
+    }
+
+    // AUTOCORRECT ON FRONTEND (Adhering to rules)
+    if (!currentVisualQuery && requestedPage === 1 && finalQuery.length > 3) {
+      try {
+        const autocorrectPrompt = `Act as a search engine spell checker. Check if "${finalQuery}" has obvious typos. 
+        If it has an obvious typo, return ONLY the corrected string. 
+        If it is likely correct or a brand name, return the exact same string.
+        Be conservative. Only correct if you are 95% certain.`;
+        
+        const r = await genAI.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: autocorrectPrompt
+        });
+        const text = r.text?.trim() || "";
+        if (text.toLowerCase() !== finalQuery.toLowerCase() && text.length > 0 && text.length < 100) {
+          setCorrection(text);
+          setOriginalQuery(finalQuery);
+          finalQuery = text;
+        }
+      } catch (e) {}
     }
 
     try {
@@ -259,14 +359,42 @@ export default function App() {
           query: finalQuery, 
           page: requestedPage,
           type: activeTab,
-          clickedUrls 
+          clickedUrls,
+          imageQuery: currentVisualQuery,
+          vector 
         })
       });
       
-      const data = await searchRes.json();
+      let data: any;
+      const contentType = searchRes.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        data = await searchRes.json();
+      } else {
+        const text = await searchRes.text();
+        if (text.includes("application starts") || text.includes("Starting Server")) {
+          throw new Error("Neural Engines Warming Up: Scout is currently loading its local AI models. Please wait about 30 seconds and try again.");
+        }
+        console.error("Non-JSON response:", text);
+        throw new Error("Server communication error. Please try again.");
+      }
       
       if (!searchRes.ok) {
+        if (!currentVisualQuery) setSearchStage('idle');
+        // Handle specific warming error from our backend
+        if (searchRes.status === 503 && data.error === "Neural Engines Warming Up") {
+           throw new Error(data.message || "Scout's AI engine is warming up. Please try again in 30 seconds.");
+        }
         throw new Error(data.error || 'Unknown search error');
+      }
+
+      setVisualMathProblem(data.visualMathProblem || null);
+      if (data.visualMathProblem) {
+        // AI/Google-grade artificial delay to show the analysis stages vividly
+        setSearchStage('vectorizing');
+        await new Promise(r => setTimeout(r, 600));
+        setSearchStage('ranking');
+      } else {
+        setSearchStage('ranking');
       }
 
       setCorrection(data.correction || null);
@@ -302,6 +430,15 @@ export default function App() {
       setResults(rawResults);
       setLoading(false);
 
+      // Persist to Firebase history
+      if (user?.sub && requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
+        setDoc(doc(db, "users", user.sub), {
+          queries: arrayUnion(finalQuery.trim()),
+          updatedAt: new Date().toISOString()
+        }, { merge: true }).catch(console.error);
+        setUserHistory(prev => [...new Set([...prev, finalQuery.trim()])]);
+      }
+
       // PARALLEL EXECUTION FOR AI FEATURES
       if (requestedPage === 1) {
         generateAIOverview(finalQuery, rawResults, data.isEnglishHelp || false);
@@ -320,8 +457,7 @@ export default function App() {
       }
     } catch (error: any) {
       console.error("Search failed:", error);
-      const isNetworkError = error.message === 'Failed to fetch' || error.name === 'TypeError';
-      setError(isNetworkError ? "Connection established but server is busy downloading AI models. Please wait 10 seconds and try again." : (error.message || "Something went wrong."));
+      setError(error.message || "Something went wrong.");
       setLoading(false);
     }
   };
@@ -330,49 +466,122 @@ export default function App() {
     setAiLoading(true);
     setIsOverviewExpanded(false);
     try {
-      const context = contextResults.slice(0, 5).map(r => r.snippet).join("\n");
-      const res = await fetch('/api/ai/overview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: queryText, context, isLinguisticHelp: linguisticHelp })
+      const context = contextResults.slice(0, 5).map(r => `Title: ${r.title}\nSnippet: ${r.snippet}`).join("\n---\n");
+      
+      const prompt = linguisticHelp
+        ? `Act as an expert linguist. Provide a concise grammar, spelling, and usage guide for: "${queryText}". Respond in Markdown with clear examples.`
+        : `Act as a master synthesis engine for the search engine "Scout". 
+           Provide a comprehensive, authoritative AI Overview for the search query: "${queryText}". 
+           Use the following search results as context:
+           ${context}
+           
+           Instructions:
+           1. Start with a direct answer.
+           2. Use bullet points for key facts.
+           3. Use bolding for emphasis.
+           4. Be objective and professional.
+           5. Use Markdown formatting.`;
+
+      const result = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
-      const data = await res.json();
       
       setAiOverview({
-        summary: data.text || "No summary available.",
+        summary: result.text || "No summary available.",
         sources: contextResults.slice(0, 3).map(r => ({ title: r.title, url: r.url }))
       });
-    } catch (e) {} finally {
+    } catch (e) {
+      console.error("AI Overview failed:", e);
+    } finally {
       setAiLoading(false);
     }
   };
 
   const generateFAQ = async (queryText: string, contextResults: SearchResult[]) => {
     try {
-      const context = contextResults.slice(0, 10).map(r => r.snippet).join("\n");
-      const res = await fetch('/api/ai/faq', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: queryText, context })
+      const context = contextResults.slice(0, 8).map(r => r.snippet).join("\n");
+      const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 5 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
+      
+      const response = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { 
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.STRING },
+                answer: { type: Type.STRING }
+              },
+              required: ["question", "answer"]
+            }
+          }
+        }
       });
-      const data = await res.json();
+      
+      const data = JSON.parse(response.text || '[]');
       setFaq(data);
-    } catch (e) {}
+    } catch (e) {
+      console.error("FAQ generation failed:", e);
+    }
   };
 
   const generateKnowledgePanel = async (entityName: string, entityType?: string) => {
     try {
-      const res = await fetch('/api/ai/knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityName, entityType })
+      const prompt = `Entity: "${entityName}" (${entityType || 'General'})
+      Generate a high-quality "Knowledge Panel" for this entity. 
+      Return as a JSON object with: 
+      title, subtitle, description, image (a placeholder like "https://images.unsplash.com/photo..."), 
+      details (array of {label, value}), and sections (array of {title, content}).`;
+
+      const response = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { 
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              subtitle: { type: Type.STRING },
+              description: { type: Type.STRING },
+              image: { type: Type.STRING },
+              details: { 
+                type: Type.ARRAY, 
+                items: { 
+                  type: Type.OBJECT, 
+                  properties: { label: { type: Type.STRING }, value: { type: Type.STRING } },
+                  required: ["label", "value"] 
+                } 
+              },
+              sections: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: { title: { type: Type.STRING }, content: { type: Type.STRING } },
+                  required: ["title", "content"]
+                }
+              }
+            },
+            required: ["title", "subtitle", "description", "details", "sections"]
+          }
+        }
       });
-      const data = await res.json();
+      
+      const data = JSON.parse(response.text || 'null');
       if (data) setKnowledgePanel(data);
-    } catch (e) {}
+    } catch (e) {
+      console.error("Knowledge Panel failed:", e);
+    }
   };
 
-  const handleResultClick = (url: string) => {
+  const handleResultClick = (id: string, url: string) => {
+    // Record for behavioral signals (Pogo-sticking detection)
+    lastClickRef.current = { id, url, time: Date.now() };
+
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
     setDoc(doc(db, "users", user.sub), {
@@ -395,6 +604,25 @@ export default function App() {
   useEffect(() => {
     if (!isSearching) searchInputRef.current?.focus();
   }, [isSearching]);
+
+  const onImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setImageQuery(base64);
+        setQuery('Visual Search (Scout Vision)');
+        handleSearch(undefined, 1, base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removeImageQuery = () => {
+    setImageQuery(null);
+    setQuery('');
+  };
 
   return (
     <div className="min-h-screen bg-white font-sans selection:bg-blue-100 selection:text-blue-900">
@@ -434,61 +662,70 @@ export default function App() {
 
       <AnimatePresence mode="wait">
         {!isSearching ? (
-          <HomeView key="home" query={query} setQuery={setQuery} onSearch={handleSearch} suggestions={suggestions} showSuggestions={showSuggestions} setShowSuggestions={setShowSuggestions} inputRef={searchInputRef} searchContainerRef={searchContainerRef} user={user} onLogin={handleLogin} onLogout={handleLogout} onMicClick={toggleListening} bg={homeBg} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} appsRef={appsRef} isAppsOpen={isAppsOpen} setIsAppsOpen={setIsAppsOpen} />
+          <HomeView key="home" query={query} setQuery={setQuery} onSearch={handleSearch} suggestions={suggestions} showSuggestions={showSuggestions} setShowSuggestions={setShowSuggestions} inputRef={searchInputRef} searchContainerRef={searchContainerRef} user={user} onLogin={handleLogin} onLogout={handleLogout} onMicClick={toggleListening} bg={homeBg} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} appsRef={appsRef} isAppsOpen={isAppsOpen} setIsAppsOpen={setIsAppsOpen} imageQuery={imageQuery} onImageUpload={onImageUpload} removeImageQuery={removeImageQuery} fileInputRef={fileInputRef} userHistory={userHistory} />
         ) : (
-            <ResultsView 
-              key="results"
-              query={query}
-              setQuery={setQuery}
-              onSearch={handleSearch}
-              loading={loading}
-              results={results}
-              error={error}
-              aiOverview={aiOverview}
-              dictionary={dictionary}
-              knowledgePanel={knowledgePanel}
-              isEnglishHelp={isEnglishHelp}
-              isOverviewExpanded={isOverviewExpanded}
-              setIsOverviewExpanded={setIsOverviewExpanded}
-              faq={faq}
-              openFaqIndex={openFaqIndex}
-              setOpenFaqIndex={setOpenFaqIndex}
-              aiLoading={aiLoading}
-              activeTab={activeTab}
-              setActiveTab={setActiveTab}
-              page={page}
-              totalPages={totalPages}
-              goHome={goHome}
-              user={user}
-              onLogin={handleLogin}
-              onLogout={handleLogout}
-              onMicClick={toggleListening}
-              suggestions={suggestions}
-              showSuggestions={showSuggestions}
-              setShowSuggestions={setShowSuggestions}
-              searchContainerRef={searchContainerRef}
-              onResultClick={handleResultClick}
-              clickedUrls={clickedUrls}
-              isSignoutOpen={isSignoutOpen}
-              setIsSignoutOpen={setIsSignoutOpen}
-              appsRef={appsRef}
-              isAppsOpen={isAppsOpen}
-              setIsAppsOpen={setIsAppsOpen}
-              correction={correction}
-              originalQuery={originalQuery}
-            />
+          <ResultsView 
+            key="results"
+            query={query}
+            setQuery={setQuery}
+            onSearch={handleSearch}
+            loading={loading}
+            results={results}
+            error={error}
+            aiOverview={aiOverview}
+            dictionary={dictionary}
+            knowledgePanel={knowledgePanel}
+            isEnglishHelp={isEnglishHelp}
+            isOverviewExpanded={isOverviewExpanded}
+            setIsOverviewExpanded={setIsOverviewExpanded}
+            faq={faq}
+            openFaqIndex={openFaqIndex}
+            setOpenFaqIndex={setOpenFaqIndex}
+            aiLoading={aiLoading}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            page={page}
+            totalPages={totalPages}
+            goHome={goHome}
+            user={user}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
+            onMicClick={toggleListening}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            setShowSuggestions={setShowSuggestions}
+            searchContainerRef={searchContainerRef}
+            onResultClick={handleResultClick}
+            clickedUrls={clickedUrls}
+            isSignoutOpen={isSignoutOpen}
+            setIsSignoutOpen={setIsSignoutOpen}
+            appsRef={appsRef}
+            isAppsOpen={isAppsOpen}
+            setIsAppsOpen={setIsAppsOpen}
+            correction={correction}
+            originalQuery={originalQuery}
+            imageQuery={imageQuery}
+            onImageUpload={onImageUpload}
+            removeImageQuery={removeImageQuery}
+            fileInputRef={fileInputRef}
+            visualMathProblem={visualMathProblem}
+            searchStage={searchStage}
+            visualAnalysis={visualAnalysis}
+            setImageQuery={setImageQuery}
+          />
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen }: any) {
+function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory }: any) {
   return (
     <motion.div 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -20 }}
       className="relative min-h-screen flex flex-col items-center justify-center p-4 md:p-6 bg-slate-900"
     >
+      <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
       <div className="absolute inset-0 z-0 opacity-60">
         <img src={bg || "https://picsum.photos/seed/scout-vibe/1920/1080?blur=1"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
         <div className="absolute inset-0 bg-linear-to-b from-black/20 via-transparent to-black/80" />
@@ -511,16 +748,9 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
-          className="text-3xl md:text-4xl font-display font-black text-white drop-shadow-xl tracking-tight"
+          className="text-4xl md:text-6xl font-display font-black text-white drop-shadow-2xl tracking-tighter"
         >
-          <motion.h1 
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="text-4xl md:text-6xl font-display font-black text-white drop-shadow-2xl tracking-tighter"
-          >
-            Ask Anything.
-          </motion.h1>
+          Ask Anything.
         </motion.h1>
 
         <motion.div 
@@ -535,17 +765,46 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
             className={`flex items-center gap-3 px-5 h-12 md:h-14 transition-all duration-300 bg-white shadow-2xl ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem]' : 'rounded-full'}`}
           >
             <Search className="text-slate-400 group-focus-within:text-blue-500 transition-colors" size={22} />
+            {imageQuery && (
+              <div className="relative group/img ml-4 h-8 w-8 shrink-0 rounded overflow-hidden shadow-sm border border-slate-200">
+                <img src={imageQuery} className="w-full h-full object-cover blur-[2px]" />
+                <div className="absolute inset-0 bg-[#00000022] backdrop-blur-[1px] grid grid-cols-4 grid-rows-4 opacity-70">
+                  {[...Array(16)].map((_, i) => <div key={i} className="border-[0.5px] border-white/20" />)}
+                </div>
+                <button 
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); removeImageQuery(); }}
+                  className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity"
+                >
+                  <X size={12} className="text-white" />
+                </button>
+              </div>
+            )}
             <input 
               ref={inputRef} 
               value={query} 
               onFocus={() => setShowSuggestions(true)}
               onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
-              placeholder="Ask Scout anything..." 
+              placeholder={imageQuery ? "Visual Search Active" : "Ask Scout anything..."} 
               className="flex-1 bg-transparent border-none outline-none text-slate-900 text-base md:text-lg placeholder:text-slate-400" 
             />
             <div className="flex items-center gap-3">
-              {query && <X size={18} className="text-slate-400 cursor-pointer" onClick={() => setQuery('')} />}
+              {(query || imageQuery) && (
+                <X 
+                  size={18} 
+                  className="text-slate-400 cursor-pointer hover:text-slate-600 transition-colors" 
+                  onClick={() => { setQuery(''); removeImageQuery(); }} 
+                />
+              )}
               <div className="w-px h-5 bg-slate-200 hidden sm:block" />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                type="button"
+                className={`p-2.5 bg-slate-50 hover:bg-white hover:shadow-md rounded-full transition-all active:scale-95 ${imageQuery ? 'text-blue-600 bg-blue-50' : 'text-blue-500'}`}
+                title="Visual Search (Scout Vision)"
+              >
+                <Camera size={20} />
+              </button>
               <button 
                 onClick={onMicClick} 
                 type="button" 
@@ -573,12 +832,37 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
             )}
           </AnimatePresence>
         </motion.div>
+
+        {/* Recently Searched Shelf */}
+        {user && userHistory.length > 0 && !showSuggestions && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col items-center gap-4 pt-4"
+          >
+            <div className="flex items-center gap-2 text-white/50 text-[11px] font-bold uppercase tracking-widest">
+              <Sparkles size={12} />
+              <span>Recently Searched</span>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2 max-w-xl">
+              {userHistory.slice(-5).reverse().map((h: string, i: number) => (
+                <button 
+                  key={i} 
+                  onClick={() => onSearch(h)}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full text-white text-[13px] font-medium transition-all active:scale-95 border border-white/5 whitespace-nowrap"
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
@@ -622,6 +906,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col h-screen bg-white">
+      <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
       <header className="bg-white border-b border-slate-50 sticky top-0 z-50">
         <div className="flex flex-col sm:flex-row items-center gap-4 md:gap-12 py-6 sm:py-8 px-4 md:px-12 max-w-[1700px] mx-auto transition-all">
           <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-4">
@@ -641,8 +926,29 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
           
           <div className="flex-1 w-full max-w-2xl relative" ref={searchContainerRef}>
             <form onSubmit={onSearch} className={`flex items-center gap-2 px-6 h-12 soft-ui transition-all ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`}>
-              <input value={query} onFocus={() => setShowSuggestions(true)} onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} className="flex-1 bg-transparent border-none outline-none text-slate-800 font-medium text-sm md:text-base min-w-0" />
+              {imageQuery && (
+                <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100">
+                  <img src={imageQuery} className="w-full h-full object-cover blur-[1.5px]" />
+                  <div className="absolute inset-0 bg-[#00000011] backdrop-blur-[0.5px] grid grid-cols-4 grid-rows-4 opacity-60">
+                    {[...Array(16)].map((_, i) => <div key={i} className="border-[0.25px] border-white/20" />)}
+                  </div>
+                </div>
+              )}
+              <input 
+                value={query} 
+                onFocus={() => setShowSuggestions(true)} 
+                onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
+                placeholder={imageQuery ? "Image search active" : "Search Scout..."}
+                className="flex-1 bg-transparent border-none outline-none text-slate-800 font-medium text-sm md:text-base min-w-0" 
+              />
               <div className="flex items-center gap-3">
+                <button 
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`p-2 hover:bg-slate-50 rounded-full transition-all ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-400'}`}
+                >
+                  <Camera size={16} />
+                </button>
                 <button 
                   type="button" 
                   onClick={onMicClick}
@@ -753,6 +1059,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   )}
                 </div>
               </div>
+            )}
+
+            {/* Visual Math Analysis Display */}
+            {imageQuery && (
+              <VisualMathDisplay problem={visualMathProblem} stage={searchStage} image={imageQuery} analysis={visualAnalysis} />
             )}
 
             {/* AI Overview */}
@@ -889,7 +1200,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               activeTab === 'images' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
                   {filteredResults.map((res: any) => (
-                    <a key={res.id} href={res.url} target="_blank" rel="noreferrer" className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200">
+                    <a key={res.id} onClick={() => onResultClick?.(res.id, res.url)} href={res.url} target="_blank" rel="noreferrer" className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200">
                       <img src={isImageUrl(res.url) ? res.url : res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
                       <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
                         <span className="text-white text-xs font-medium truncate">{res.title}</span>
@@ -903,7 +1214,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
-                        <ImageStrip results={results} onMore={() => setActiveTab('images')} />
+                        <ImageStrip results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} />
                       )}
 
                       {/* First FAQ after 3 results */}
@@ -916,17 +1227,17 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       )}
                       
                       {item.type === 'single' ? (
-                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} />
+                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} />
                       ) : (
                         <div className="space-y-4 py-4 mb-8">
-                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} />
+                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} />
                           <div className="ml-4 sm:ml-12 flex flex-col -mt-4">
                             <div className="border-t border-slate-100 mt-2 mb-4" />
                             <div className="space-y-0">
                               {item.secondaries.map((s: any, sIdx: number) => (
                                 <div key={s.id} className="group/sub">
                                   <a 
-                                    onClick={() => onResultClick?.(s.url)} 
+                                    onClick={() => onResultClick?.(s.id, s.url)} 
                                     href={s.url} 
                                     target="_blank" 
                                     rel="noreferrer" 
@@ -1018,7 +1329,7 @@ function QuickSummary({ text }: { text: string }) {
   );
 }
 
-function ImageStrip({ results, onMore }: { results: SearchResult[], onMore: () => void }) {
+function ImageStrip({ results, onMore, onResultClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void }) {
   const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
   if (imagesWithMeta.length < 3) return null;
 
@@ -1035,7 +1346,7 @@ function ImageStrip({ results, onMore }: { results: SearchResult[], onMore: () =
       </div>
       <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
         {imagesWithMeta.map((img) => (
-          <a key={img.id} href={img.url} target="_blank" rel="noreferrer" className="shrink-0 w-44 sm:w-52 group">
+          <a key={img.id} onClick={() => onResultClick?.(img.id, img.url)} href={img.url} target="_blank" rel="noreferrer" className="shrink-0 w-44 sm:w-52 group">
             <div className="aspect-square rounded-3xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1">
               <img src={img.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             </div>
@@ -1184,7 +1495,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   );
 }
 
-function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls }: any) {
+function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch }: any) {
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -1209,6 +1520,8 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
   const siteName = parts[0] === 'www' ? parts[1] || parts[0] : parts[0];
   const displaySiteName = siteName.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 
+  const activeImage = domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : res.image;
+
   return (
     <article className="group py-5 transition-all border-b border-slate-100 last:border-0 pl-0 overflow-hidden">
       {isPreviouslyClicked && (
@@ -1219,51 +1532,69 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
       )}
       <div className="flex flex-col sm:flex-row gap-6 items-start">
         <div className="flex-1 min-w-0 w-full">
-          <div className="flex items-center gap-3 mb-2 overflow-hidden">
-            <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border border-slate-100 bg-slate-50 flex items-center justify-center p-1.5 shadow-sm">
-              <img 
-                src={res.sourceIcon} 
-                className="w-full h-full object-contain" 
-                referrerPolicy="no-referrer" 
-                onError={(e:any) => { e.target.src=`https://www.google.com/s2/favicons?domain=${res.displayUrl}&sz=64`; }} 
-              />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-[13px] text-slate-800 font-medium leading-tight truncate">{displaySiteName}</span>
-              <div className="flex items-center gap-1 text-[12px] text-slate-500 leading-tight max-w-full overflow-hidden">
-                <span className="truncate">
-                  {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                </span>
-                <ChevronRight size={12} className="shrink-0" />
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border border-slate-100 bg-slate-50 flex items-center justify-center p-1.5 shadow-sm">
+                <img 
+                  src={res.sourceIcon} 
+                  className="w-full h-full object-contain" 
+                  referrerPolicy="no-referrer" 
+                  onError={(e:any) => { e.target.src=`https://www.google.com/s2/favicons?domain=${res.displayUrl}&sz=64`; }} 
+                />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[13px] text-slate-800 font-medium leading-tight truncate">{displaySiteName}</span>
+                <div className="flex items-center gap-1 text-[12px] text-slate-500 leading-tight max-w-full overflow-hidden">
+                  <span className="truncate">
+                    {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                  </span>
+                  <ChevronRight size={12} className="shrink-0" />
+                </div>
               </div>
             </div>
           </div>
 
           <div className="relative group/title inline-block">
-            <a onClick={() => onResultClick?.(res.url)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
+            <a onClick={() => onResultClick?.(res.id, res.url)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
               <h3 className="text-xl md:text-2xl font-display font-medium text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
                 {res.title}
               </h3>
             </a>
           </div>
 
-          <p className="text-slate-600 text-[15px] leading-relaxed line-clamp-2 mb-4">
+          <p className="text-slate-600 text-[15px] leading-relaxed line-clamp-3 mb-4">
             {res.snippet}
           </p>
 
-          {/* Site Summary for specific sources */}
-          {(res.displayUrl.includes('wikipedia.org') || res.isNews || res.displayUrl.includes('medium.com') || res.displayUrl.includes('nytimes.com') || res.displayUrl.includes('bbc.com') || res.displayUrl.includes('theguardian.com')) && (
-             <QuickSummary text={res.snippet} />
-          )}
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Find Similar Button */}
+            {activeImage && (
+              <button 
+                onClick={() => onVisualSearch?.(activeImage)}
+                className="flex items-center gap-1.5 text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-full transition-all active:scale-95 border border-blue-100"
+              >
+                <Camera size={12} />
+                Find similar
+              </button>
+            )}
+
+            {/* Site Summary for specific sources */}
+            {(res.displayUrl.includes('wikipedia.org') || res.isNews || res.displayUrl.includes('medium.com') || res.displayUrl.includes('nytimes.com') || res.displayUrl.includes('bbc.com') || res.displayUrl.includes('theguardian.com')) && (
+               <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                  <Sparkles size={11} className="text-blue-400" />
+                  AI Summary Available
+               </div>
+            )}
+          </div>
 
           {/* Inline miniature strip */}
           {domainImages.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide py-2">
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide py-3 mt-2">
               {domainImages.slice(0, 8).map((img: any, i: number) => (
                 <button 
                   key={img.id} 
                   onClick={() => setCurrentImgIndex(i)}
-                  className={`shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-all ${currentImgIndex === i ? 'border-blue-500 scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                  className={`shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-all ${currentImgIndex === i ? 'border-blue-500 scale-105 shadow-md z-10' : 'border-transparent opacity-60 hover:opacity-100'}`}
                 >
                   <img src={img.url || img.image} title={img.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 </button>
@@ -1273,12 +1604,12 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
         </div>
         
         {/* Main Side Image / Carousel */}
-        {(res.image || domainImages.length > 0) && (
-          <div className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-8 bg-slate-50">
+        {activeImage && (
+          <div className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50">
             <AnimatePresence mode="wait">
               <motion.img 
-                key={domainImages[currentImgIndex]?.id || 'main-img'}
-                src={domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : res.image} 
+                key={activeImage}
+                src={activeImage} 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -1288,6 +1619,14 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
               />
             </AnimatePresence>
             
+            <button 
+              onClick={() => onVisualSearch?.(activeImage)}
+              className="absolute top-2 right-2 p-2 bg-black/40 backdrop-blur-md text-white rounded-full opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 shadow-lg"
+              title="Visual Search"
+            >
+              <Camera size={14} />
+            </button>
+
             {domainImages.length > 1 && (
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full">
                 {domainImages.slice(0, 5).map((_, i) => (
@@ -1301,3 +1640,91 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
     </article>
   );
 }
+
+function VisualMathDisplay({ stage, image }: { problem?: any, stage: string, image: string, analysis?: any }) {
+  const [complete, setComplete] = useState(false);
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+
+  useEffect(() => {
+    if (stage === 'ranking') {
+      const t = setTimeout(() => setComplete(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [stage]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }} 
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-[24px] overflow-hidden mb-8 shadow-sm border border-slate-100 flex items-center justify-center p-2"
+    >
+      <div className="relative w-full max-w-lg aspect-video rounded-2xl overflow-hidden bg-slate-50">
+        <motion.img 
+          src={image} 
+          animate={complete ? { filter: 'grayscale(0) brightness(1)', scale: 1 } : { filter: 'grayscale(0) brightness(1.05)', scale: 1.05 }}
+          transition={{ duration: 0.8 }}
+          className="w-full h-full object-contain" 
+        />
+        
+        {/* Sleek Lens Animation */}
+        <AnimatePresence>
+          {!complete && (
+            <>
+              {/* Subtle Scanning Points */}
+              <motion.div className="absolute inset-0 z-20 pointer-events-none">
+                 {[...Array(8)].map((_, i) => (
+                   <motion.div
+                     key={i}
+                     initial={{ opacity: 0, scale: 0 }}
+                     animate={{ 
+                       opacity: [0, 1, 0], 
+                       scale: [0.2, 1, 0.2],
+                       left: `${15 + Math.random() * 70}%`,
+                       top: `${15 + Math.random() * 70}%`
+                     }}
+                     transition={{ 
+                       repeat: Infinity, 
+                       duration: 1.5 + Math.random(), 
+                       delay: i * 0.2 
+                     }}
+                     className="absolute w-1.5 h-1.5 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]"
+                   />
+                 ))}
+              </motion.div>
+
+              {/* Minimal Line */}
+              <motion.div 
+                initial={{ top: '0%' }}
+                animate={{ top: '100%' }}
+                transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
+                className="absolute inset-x-0 h-0.5 bg-blue-500/20 backdrop-blur-[1px] z-30"
+              >
+                 <div className="h-full w-full bg-linear-to-r from-transparent via-blue-500 to-transparent opacity-40" />
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        {/* Completion Visual */}
+        <AnimatePresence>
+          {complete && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-40 bg-white/10 backdrop-blur-[2px]"
+            >
+               <motion.div 
+                 initial={{ scale: 0, rotate: -20 }} 
+                 animate={{ scale: 1, rotate: 0 }} 
+                 className="bg-white/90 backdrop-blur-md p-3 rounded-full shadow-lg border border-white"
+               >
+                 <Check className="text-blue-600" size={24} strokeWidth={3} />
+               </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
