@@ -31,27 +31,34 @@ const apps = admin.apps || [];
 
 if (apps.length === 0) {
   try {
-    if (process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+
+    if (privateKey && clientEmail) {
+      // Fix: Ensure the key actually looks like a key before trying to parse it
+      const formattedKey = privateKey.includes('\\n') 
+        ? privateKey.replace(/\\n/g, '\n') 
+        : privateKey;
+
       firebaseApp = admin.initializeApp({
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          // CRITICAL VERCEL FIX: Parses literal \n characters back into real line breaks
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+          clientEmail: clientEmail,
+          privateKey: formattedKey,
         }),
-        // NEW FIX: Points the Admin SDK to the correct regional database
         databaseURL: `https://${process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId}.firebaseio.com`
       });
-      console.log("✅ Firebase Admin initialized via Service Account");
-    } else if (firebaseConfig && firebaseConfig.projectId) {
+      console.log("✅ Admin SDK: Service Account Mode");
+    } else {
+      // Fallback that doesn't crash the server
       firebaseApp = admin.initializeApp({
-        projectId: firebaseConfig.projectId,
-        databaseURL: `https://${firebaseConfig.projectId}.firebaseio.com`
+        projectId: firebaseConfig.projectId
       });
-      console.log("⚠️ Firebase Admin initialized via Project ID only (Limited Permissions)");
+      console.log("⚠️ Admin SDK: Project ID Mode (No Auth)");
     }
   } catch (err) {
-    console.error("❌ Firebase Init Error:", err);
+    console.error("❌ Firebase Init Crash:", err);
+    firebaseApp = null;
   }
 } else {
   // apps[0] might be undefined if the array is empty, so we use || null 
