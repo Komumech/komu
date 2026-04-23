@@ -57,7 +57,7 @@ if (apps.length === 0) {
 
 // Initialize Firestore
 const db = firebaseApp 
-  ? getFirestore(firebaseApp, (firebaseConfig as any).firestoreDatabaseId) 
+  ? getFirestore(firebaseApp, "(default)") 
   : null;
 
 // --- NEURAL ENGINE ---

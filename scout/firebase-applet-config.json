@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0607484855",
-  "appId": "1:408473773399:web:ca06069a46710c0cfc0a12",
-  "apiKey": "AIzaSyDEzvbNs8e__fMbJp5Wx87VZs00A6uP6jQ",
-  "authDomain": "gen-lang-client-0607484855.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-76ad9fff-559b-4f9b-9a43-2b13e3635e9b",
-  "storageBucket": "gen-lang-client-0607484855.firebasestorage.app",
-  "messagingSenderId": "408473773399",
-  "measurementId": ""
+  "apiKey": "AIzaSyBvY0mqrvG5LrwMfyUoNNf1FWB-5_NR2G8",
+  "authDomain": "komu-notes.firebaseapp.com",
+  "projectId": "komu-notes",
+  "storageBucket": "komu-notes.firebasestorage.app",
+  "messagingSenderId": "530718193944",
+  "firestoreDatabaseId": "(default)",
+  "appId": "1:530718193944:web:079b5fad58c9c43308466d",
+  "measurementId": "G-1PL5GT2733"
 }
