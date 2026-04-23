@@ -35,8 +35,11 @@ try {
     const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
 
     if (privateKey && clientEmail) {
-      // Robust key formatting for Vercel
-      const formattedKey = privateKey.replace(/\\n/g, '\n');
+      // This version handles double-escaped backslashes AND literal newlines
+      const formattedKey = privateKey
+        .replace(/\\n/g, '\n')     // Fixes escaped newlines
+        .replace(/"/g, '')         // Removes accidental extra quotes
+        .trim();                   // Removes accidental spaces at the start/end
 
       firebaseApp = admin.initializeApp({
         credential: admin.credential.cert({
@@ -771,23 +774,27 @@ app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: 
 const ADMIN_EMAILS = ['komumech@gmail.com']; // Your authorized email
 
 app.post('/api/admin/clickstream', async (req, res) => {
-  if (!db) return res.status(503).json({ error: 'Database not initialized' });
   try {
+    if (!db) {
+      console.error("❌ Database not initialized");
+      return res.status(503).json({ error: "Database unavailable" });
+    }
+
     const { type, query, url, uid } = req.body;
 
-    // The .add() method creates the collection "clickstream" automatically on first write
+    // This is what forces the creation of the collection
     await db.collection('clickstream').add({
       type: type || 'search',
       query: query || '',
       url: url || '',
       uid: uid || 'anonymous',
-      timestamp: new Date() 
+      timestamp: new Date()
     });
 
     res.status(200).json({ success: true });
-  } catch (error) {
-    console.error("❌ Clickstream auto-creation failed:", error);
-    res.status(500).json({ error: "Could not save event" });
+  } catch (error: any) {
+    console.error("❌ Firestore Write Error:", error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
