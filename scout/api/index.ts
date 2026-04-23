@@ -37,7 +37,8 @@ async function getPipes() {
     isModelLoading = true;
     console.log("🚀 Warming Multimodal Engines (768-dim)...");
     
-    // Sdsion_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
+    if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
 
     console.log("✅ Scout Multimodal Engines ready!");
     return { text_pipe, vision_pipe };
@@ -430,10 +431,18 @@ app.post('/api/search', async (req, res) => {
       if (a.isExactMatch) sA += 10.0;
       if (b.isExactMatch) sB += 10.0;
       
-      if (a.isOfficialProperty) s += 5.0;
-      
+      if (a.isOfficialProperty) sA += 5.0;
+      if (b.isOfficialProperty) sB += 5.0;
+
+      if (a.isNavIntent && a.isRootDomain) sA += 10.0;
+      if (b.isNavIntent && b.isRootDomain) sB += 10.0;
+
       // Semantic Strength
-     n
+      const tA = a.title.toLowerCase();
+      const tB = b.title.toLowerCase();
+      if (tA === qLower) sA += 30.0;
+      if (tB === qLower) sB += 30.0;
+      if (tA.includes(qLower)) sA += 2.0;
       if (tB.includes(qLower)) sB += 2.0;
 
       if (clickedUrls.includes(a.url)) sA += 5.0;
