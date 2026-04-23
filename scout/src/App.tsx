@@ -13,7 +13,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestore";
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI, Type } from "@google/genai";
-import { SearchResult, AIOverview, KnowledgePanel } from './types';
+import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
 
 // Initialize Gemini on the Frontend
 const genAI = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '') });
@@ -50,11 +50,13 @@ export default function App() {
   const [isAppsOpen, setIsAppsOpen] = useState(false);
   const [isEnglishHelp, setIsEnglishHelp] = useState(false);
   const [imageQuery, setImageQuery] = useState<string | null>(null);
-  const [visualAnalysis, setVisualAnalysis] = useState<any | null>(null);
+  const [selectedImage, setSelectedImage] = useState<SearchResult | null>(null);
+  const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
-  const lastClickRef = useRef<{ id: string; url: string; time: number } | null>(null);
+  const lastQueryRef = useRef<string>('');
+  const lastClickRef = useRef<{ id: string; url: string; time: number; query: string } | null>(null);
   const appsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -82,7 +84,11 @@ export default function App() {
         const type = durationSeconds < 30 ? 'pogo' : 'success';
         console.log(`User Signal: ${type} after ${durationSeconds.toFixed(1)}s`);
         
-        axios.post('/api/feedback', { id: lastClickRef.current.id, type }).catch(() => {});
+        axios.post('/api/feedback', { 
+          id: lastClickRef.current.id, 
+          type, 
+          queryText: lastClickRef.current.query 
+        }).catch(() => {});
         lastClickRef.current = null;
       }
     };
@@ -94,6 +100,13 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  // SWITCH TAB SEARCH
+  useEffect(() => {
+    if (isSearching && query.trim()) {
+      handleSearch(query, 1);
+    }
+  }, [activeTab]);
 
   // Random Background for Home
   useEffect(() => {
@@ -304,6 +317,7 @@ export default function App() {
     setPage(requestedPage);
     setCorrection(null);
     setOriginalQuery(null);
+    lastQueryRef.current = finalQuery;
 
     let vector = null;
 
@@ -314,7 +328,7 @@ export default function App() {
       setSearchStage('vectorizing');
     }
 
-    // Vector generation is now handled by the backend to ensure 
+    // Neural embeddings are now handled server-side using mpnet-base for consistency and precision.
     // compatibility with the CLIP-ViT-L-14 latent space.
 
     // AUTOCORRECT ON FRONTEND (Adhering to rules)
@@ -326,7 +340,7 @@ export default function App() {
         Be conservative. Only correct if you are 95% certain.`;
         
         const r = await genAI.models.generateContent({
-          model: "gemini-1.5-flash",
+          model: "gemini-3-flash-preview",
           contents: autocorrectPrompt
         });
         const text = r.text?.trim() || "";
@@ -395,23 +409,15 @@ export default function App() {
       setDictionary(data.dictionary || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
       
-      const rawResults: SearchResult[] = pineconeResults.map((r: any) => {
-        const url = r.url || '#';
-        const hostname = r.displayUrl || 'unknown';
-        const parts = hostname.split('.');
-        const domainName = parts[0] === 'www' ? parts[1] || parts[0] : parts[0];
-        const fallbackTitle = domainName.charAt(0).toUpperCase() + domainName.slice(1);
-        
-        return {
-          id: r.id,
-          title: (r.title && !/^untitled/i.test(r.title)) ? r.title : fallbackTitle,
-          url,
-          displayUrl: hostname,
-          snippet: r.snippet || 'No description available.',
-          sourceIcon: r.sourceIcon || '🌐',
-          image: r.image || r.thumbnail || r.ogImage || r.imageUrl || null
-        };
-      });
+      const rawResults: SearchResult[] = pineconeResults.map((r: any) => ({
+        id: r.id,
+        title: r.title || 'Untitled Page',
+        url: r.url || '#',
+        displayUrl: r.displayUrl || 'unknown',
+        snippet: r.snippet || 'No description available.',
+        sourceIcon: r.sourceIcon || '🌐',
+        image: r.image || null
+      }));
 
       // IMMEDIATE UPDATE FOR SPEED
       setResults(rawResults);
@@ -470,7 +476,7 @@ export default function App() {
            5. Use Markdown formatting.`;
 
       const result = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
@@ -491,7 +497,7 @@ export default function App() {
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 5 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
       const response = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -525,7 +531,7 @@ export default function App() {
       details (array of {label, value}), and sections (array of {title, content}).`;
 
       const response = await genAI.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -567,7 +573,7 @@ export default function App() {
 
   const handleResultClick = (id: string, url: string) => {
     // Record for behavioral signals (Pogo-sticking detection)
-    lastClickRef.current = { id, url, time: Date.now() };
+    lastClickRef.current = { id, url, time: Date.now(), query: lastQueryRef.current };
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
@@ -699,6 +705,18 @@ export default function App() {
             searchStage={searchStage}
             visualAnalysis={visualAnalysis}
             setImageQuery={setImageQuery}
+            selectedImage={selectedImage}
+            setSelectedImage={setSelectedImage}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {selectedImage && (
+          <ImageDetailView 
+            image={selectedImage} 
+            allResults={results} 
+            onClose={() => setSelectedImage(null)} 
+            onSelect={(img: any) => setSelectedImage(img)}
           />
         )}
       </AnimatePresence>
@@ -849,42 +867,46 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
   // Group images by domain for the carousel
-  const carouselImages = results.filter((r: any) => isImageUrl(r.url));
+  const carouselImages = results.filter((res: any) => isImageUrl(res.url));
 
   const filteredResults = activeTab === 'images' 
     ? results.filter((res: any) => isImageUrl(res.url) || res.image)
-    : results.filter((res: any) => !isImageUrl(res.url));
+    : results.filter((res: any) => !isImageUrl(res.url)); // Keep 'all' list focused on webpages, but results still contains images
 
   // Group results by domain (simple grouping)
   const groupedResults: any[] = [];
   const processedDomains = new Set();
+  const maxNested = 3; // Nesting limit
   
   if (activeTab === 'all') {
-    filteredResults.forEach((res: any, idx: number) => {
+    results.filter((res: any) => !isImageUrl(res.url)).forEach((res: any) => {
       // Normalize domain for reliable grouping (remove www. and lowercase)
       const groupKey = res.displayUrl.toLowerCase().replace(/^www\./, '');
       
-      // Check if this domain has multiple entries in the results
-      const domainMatches = filteredResults.filter((r: SearchResult) => 
+      if (processedDomains.has(groupKey)) return;
+
+      // Find all results for this domain in the full results set
+      const domainMatches = results.filter((r: SearchResult) => 
+        !isImageUrl(r.url) &&
         r.displayUrl.toLowerCase().replace(/^www\./, '') === groupKey
       );
       
-      if (domainMatches.length > 1 && !processedDomains.has(groupKey)) {
+      if (domainMatches.length > 1) {
         // Create a group with a primary and secondary results
         groupedResults.push({
           type: 'group',
           primary: domainMatches[0],
-          secondaries: domainMatches.slice(1).slice(0, 4) // Show up to 4 rich sitelinks
+          secondaries: domainMatches.slice(1).slice(0, maxNested)
         });
-        processedDomains.add(groupKey);
-      } else if (!processedDomains.has(groupKey)) {
+      } else {
         groupedResults.push({ type: 'single', result: res });
       }
+      processedDomains.add(groupKey);
     });
   } else {
     // For other tabs, don't group or use simple list
@@ -1187,12 +1209,16 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               activeTab === 'images' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
                   {filteredResults.map((res: any) => (
-                    <a key={res.id} onClick={() => onResultClick?.(res.id, res.url)} href={res.url} target="_blank" rel="noreferrer" className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200">
+                    <div 
+                      key={res.id} 
+                      onClick={() => setSelectedImage(res)} 
+                      className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
+                    >
                       <img src={isImageUrl(res.url) ? res.url : res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
                       <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
                         <span className="text-white text-xs font-medium truncate">{res.title}</span>
                       </div>
-                    </a>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -1201,7 +1227,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
-                        <ImageStrip results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} />
+                        <ImageStrip results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
                       )}
 
                       {/* First FAQ after 3 results */}
@@ -1214,10 +1240,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       )}
                       
                       {item.type === 'single' ? (
-                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} />
+                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
                       ) : (
                         <div className="space-y-4 py-4 mb-8">
-                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} />
+                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
                           <div className="ml-4 sm:ml-12 flex flex-col -mt-4">
                             <div className="border-t border-slate-100 mt-2 mb-4" />
                             <div className="space-y-0">
@@ -1243,9 +1269,12 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                               ))}
                             </div>
                             <div className="border-t border-slate-100 mt-4 mb-2" />
-                            <a href={`https://${item.primary.displayUrl}`} className="text-sm font-bold text-slate-500 hover:text-blue-600 flex items-center gap-2 mt-4 px-3 py-1.5 hover:bg-slate-50 w-fit rounded-lg transition-all border border-transparent hover:border-slate-100">
+                            <button 
+                              onClick={() => { setQuery(`site:${item.primary.displayUrl}`); onSearch(`site:${item.primary.displayUrl}`); }}
+                              className="text-sm font-bold text-slate-500 hover:text-blue-600 flex items-center gap-2 mt-4 px-3 py-1.5 hover:bg-slate-50 w-fit rounded-lg transition-all border border-transparent hover:border-slate-100"
+                            >
                               More results from {item.primary.displayUrl.replace('www.', '')} <ArrowRight size={14} />
-                            </a>
+                            </button>
                           </div>
                         </div>
                       )}
@@ -1256,14 +1285,50 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             ) : <div className="py-20 text-center text-slate-400 font-medium italic">No results found for your query.</div>}
 
             {totalPages > 1 && !loading && (
-              <div className="flex items-center justify-center gap-3 py-12 border-t border-slate-100">
-                <button onClick={() => onSearch(undefined, Math.max(1, page - 1))} disabled={page===1} className="p-3 rounded-2xl hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-20 transition-all font-bold text-sm">Prev</button>
-                <div className="flex gap-2">
-                  {[...Array(Math.min(5, totalPages))].map((_, i) => (
-                    <button key={i} onClick={() => onSearch(undefined, i+1)} className={`w-11 h-11 rounded-2xl font-bold transition-all ${page===i+1 ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white text-slate-600 border border-transparent hover:border-slate-200'}`}>{i+1}</button>
-                  ))}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-12 border-t border-slate-100 mt-8 mb-10 overflow-hidden">
+                <div className="flex items-center gap-1.5 order-2 sm:order-1">
+                  <button 
+                    onClick={() => onSearch(undefined, Math.max(1, page - 1))} 
+                    disabled={page === 1} 
+                    className="h-10 px-4 rounded-xl hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all font-bold text-xs uppercase tracking-widest text-slate-500 border border-transparent hover:border-slate-200"
+                  >
+                    Prev
+                  </button>
+                  
+                  <div className="flex gap-1">
+                    {(() => {
+                      const pages = [];
+                      const startPage = Math.max(1, page - 2);
+                      const endPage = Math.min(totalPages, startPage + 4);
+                      const actualStart = Math.max(1, endPage - 4);
+                      
+                      for (let i = actualStart; i <= endPage; i++) {
+                        pages.push(
+                          <button 
+                            key={i} 
+                            onClick={() => onSearch(undefined, i)} 
+                            className={`w-10 h-10 rounded-xl font-black text-sm transition-all ${page === i ? 'bg-[#1a73e8] text-white shadow-lg shadow-blue-200' : 'hover:bg-slate-50 text-slate-600'}`}
+                          >
+                            {i}
+                          </button>
+                        );
+                      }
+                      return pages;
+                    })()}
+                  </div>
+
+                  <button 
+                    onClick={() => onSearch(undefined, Math.min(totalPages, page + 1))} 
+                    disabled={page === totalPages} 
+                    className="h-10 px-4 rounded-xl hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all font-bold text-xs uppercase tracking-widest text-slate-500 border border-transparent hover:border-slate-200"
+                  >
+                    Next
+                  </button>
                 </div>
-                <button onClick={() => onSearch(undefined, Math.min(totalPages, page + 1))} disabled={page===totalPages} className="p-3 rounded-2xl hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-20 transition-all font-bold text-sm">Next</button>
+                
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest order-1 sm:order-2">
+                  Page <span className="text-slate-900">{page}</span> of {totalPages}
+                </div>
               </div>
             )}
           </div>
@@ -1316,39 +1381,33 @@ function QuickSummary({ text }: { text: string }) {
   );
 }
 
-function ImageStrip({ results, onMore, onResultClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void }) {
+function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void, onImageClick?: (img: any) => void }) {
   const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
   if (imagesWithMeta.length < 3) return null;
 
   return (
     <div className="py-8 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between mb-5 px-1">
-        <h2 className="text-2xl font-display font-medium text-slate-900">Images</h2>
+        <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Images for {results[0]?.title.split(' ')[0] || 'your search'}</h2>
         <button 
           onClick={onMore} 
-          className="text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-full text-[13px] font-bold flex items-center gap-1 transition-all active:scale-95"
+          className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100"
         >
-          More images <ChevronRight size={16} />
+          View all <ChevronRight size={14} />
         </button>
       </div>
-      <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
+      <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
         {imagesWithMeta.map((img) => (
-          <a key={img.id} onClick={() => onResultClick?.(img.id, img.url)} href={img.url} target="_blank" rel="noreferrer" className="shrink-0 w-44 sm:w-52 group">
-            <div className="aspect-square rounded-3xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1">
-              <img src={img.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
+            <div className="aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1">
+              <img src={img.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={img.title} />
             </div>
-            <div className="mt-3 text-[13px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{img.title}</div>
-            <div className="mt-1 text-[11px] text-slate-500 line-clamp-1 flex items-center gap-1.5 opacity-80 uppercase tracking-wider font-bold">
-              <img src={img.sourceIcon || `https://www.google.com/s2/favicons?domain=${img.displayUrl}&sz=32`} className="w-3.5 h-3.5 rounded-full" referrerPolicy="no-referrer" />
-              {img.displayUrl.split('.')[0]}
+            <div className="mt-2 text-[12px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{img.title}</div>
+            <div className="mt-1 text-[10px] text-slate-400 line-clamp-1 flex items-center gap-1.5 font-bold uppercase tracking-wider">
+               {img.displayUrl.replace('www.', '')}
             </div>
-          </a>
+          </div>
         ))}
-      </div>
-      <div className="mt-2 flex justify-center">
-         <button onClick={onMore} className="w-full py-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl text-[13px] font-bold flex items-center justify-center gap-2 transition-all">
-           Show more images <ChevronRight size={14} className="rotate-90" />
-         </button>
       </div>
     </div>
   );
@@ -1482,7 +1541,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   );
 }
 
-function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch }: any) {
+function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick }: any) {
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -1592,7 +1651,13 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
         
         {/* Main Side Image / Carousel */}
         {activeImage && (
-          <div className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50">
+          <div 
+            onClick={() => {
+              const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
+              onImageClick?.(imgData);
+            }}
+            className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer"
+          >
             <AnimatePresence mode="wait">
               <motion.img 
                 key={activeImage}
@@ -1601,7 +1666,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.5 }}
-                className="w-full h-full object-cover" 
+                className="w-full h-full object-cover transition-transform hover:scale-105" 
                 referrerPolicy="no-referrer" 
               />
             </AnimatePresence>
@@ -1616,7 +1681,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
 
             {domainImages.length > 1 && (
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full">
-                {domainImages.slice(0, 5).map((_unused: any, i: number) => (
+                {domainImages.slice(0, 5).map((_: any, i: number) => (
                   <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${currentImgIndex === i ? 'bg-white scale-125' : 'bg-white/40'}`} />
                 ))}
               </div>
@@ -1625,6 +1690,101 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
         )}
       </div>
     </article>
+  );
+}
+
+function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+  
+  const relatedImages = allResults.filter((res: any) => {
+    if (!res.image || res.id === image.id) return false;
+    const imgTitle = (image.title || '').toLowerCase();
+    const resTitle = (res.title || '').toLowerCase();
+    const imgTerms = imgTitle.split(/\s+/).filter((t: string) => t.length > 3);
+    // Intersection based on keywords or same domain
+    return imgTerms.some((term: string) => resTitle.includes(term)) || res.displayUrl === image.displayUrl;
+  }).slice(0, 12);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[2200] flex justify-end bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div 
+        initial={isMobile ? { y: '100%' } : { x: '100%' }}
+        animate={isMobile ? { y: 0 } : { x: 0 }}
+        exit={isMobile ? { y: '100%' } : { x: '100%' }}
+        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        className={`relative w-full md:w-[600px] lg:w-[800px] h-full bg-white shadow-2xl overflow-y-auto flex flex-col p-0`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between p-4 md:p-6">
+          <div className="flex items-center gap-3 overflow-hidden">
+            <img 
+               src={`https://www.google.com/s2/favicons?domain=${image.displayUrl}&sz=64`} 
+               className="w-6 h-6 rounded-full shrink-0" 
+            />
+            <span className="text-sm font-bold text-slate-500 truncate">{image.displayUrl.replace('www.', '')}</span>
+          </div>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-all active:scale-95"
+          >
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 p-4 md:p-10">
+          {/* Main Image Container */}
+          <div className="aspect-auto bg-slate-50 rounded-3xl overflow-hidden border border-slate-100 mb-8 max-h-[60vh] flex items-center justify-center">
+            <img 
+              src={image.image || image.url} 
+              className="max-w-full max-h-full object-contain" 
+              referrerPolicy="no-referrer"
+              alt={image.title}
+            />
+          </div>
+
+          <div className="mb-10">
+            <h2 className="text-2xl md:text-3xl font-display font-medium text-slate-900 mb-4">{image.title}</h2>
+            <p className="text-slate-600 text-lg leading-relaxed mb-6">{image.snippet}</p>
+            <a 
+              href={image.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100"
+            >
+              Visit Website <ExternalLink size={16} />
+            </a>
+          </div>
+
+          {/* Related Images Table/Grid */}
+          {relatedImages.length > 0 && (
+            <div className="border-t border-slate-100 pt-10">
+              <h3 className="text-xl font-display font-bold text-slate-900 mb-6">Related Images</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {relatedImages.map((rel: any) => (
+                  <button 
+                    key={rel.id}
+                    onClick={() => onSelect(rel)}
+                    className="group relative aspect-square rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 hover:shadow-xl transition-all"
+                  >
+                    <img src={rel.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-end p-3 transition-opacity">
+                       <span className="text-white text-[10px] font-bold truncate uppercase tracking-widest">{rel.displayUrl.replace('www.', '')}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 

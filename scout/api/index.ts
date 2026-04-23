@@ -7,7 +7,7 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { pipeline, RawImage, env } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
 
 dotenv.config();
 
@@ -33,10 +33,12 @@ async function getPipes() {
   
   try {
     isModelLoading = true;
-    console.log("🚀 Loading MPNet Search Engine...");
+    console.log("🚀 Warming Scout Semantic Brain (all-mpnet-base-v2)...");
     
+    // Semantic Encoder (768-dim) 
     if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
 
+    console.log("✅ Scout Semantic Brain ready!");
     return { text_pipe };
   } catch (err: any) {
     console.error("❌ Multimodal Engine failure:", err.message);
@@ -52,7 +54,7 @@ async function getEmbedding(text: string): Promise<number[] | null> {
     const pipes = await getPipes();
     if (pipes?.text_pipe) {
       const output = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
-      return Array.from(output.data) as number[];
+      return Array.from(output.data);
     }
   } catch (err: any) {
     console.warn("⚠️ Local embedding failed:", err.message);
@@ -170,9 +172,66 @@ app.get('/api/suggestions', async (req, res) => {
     res.json([]);
   }
 });
+
+// --- COLLECTIVE MEMORY / INTENT LOGIC ---
+// In a production environment, this would be a background job.
+// Here we implement "Active Learning" on every interaction.
+async function updateQueryIntent(queryText: string, docId: string, signal: 'success' | 'pogo') {
+  const pc = getPinecone();
+  if (!pc) return;
+  
+  const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
+  const namespace = 'intent';
+  const queryVector = await getEmbedding(queryText);
+  if (!queryVector) return;
+
+  // We use a hashed ID for the query to prevent duplicate intent entries for the same query text
+  const queryHash = Buffer.from(queryText.toLowerCase().trim()).toString('base64').slice(0, 50);
+  
+  try {
+    // 1. Fetch current intent state for this query
+    const fetchRes = await index.namespace(namespace).fetch({ ids: [queryHash] });
+    const record = fetchRes.records?.[queryHash];
+    
+    let docWeights: Record<string, number> = {};
+    if (record?.metadata?.doc_weights) {
+      docWeights = JSON.parse(record.metadata.doc_weights as string);
+    }
+
+    // 2. Adjust Weights based on Signal (Collaborative Ranking)
+    // A success is +1.0, a pogo (quick exit) is -0.5
+    const currentWeight = docWeights[docId] || 0;
+    const adjustment = signal === 'success' ? 1.0 : -0.5;
+    docWeights[docId] = Math.max(0, currentWeight + adjustment);
+
+    // 3. Keep only top performers for this query to keep metadata size small
+    const sortedDocs = Object.entries(docWeights)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10);
+    const prunedWeights = Object.fromEntries(sortedDocs);
+
+    // 4. Update Intent Index
+    await index.namespace(namespace).upsert({
+      records: [{
+        id: queryHash,
+        values: queryVector,
+        metadata: {
+          query_text: queryText,
+          doc_weights: JSON.stringify(prunedWeights),
+          last_updated: new Date().toISOString()
+        }
+      }]
+    });
+    
+    console.log(`🧠 Intent Updated: "${queryText}" -> Doc:${docId} (Signal: ${signal})`);
+  } catch (err) {
+    console.warn("⚠️ Intent update failed:", err);
+  }
+}
+
 app.post('/api/feedback', async (req, res) => {
   try {
-    const { id, type } = req.body; // type: 'success' | 'pogo'
+    const { id, type, queryText } = req.body; 
     if (!id) return res.status(400).json({ error: 'Record ID required' });
 
     const pc = getPinecone();
@@ -187,18 +246,23 @@ app.post('/api/feedback', async (req, res) => {
 
     let currentBoost = parseFloat(record.metadata?.popularity_boost as string) || 1.0;
 
-    // Adjust based on signal
+    // Phase 2: The "Listen" Phase
     if (type === 'success') {
-      currentBoost = Math.min(3.0, currentBoost + 0.05); // Cap at 3x
+      currentBoost = Math.min(3.0, currentBoost + 0.1); 
     } else if (type === 'pogo') {
-      currentBoost = Math.max(0.5, currentBoost - 0.05); // Floor at 0.5x
+      currentBoost = Math.max(0.5, currentBoost - 0.1); 
     }
 
-    // Update asynchronously
+    // Update main index metadata (Global Popularity)
     await index.namespace(namespace).update({
       id,
       metadata: { ...record.metadata, popularity_boost: String(currentBoost) }
     });
+
+    // Phase 3: The "Learn" Phase (Collective Brain)
+    if (queryText) {
+      updateQueryIntent(queryText, id, type);
+    }
 
     res.json({ success: true, boost: currentBoost });
   } catch (error) {
@@ -209,18 +273,16 @@ app.post('/api/feedback', async (req, res) => {
 app.post('/api/search', async (req, res) => {
   try {
     const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
-    const pageSize = 10;
+    const pageSize = 40;
     const skip = (page - 1) * pageSize;
     
     const pc = getPinecone();
     if (!pc) return res.status(503).json({ error: 'Pinecone not configured' });
     const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
-    const namespace = process.env.PINECONE_NAMESPACE || '';
+    const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     let finalQuery = query;
 
-    // VISUAL SEARCH LOGIC (Local CLIP Vectorization)
-    let visualVector: number[] | null = null;
     if (imageQuery) {
       console.warn("Visual search disabled in serverless mode to prevent memory crashes.");
       return res.status(400).json({ 
@@ -271,28 +333,29 @@ app.post('/api/search', async (req, res) => {
       ]
     } : null;
 
-    let mpnetVector: number[] | null = null;
-
-    if (visualVector) {
-      mpnetVector = visualVector; // Use the visual vector for image search
-    } else if (providedVector) {
-      mpnetVector = Array.isArray(providedVector) ? providedVector.slice(0, 768) : null;
-    } else if (finalQuery) {
-      console.log("Scout: Generating MPNet embedding...");
-      const pipes = await getPipes();
-      if (!pipes) {
-        return res.status(503).json({
-          error: "Neural Engines Warming Up",
-          message: "Scout's semantic engines are loading. Please try again in a few seconds."
-        });
-      }
-      const embedding = await getEmbedding(finalQuery);
-      mpnetVector = embedding;
+    let vector = providedVector;
+    
+    // Safety check: Truncate to 768 if it's from a higher-dim model
+    if (vector && vector.length > 768) {
+      vector = vector.slice(0, 768);
     }
 
+    if (!vector && finalQuery) {
+      const pipes = await getPipes();
+      if (!pipes) {
+        return res.status(503).json({ 
+          error: "Neural Engines Warming Up", 
+          message: "Scout's semantic embedding engine is loading. Please try again in a few seconds." 
+        });
+      }
+      vector = await getEmbedding(finalQuery);
+    }
+    
+    if (!vector) vector = Array(768).fill(0);
+
     let filter: any = {};
-    if (type === 'images') filter = { is_image: { $eq: true } };
-    else filter = { is_image: { $ne: true } };
+    if (type === 'images') filter = { is_image: { "$eq": true } };
+    // 'all' type now includes images by not having an explicit negative filter
 
     if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
     if (newsFilter) filter = { "$and": [filter, newsFilter] };
@@ -314,35 +377,66 @@ app.post('/api/search', async (req, res) => {
       `${qLower} official`
     ])];
 
-    // Perform Multi-Vector Retrieval across both possible latent spaces
-    const [mpnetRes, kRes] = await Promise.all([
-      mpnetVector ? index.namespace(namespace || 'default').query({
-        vector: mpnetVector,
-        topK: 250,
+    // Step 2: Intent Retrieval (What did others choose?)
+    // Phase 4: The "Act" Phase
+    let intentBoosts: Record<string, number> = {};
+    try {
+      const intentRes = await index.namespace('intent').query({
+        vector,
+        topK: 3,
+        includeMetadata: true
+      });
+      
+      intentRes.matches.forEach(match => {
+        if (match.metadata?.doc_weights) {
+          const weights = JSON.parse(match.metadata.doc_weights as string);
+          // Intent Relevance decreases as the query match gets further away
+          const intentStrength = match.score || 0; 
+          Object.entries(weights).forEach(([docId, weight]) => {
+            const current = intentBoosts[docId] || 0;
+            intentBoosts[docId] = current + ((weight as number) * intentStrength * 5.0);
+          });
+        }
+      });
+    } catch (e) {
+      console.warn("Intent lookup failed, falling back to pure semantic search");
+    }
+
+    const [vRes, kRes] = await Promise.all([
+      index.query({
+        vector,
+        topK: 1000,
         filter: Object.keys(filter).length > 0 ? filter : undefined,
         includeMetadata: true,
-      }).catch(() => ({ matches: [] })) : { matches: [] },
-
-      index.namespace(namespace || 'default')
-        .query({
-          vector: Array(768).fill(0),
-          filter: {
-            ...filter,
-            "$or": [
-              { title: { "$in": variations } },
-              { text: { "$in": variations } },
-              { domain: { "$in": variations || [] } }
-            ]
-          },
-          topK: 100,
-          includeMetadata: true,
+        namespace
+      }).catch(err => {
+        console.error("Vector query failed:", err);
+        return { matches: [] };
+      }),
+      index.query({
+        vector: Array(vector.length).fill(0),
+        filter: {
+          ...filter,
+          "$or": [
+            { title: { "$in": variations } },
+            { text: { "$in": variations } },
+            { name: { "$in": variations } },
+            { domain: { "$in": variations || [] } }
+          ]
+        },
+        topK: 250,
+        includeMetadata: true,
+        namespace
       }).catch(err => {
         console.error("Keyword query failed:", err);
         return { matches: [] };
       })
     ]);
 
-    const allMatches = [...mpnetRes.matches, ...kRes.matches];
+    vectorResults = vRes;
+    keywordResults = kRes;
+
+    const allMatches = [...vectorResults.matches, ...keywordResults.matches];
     const seenIds = new Set();
     const uniqueMatches = allMatches.filter(match => {
       if (seenIds.has(match.id)) return false;
@@ -386,60 +480,104 @@ app.post('/api/search', async (req, res) => {
     });
 
     const reranked = allResults.sort((a, b) => {
-      // 1. Start with User Intent Hybrid Score
-      let sA = (a.score * 0.7) + (a.boost * 0.3);
-      let sB = (b.score * 0.7) + (b.boost * 0.3);
+      // 1. Hybrid Score: Vector Similarity + Popularity Boost
+      // mpnet scores are usually between 0.3 and 0.9.
+      let sA = (a.score * 0.8) + (Math.log10(a.boost + 1) * 0.2);
+      let sB = (b.score * 0.8) + (Math.log10(b.boost + 1) * 0.2);
 
-      // 2. Navigational/Brand Centric Pins (Astronomical boosts to guarantee order)
-      if (a.isExactMatch) sA += 10.0;
-      if (b.isExactMatch) sB += 10.0;
+      // 2. Exact Title/Domain Matches (Super High Boost)
+      const tA = a.title.toLowerCase().trim();
+      const tB = b.title.toLowerCase().trim();
+      const nA = a.name?.toLowerCase().trim() || '';
+      const nB = b.name?.toLowerCase().trim() || '';
+
+      if (tA === qLower || nA === qLower) sA += 50.0;
+      if (tB === qLower || nB === qLower) sB += 50.0;
       
-      if (a.isOfficialProperty) sA += 5.0;
-      if (b.isOfficialProperty) sB += 5.0;
+      if (a.isExactMatch) sA += 100.0;
+      if (b.isExactMatch) sB += 100.0;
+      
+      if (a.isOfficialProperty) sA += 40.0;
+      if (b.isOfficialProperty) sB += 40.0;
 
-      if (a.isNavIntent && a.isRootDomain) sA += 10.0;
-      if (b.isNavIntent && b.isRootDomain) sB += 10.0;
+      // 3. Navigational Strength
+      if (a.isNavIntent && a.isRootDomain) sA += 15.0;
+      if (b.isNavIntent && b.isRootDomain) sB += 15.0;
 
-      // Semantic Strength
-      const tA = a.title.toLowerCase();
-      const tB = b.title.toLowerCase();
-      if (tA === qLower) sA += 30.0;
-      if (tB === qLower) sB += 30.0;
+      // 4. Content Relevance (Title inclusion)
       if (tA.includes(qLower)) sA += 2.0;
       if (tB.includes(qLower)) sB += 2.0;
 
-      if (clickedUrls.includes(a.url)) sA += 5.0;
-      if (clickedUrls.includes(b.url)) sB += 5.0;
+      // 5. Intent Re-ranking (Collaborative IQ)
+      const intentBoost = intentBoosts[a.id] || 0;
+      const intentBoostB = intentBoosts[b.id] || 0;
+      sA += intentBoost;
+      sB += intentBoostB;
 
-      // Penalize deep links for generic searches
-      if (a.url.length > 70 && !a.isExactMatch && !a.isOfficialProperty) sA -= 1.0;
-      if (b.url.length > 70 && !b.isExactMatch && !b.isOfficialProperty) sB -= 1.0;
+      // 6. User Feedback (Clicks)
+      if (clickedUrls.includes(a.url)) sA += 10.0;
+      if (clickedUrls.includes(b.url)) sB += 10.0;
+
+      // 7. Quality Penalties
+      if (a.url.length > 80 && !a.isExactMatch && !a.isOfficialProperty) sA -= 2.0;
+      if (b.url.length > 80 && !b.isExactMatch && !b.isOfficialProperty) sB -= 2.0;
 
       return sB - sA;
     });
 
-    // Smart Diversity: Group official sites together, but demote secondary domains
-    const finalResults: any[] = [];
-    const domainCountMap = new Map();
-    reranked.forEach(res => {
-      const domainKey = res.displayUrl || 'unknown';
-      const count = domainCountMap.get(domainKey) || 0;
+    // --- SEGREGATION FOR TAB-SPECIFIC PAGINATION ---
+    const webResults = reranked.filter(r => !r.is_image);
+    const imageResults = reranked.filter(r => r.is_image);
+
+    // Decide which pool to paginate based on the tab
+    let poolToPaginate = webResults;
+    if (type === 'images') {
+      poolToPaginate = imageResults;
+    } else if (type === 'news') {
+      poolToPaginate = webResults;
+    }
+
+    // Step 5: Diversity & Nesting Limit for Web Results (only if in 'all' or 'news' tab)
+    let finalOrdered: any[] = [];
+    if (type !== 'images') {
+      const groupedResults: Record<string, any[]> = {};
       
-      // Allow many results for official properties (e.g. show many Google sites for "Google")
-      // But restrict third-party sites (e.g. limit github items to 2 when searching Google)
-      const limit = res.isOfficialProperty ? 8 : 2; 
+      poolToPaginate.forEach(res => {
+        const dom = res.displayUrl.toLowerCase().replace('www.', '');
+        if (!groupedResults[dom]) groupedResults[dom] = [];
+        // Nesting Limit: Max 4 results per domain (1 primary + 3 secondaries)
+        if (groupedResults[dom].length < 4) {
+          groupedResults[dom].push(res);
+        }
+      });
 
-      if (count < limit) { 
-        finalResults.push(res);
-        domainCountMap.set(domainKey, count + 1);
-      }
-    });
+      const seenDomains = new Set();
+      poolToPaginate.forEach(res => {
+        const dom = res.displayUrl.toLowerCase().replace('www.', '');
+        if (!seenDomains.has(dom)) {
+          const matches = groupedResults[dom];
+          if (matches) {
+            finalOrdered.push(...matches);
+          }
+          seenDomains.add(dom);
+        }
+      });
+    } else {
+      finalOrdered = poolToPaginate;
+    }
 
-    const paginatedResults = finalResults.slice(skip, skip + pageSize);
-    const totalPages = Math.ceil(finalResults.length / pageSize);
+    // SLICE BASED ON REQUESTED PAGE
+    const paginatedResults = finalOrdered.slice(skip, skip + pageSize);
+    const totalPagesCount = Math.ceil(finalOrdered.length / pageSize);
+
+    // If 'all' tab, we mix in some top images so the ImageStrip always works on page 1
+    let resultsWithOptionalImages = paginatedResults;
+    if (type === 'all' && imageResults.length > 0) {
+       resultsWithOptionalImages = [...paginatedResults, ...imageResults.slice(0, 10)];
+    }
 
     res.json({ 
-      results: paginatedResults,
+      results: resultsWithOptionalImages,
       dictionary: dictionaryResult,
       suggestKnowledgePanel,
       detectedEntity,
@@ -447,8 +585,8 @@ app.post('/api/search', async (req, res) => {
       correction: null, 
       originalQuery: null,
       page,
-      totalPages,
-      totalResults: finalResults.length,
+      totalPages: totalPagesCount,
+      totalResults: finalOrdered.length,
       visualMathProblem: null 
     });
   } catch (err: any) {

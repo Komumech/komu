@@ -22,8 +22,8 @@ except ImportError:
     PINECONE_KEY = None
 
 # --- INITIALIZE SCOUT V3.5 VISUAL BRAIN ---
-# CLIP-ViT-L-14 provides a shared 768-dim latent space for visual and textual data.
-visual_engine = SentenceTransformer('clip-ViT-L-14')
+# Switching to MPNet (768-dim) for all text and image-alt metadata search
+visual_engine = SentenceTransformer('all-mpnet-base-v2')
 
 def get_metadata(html, url):
     """Rigorous extraction of Title and Preview Image."""
@@ -101,13 +101,9 @@ def index_website(url):
                 img_url = urljoin(url, src).split('?')[0]
                 if any(ext in img_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
                     try:
-                        # 1. Fetch the actual image data
-                        img_resp = requests.get(img_url, timeout=5)
-                        if img_resp.status_code != 200: continue
-                        
-                        # 2. Vectorize visual features (edges, shapes, colors)
-                        img_obj = Image.open(io.BytesIO(img_resp.content)).convert('RGB')
-                        img_vector = visual_engine.encode(img_obj).tolist()
+                        # Since MPNet is text-only, we vectorize the Alt Text. 
+                        # This allows images to be found via semantic keyword search.
+                        img_vector = visual_engine.encode(alt[:1000]).tolist()
                     except Exception: continue
 
                     img_vectors.append({
