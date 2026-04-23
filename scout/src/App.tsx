@@ -947,8 +947,6 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
   );
 }
 
-<<<<<<< HEAD
-=======
 function VisualMathDisplay({ problem, stage, image, analysis }: any) {
   const stages = [
     { id: 'extracting', label: 'Extracting Text', icon: Camera },
@@ -1017,7 +1015,6 @@ function VisualMathDisplay({ problem, stage, image, analysis }: any) {
     </motion.div>
   );
 }
->>>>>>> 0506e172c4857ffaed672818932134c68157fb1b
 function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
@@ -1363,7 +1360,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   </div>
                 </div>
               </motion.div>
-            ) : aiRateLimited ? (
+            ) }: aiRateLimited ? (
               <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
                 <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
                   <Zap size={20} />
@@ -1373,7 +1370,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
                 </div>
               </div>
-            )}
+            )
 
             {loading ? (
               <div className="space-y-6">
@@ -1984,11 +1981,10 @@ function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
       </motion.div>
     </motion.div>
   );
-}
+ }
 
-function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any[], onClose: () => void, loading: boolean, refresh: () => void }) {
+ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any[], onClose: () => void, loading: boolean, refresh: () => void }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'queries' | 'performance'>('overview');
-<<<<<<< HEAD
 
   // Process data for charts
   const queryCounts = events.reduce((acc: any, curr: any) => {
@@ -2120,7 +2116,7 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                      {pieData.map((_entry, index) => (
+                                      {pieData.map((_entry: any, index: number) => (
                                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                       ))}
                                    </Pie>
@@ -2129,217 +2125,7 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
                              </ResponsiveContainer>
                           </div>
                           <div className="flex justify-center gap-4 pt-4 flex-wrap">
-                             {pieData.map((d, i) => (
-                               <div key={i} className="flex items-center gap-2">
-                                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                                  <span className="text-xs font-bold text-slate-500 lowercase">{d.name}</span>
-                               </div>
-                             ))}
-                          </div>
-                       </div>
-                    </div>
-                  </>
-                )}
-
-                {activeTab === 'queries' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                     <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm h-[500px] flex flex-col">
-                        <h4 className="font-bold text-slate-900 mb-8">Top 10 Resonant Queries</h4>
-                        <div className="flex-1 min-h-0">
-                           <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={queryData} layout="vertical">
-                                 <XAxis type="number" hide />
-                                 <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12, fontWeight: 'bold' }} />
-                                 <Tooltip />
-                                 <Bar dataKey="value" fill="#8b5cf6" radius={[0, 10, 10, 0]} />
-                              </BarChart>
-                           </ResponsiveContainer>
-                        </div>
-                     </div>
-                     
-                     <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm flex flex-col">
-                        <h4 className="font-bold text-slate-900 mb-6">Live Feed</h4>
-                        <div className="space-y-4 overflow-y-auto max-h-[440px] pr-2 custom-scrollbar">
-                           {events.slice(0, 50).map((e, i) => (
-                             <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-start justify-between gap-4">
-                                <div>
-                                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{new Date(e.timestamp).toLocaleTimeString()}</div>
-                                   <div className="text-sm font-bold text-slate-800 line-clamp-1 italic">"{e.query}"</div>
-                                   <div className="text-[11px] text-slate-500 mt-1 line-clamp-1">{e.url}</div>
-                                </div>
-                                <div className={`shrink-0 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter ${e.type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-                                   {e.type}
-                                </div>
-                             </div>
-                           ))}
-                        </div>
-                     </div>
-                  </div>
-                )}
-
-                {activeTab === 'performance' && (
-                   <div className="flex flex-col items-center justify-center py-20 text-center">
-                      <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-6">
-                         <Clock size={40} />
-                      </div>
-                      <h3 className="text-2xl font-display font-medium text-slate-900 mb-2">Technical Vitals</h3>
-                      <p className="text-slate-500 max-w-sm">Detailed performance metrics for local embedding vs. vector retrieval currently under development.</p>
-                   </div>
-                )}
-             </div>
-           )}
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function VisualMathDisplay({ stage, image }: { problem?: any, stage: string, image: string, analysis?: any }) {
-  const [complete, setComplete] = useState(false);
-  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
-=======
->>>>>>> 0506e172c4857ffaed672818932134c68157fb1b
-
-  // Process data for charts
-  const queryCounts = events.reduce((acc: any, curr: any) => {
-    if (!curr.query) return acc;
-    acc[curr.query] = (acc[curr.query] || 0) + 1;
-    return acc;
-  }, {});
-
-  const queryData = Object.entries(queryCounts)
-    .sort(([, a]: any, [, b]: any) => b - a)
-    .slice(0, 10)
-    .map(([name, value]) => ({ name, value }));
-
-  const interactionMix = events.reduce((acc: any, curr: any) => {
-    acc[curr.type] = (acc[curr.type] || 0) + 1;
-    return acc;
-  }, {});
-
-  const pieData = Object.entries(interactionMix).map(([name, value]) => ({ name, value }));
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-
-  const timeGroups: Record<string, number> = {};
-  events.forEach(e => {
-    if (!e.timestamp) return;
-    const date = new Date(e.timestamp).toLocaleDateString();
-    timeGroups[date] = (timeGroups[date] || 0) + 1;
-  });
-
-  const trendData = Object.entries(timeGroups).map(([date, count]) => ({ date, count })).reverse();
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[3000] bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4 md:p-10"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }}
-        className="w-full max-w-6xl h-[85vh] bg-white rounded-[40px] shadow-2xl flex flex-col overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between shrink-0" >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
-              < BarChart3 size={24} />
-            </div>
-            <div>
-              <h2 className="text-2xl font-display font-bold text-slate-900">Search Analytics</h2>
-              <p className="text-sm text-slate-500">Monitoring Scout's Collective Intelligence</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-             <button onClick={refresh} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-900 transition-all">
-                <Clock size={20} className={loading ? 'animate-spin' : ''} />
-             </button>
-             <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-900 transition-all">
-                <X size={24} />
-             </button>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="px-8 py-2 bg-slate-50/50 border-b border-slate-100 flex gap-4 shrink-0">
-           {['Overview', 'Queries', 'Performance'].map(tab => (
-             <button 
-               key={tab} 
-               onClick={() => setActiveTab(tab.toLowerCase() as any)}
-               className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${activeTab === tab.toLowerCase() ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-             >
-               {tab}
-             </button>
-           ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-8">
-           {loading && events.length === 0 ? (
-             <div className="h-full flex items-center justify-center">
-                <Loader2 className="animate-spin text-blue-600" size={48} />
-             </div>
-           ) : (
-             <div className="space-y-10">
-                {activeTab === 'overview' && (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                       {[
-                         { label: 'Total Events', val: events.length, icon: MousePointer2, color: 'text-blue-600', bg: 'bg-blue-50' },
-                         { label: 'Unique Queries', val: Object.keys(queryCounts).length, icon: Search, color: 'text-purple-600', bg: 'bg-purple-50' },
-                         { label: 'Success Rate', val: `${Math.round((interactionMix['success'] || 0) / (events.length || 1) * 100)}%`, icon: Target, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                         { label: 'Pogo Rate', val: `${Math.round((interactionMix['pogo'] || 0) / (events.length || 1) * 100)}%`, icon: TrendingUp, color: 'text-amber-600', bg: 'bg-amber-50' },
-                       ].map((stat, i) => (
-                         <div key={i} className="p-6 bg-white border border-slate-100 rounded-3xl shadow-sm">
-                            <div className={`p-3 w-fit ${stat.bg} ${stat.color} rounded-2xl mb-4`}>
-                               <stat.icon size={20} />
-                            </div>
-                            <div className="text-3xl font-black text-slate-900 mb-1">{stat.val}</div>
-                            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">{stat.label}</div>
-                         </div>
-                       ))}
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-[400px]">
-                       <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm flex flex-col">
-                          <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
-                             <TrendingUp size={18} className="text-blue-500" /> Interaction Volume
-                          </h4>
-                          <div className="flex-1 min-h-0">
-                            <ResponsiveContainer width="100%" height="100%">
-                               <AreaChart data={trendData}>
-                                  <defs>
-                                    <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                    </linearGradient>
-                                  </defs>
-                                  <Tooltip />
-                                  <Area type="monotone" dataKey="count" stroke="#3b82f6" fillOpacity={1} fill="url(#colorCount)" strokeWidth={3} />
-                               </AreaChart>
-                            </ResponsiveContainer>
-                          </div>
-                       </div>
-                       
-                       <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm flex flex-col">
-                          <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
-                             <Target size={18} className="text-purple-500" /> Event Distribution
-                          </h4>
-                          <div className="flex-1 min-h-0">
-                             <ResponsiveContainer width="100%" height="100%">
-                     <PieChart>
-                                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                           {pieData.map((_entry: any, index: number) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                      ))}
-                                   </Pie>
-                                   <Tooltip />
-                                </PieChart>
-                             </ResponsiveContainer>
-                          </div>
-                          <div className="flex justify-center gap-4 pt-4 flex-wrap">
-                     {pieData.map((d: any, i: number) => (
+                            {pieData.map((d: any, i: number) => (
                                <div key={i} className="flex items-center gap-2">
                                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                                   <span className="text-xs font-bold text-slate-500 lowercase">{d.name}</span>
