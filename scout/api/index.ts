@@ -7,9 +7,16 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { pipeline, RawImage } from '@xenova/transformers';
+import { pipeline, RawImage, env } from '@xenova/transformers';
 
 dotenv.config();
+
+// --- SERVERLESS OPTIMIZATION ---
+// Prevent Transformers.js from trying to write to read-only directories
+env.allowLocalModels = false;
+if (process.env.NODE_ENV === 'production') {
+  env.cacheDir = '/tmp';
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -176,8 +183,8 @@ app.post('/api/feedback', async (req, res) => {
 
     const pc = getPinecone();
     if (!pc) return res.status(503).json({ error: 'Database unavailable' });
-    const index = pc.Index(process.env.PINECONE_INDEX || 'scout');
-    const namespace = process.env.PINECONE_NAMESPACE || 'web';
+    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
+    const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     // Fetch current state
     const fetchRes = await index.namespace(namespace).fetch({ ids: [id] });
@@ -240,7 +247,7 @@ app.post('/api/search', async (req, res) => {
             visualVector = Array.from(output.data);
             
             // Pad or interpolate to 768 dimensions if necessary to match index
-            if (visualVector.length === 512) {
+            if (visualVector && visualVector.length === 512) {
                visualVector = [...visualVector, ...Array(256).fill(0)];
             }
             console.log(`✅ Scout Lens: Vector match generated (${visualVector.length} dims)`);
@@ -297,12 +304,13 @@ app.post('/api/search', async (req, res) => {
 
     let vector = providedVector || visualVector;
     
-    // Safety check: Truncate to 768 if it's from a higher-dim model (like Gemini 3 defaults)
-    if (vector && vector.length > 768) {
+    // Safety check: Truncate to 768 if it's from a higher-dim model
+    if (vector && Array.isArray(vector) && vector.length > 768) {
       vector = vector.slice(0, 768);
     }
 
     if (!vector && finalQuery) {
+      console.log("Scout: Generating semantic embedding for query...");
       const pipes = await getPipes();
       if (!pipes) {
         return res.status(503).json({ 
@@ -340,16 +348,19 @@ app.post('/api/search', async (req, res) => {
     ])];
 
     const [vRes, kRes] = await Promise.all([
-      index.query({
-        vector,
-        topK: 500,
-        includeMetadata: true,
-        namespace
-      }).catch(err => {
-        console.error("Vector query failed:", err);
-        return { matches: [] };
-      }),
-      index.query({
+      index.namespace(namespace || 'default')
+        .query({
+          vector,
+          topK: 500,
+          filter: Object.keys(filter).length > 0 ? filter : undefined,
+          includeMetadata: true,
+        })
+        .catch(err => {
+          console.error("Vector query failed:", err);
+          return { matches: [] };
+        }),
+      index.namespace(namespace || 'default')
+        .query({
         vector: Array(vector.length).fill(0),
         filter: {
           ...filter,
@@ -361,7 +372,6 @@ app.post('/api/search', async (req, res) => {
         },
         topK: 100,
         includeMetadata: true,
-        namespace
       }).catch(err => {
         console.error("Keyword query failed:", err);
         return { matches: [] };
@@ -557,8 +567,11 @@ app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: 
 
 // Vite Middleware
 if (process.env.NODE_ENV !== 'production') {
-  const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
-  app.use(vite.middlewares);
+  // Use dynamic import to prevent Vite from crashing production environments
+  import('vite').then(async ({ createServer }) => {
+    const vite = await createServer({ server: { middlewareMode: true }, appType: 'spa' });
+    app.use(vite.middlewares);
+  });
 } else {
   const distPath = path.join(__dirname, 'dist');
   app.use(express.static(distPath));
