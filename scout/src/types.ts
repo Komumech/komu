@@ -69,3 +69,12 @@ export interface KnowledgePanel {
   details: { label: string; value: string }[];
   sections?: { title: string; content: string }[];
 }
+
+export interface ClickstreamEvent {
+  id: string;
+  type: 'success' | 'info' | 'error';
+  query: string;
+  url: string;
+  timestamp: Date | string;
+  uid?: string;
+}

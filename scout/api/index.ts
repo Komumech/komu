@@ -36,15 +36,19 @@ if (apps.length === 0) {
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          // CRITICAL VERCEL FIX: Parses literal \n characters back into real line breaks
           privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
         }),
+        // NEW FIX: Points the Admin SDK to the correct regional database
+        databaseURL: `https://${process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId}.firebaseio.com`
       });
       console.log("✅ Firebase Admin initialized via Service Account");
     } else if (firebaseConfig && firebaseConfig.projectId) {
       firebaseApp = admin.initializeApp({
         projectId: firebaseConfig.projectId,
+        databaseURL: `https://${firebaseConfig.projectId}.firebaseio.com`
       });
-      console.log("⚠️ Firebase Admin initialized via Project ID only");
+      console.log("⚠️ Firebase Admin initialized via Project ID only (Limited Permissions)");
     }
   } catch (err) {
     console.error("❌ Firebase Init Error:", err);
