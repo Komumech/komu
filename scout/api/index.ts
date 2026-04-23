@@ -770,9 +770,30 @@ app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: 
 // --- AI TRAINING EXPORT (Phase 3) ---
 const ADMIN_EMAILS = ['komumech@gmail.com']; // Your authorized email
 
+app.post('/api/admin/clickstream', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database not initialized' });
+  try {
+    const { type, query, url, uid } = req.body;
+
+    // The .add() method creates the collection "clickstream" automatically on first write
+    await db.collection('clickstream').add({
+      type: type || 'search',
+      query: query || '',
+      url: url || '',
+      uid: uid || 'anonymous',
+      timestamp: new Date() 
+    });
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("❌ Clickstream auto-creation failed:", error);
+    res.status(500).json({ error: "Could not save event" });
+  }
+});
+
 app.get('/api/admin/clickstream', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database not initialized' });
-  
+
   // Admin Guard
   const user = req.session?.user;
   if (!user || !ADMIN_EMAILS.includes(user.email)) {
@@ -781,14 +802,15 @@ app.get('/api/admin/clickstream', async (req, res) => {
 
   try {
     const snapshot = await db.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
-    const events = snapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => ({
+    const data = snapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => ({
       id: doc.id,
       ...doc.data(),
       timestamp: doc.data().timestamp?.toDate()
     }));
-    res.json(events);
+    res.json(data);
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to export clickstream', message: err.message });
+    // Return empty array instead of 500 if collection hasn't been created yet
+    res.json([]);
   }
 });
 

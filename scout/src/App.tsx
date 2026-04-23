@@ -461,6 +461,15 @@ export default function App() {
         setUserHistory(prev => [...new Set([...prev, finalQuery.trim()])]);
       }
 
+      // Add Clickstream Logging (Triggers collection creation)
+      if (requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
+        axios.post('/api/admin/clickstream', {
+          type: 'search',
+          query: finalQuery,
+          uid: user?.sub || 'guest'
+        }).catch(() => {}); // Silent fail for analytics
+      }
+
       // PARALLEL EXECUTION FOR AI FEATURES
       if (requestedPage === 1) {
         generateAIOverview(finalQuery, rawResults, data.isEnglishHelp || false);
