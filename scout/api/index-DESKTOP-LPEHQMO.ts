@@ -8,17 +8,12 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
 import { pipeline, env } from '@xenova/transformers';
 import * as admin from 'firebase-admin';
-<<<<<<< HEAD
-import fs from 'fs';
-import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
-=======
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 
 // Use a standard import for JSON. 
 // Ensure "resolveJsonModule": true is in your tsconfig.json
 import firebaseConfig from '../firebase-applet-config.json';
->>>>>>> 0506e172c4857ffaed672818932134c68157fb1b
 
 dotenv.config();
 
@@ -43,14 +38,6 @@ if (!admin.apps.length && firebaseConfig.projectId) {
     console.error("❌ Firebase Init Error:", err);
   }
 } else if (admin.apps.length) {
-<<<<<<< HEAD
-  firebaseApp = admin.apps[0];
-}
-
-const db = (firebaseApp && (firebaseConfig as any).firestoreDatabaseId)
-  ? firebaseApp.firestore((firebaseConfig as any).firestoreDatabaseId) 
-  : (firebaseApp ? firebaseApp.firestore() : null);
-=======
   firebaseApp = admin.apps[0] || undefined;
 }
 
@@ -60,7 +47,6 @@ try {
 } catch (err) {
   console.error("❌ Firestore Init Error:", err);
 }
->>>>>>> 0506e172c4857ffaed672818932134c68157fb1b
 
 // --- CLEANUP: Removed Gemini initialization from backend ---
 // All AI calls moved to Frontend per security guidelines.
