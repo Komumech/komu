@@ -6,7 +6,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { initializeApp } from "firebase/app";
@@ -16,7 +17,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
 
 // Initialize Gemini on the Frontend
-const genAI = new GoogleGenAI({ apiKey: (process.env.GEMINI_API_KEY || '') });
+const API_KEY = process.env.GEMINI_API_KEY || '';
+const genAI = new GoogleGenAI({ apiKey: API_KEY || 'AI-NOT-SET' });
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -27,6 +29,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [aiOverview, setAiOverview] = useState<AIOverview | null>(null);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
+  const [aiRateLimited, setAiRateLimited] = useState(false);
   const [faq, setFaq] = useState<{ question: string; answer: string }[]>([]);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -48,6 +51,9 @@ export default function App() {
   const [isSignoutOpen, setIsSignoutOpen] = useState(false);
   const [knowledgePanel, setKnowledgePanel] = useState<KnowledgePanel | null>(null);
   const [isAppsOpen, setIsAppsOpen] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [analyticsEvents, setAnalyticsEvents] = useState<any[]>([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [isEnglishHelp, setIsEnglishHelp] = useState(false);
   const [imageQuery, setImageQuery] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<SearchResult | null>(null);
@@ -78,16 +84,22 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && lastClickRef.current) {
         const now = Date.now();
-        const durationSeconds = (now - lastClickRef.current.time) / 1000;
+        const durationMs = now - lastClickRef.current.time;
+        const durationSeconds = durationMs / 1000;
         
-        // Pogo-sticking: if return < 30 seconds
-        const type = durationSeconds < 30 ? 'pogo' : 'success';
+        // Pogo-sticking: if return < 20 seconds (Frustrated bounce)
+        // Dwell: if stay > 60 seconds (High satisfaction)
+        let type = 'success';
+        if (durationSeconds < 20) type = 'pogo';
+        else if (durationSeconds > 60) type = 'dwell';
+
         console.log(`User Signal: ${type} after ${durationSeconds.toFixed(1)}s`);
         
         axios.post('/api/feedback', { 
           id: lastClickRef.current.id, 
           type, 
-          queryText: lastClickRef.current.query 
+          queryText: lastClickRef.current.query,
+          durationMs
         }).catch(() => {});
         lastClickRef.current = null;
       }
@@ -289,6 +301,21 @@ export default function App() {
     }
   };
 
+  const fetchAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetch('/api/admin/clickstream');
+      if (res.ok) {
+        const data = await res.json();
+        setAnalyticsEvents(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch analytics", e);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await fetch('/api/logout', { method: 'POST' });
     setUser(null);
@@ -332,7 +359,7 @@ export default function App() {
     // compatibility with the CLIP-ViT-L-14 latent space.
 
     // AUTOCORRECT ON FRONTEND (Adhering to rules)
-    if (!currentVisualQuery && requestedPage === 1 && finalQuery.length > 3) {
+    if (!currentVisualQuery && requestedPage === 1 && finalQuery.length > 3 && API_KEY && API_KEY !== 'AI-NOT-SET') {
       try {
         const autocorrectPrompt = `Act as a search engine spell checker. Check if "${finalQuery}" has obvious typos. 
         If it has an obvious typo, return ONLY the corrected string. 
@@ -350,6 +377,8 @@ export default function App() {
           finalQuery = text;
         }
       } catch (e) {}
+    } else {
+      console.warn("Autocorrect failed: API key not configured");
     }
 
     try {
@@ -375,8 +404,8 @@ export default function App() {
         if (text.includes("application starts") || text.includes("Starting Server")) {
           throw new Error("Neural Engines Warming Up: Scout is currently loading its local AI models. Please wait about 30 seconds and try again.");
         }
-        console.error("Non-JSON response:", text);
-        throw new Error("Server communication error. Please try again.");
+        console.error("Non-JSON Server Response:", text);
+        throw new Error(`Server Error (${searchRes.status}): ${text.slice(0, 100)}...`);
       }
       
       if (!searchRes.ok) {
@@ -456,8 +485,10 @@ export default function App() {
   };
 
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
+    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
     setAiLoading(true);
     setIsOverviewExpanded(false);
+    setAiRateLimited(false);
     try {
       // Include image URLs in the context for the LLM to use
       const context = contextResults.slice(0, 5).map(r => 
@@ -473,7 +504,8 @@ export default function App() {
            
            Instructions:
            1. Start with a direct answer.
-           2. Use bullet points for key facts.           3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown !title if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
+           2. Use bullet points for key facts.
+           3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown !title if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
            4. Be objective and professional.
            5. Use Markdown formatting.`;
 
@@ -486,14 +518,18 @@ export default function App() {
         summary: result.text || "No summary available.",
         sources: contextResults.slice(0, 3).map(r => ({ title: r.title, url: r.url }))
       });
-    } catch (e) {
+    } catch (e: any) {
       console.error("AI Overview failed:", e);
+      if (e.message?.includes('429') || e.status === 429) {
+        setAiRateLimited(true);
+      }
     } finally {
       setAiLoading(false);
     }
   };
 
   const generateFAQ = async (queryText: string, contextResults: SearchResult[]) => {
+    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
     try {
       const context = contextResults.slice(0, 8).map(r => r.snippet).join("\n");
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 5 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
@@ -525,6 +561,7 @@ export default function App() {
   };
 
   const generateKnowledgePanel = async (entityName: string, entityType?: string) => {
+    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
     try {
       const prompt = `Entity: "${entityName}" (${entityType || 'General'})
       Generate a high-quality "Knowledge Panel" for this entity. 
@@ -576,6 +613,9 @@ export default function App() {
   const handleResultClick = (id: string, url: string) => {
     // Record for behavioral signals (Pogo-sticking detection)
     lastClickRef.current = { id, url, time: Date.now(), query: lastQueryRef.current };
+
+    // Immediate NavBoost "Interest" signal
+    axios.post('/api/feedback', { id, type: 'click', queryText: lastQueryRef.current }).catch(() => {});
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
@@ -657,7 +697,33 @@ export default function App() {
 
       <AnimatePresence mode="wait">
         {!isSearching ? (
-          <HomeView key="home" query={query} setQuery={setQuery} onSearch={handleSearch} suggestions={suggestions} showSuggestions={showSuggestions} setShowSuggestions={setShowSuggestions} inputRef={searchInputRef} searchContainerRef={searchContainerRef} user={user} onLogin={handleLogin} onLogout={handleLogout} onMicClick={toggleListening} bg={homeBg} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} appsRef={appsRef} isAppsOpen={isAppsOpen} setIsAppsOpen={setIsAppsOpen} imageQuery={imageQuery} onImageUpload={onImageUpload} removeImageQuery={removeImageQuery} fileInputRef={fileInputRef} userHistory={userHistory} />
+          <HomeView 
+            key="home" 
+            query={query} 
+            setQuery={setQuery} 
+            onSearch={handleSearch} 
+            suggestions={suggestions} 
+            showSuggestions={showSuggestions} 
+            setShowSuggestions={setShowSuggestions} 
+            inputRef={searchInputRef} 
+            searchContainerRef={searchContainerRef} 
+            user={user} 
+            onLogin={handleLogin} 
+            onLogout={handleLogout} 
+            onMicClick={toggleListening} 
+            bg={homeBg} 
+            isSignoutOpen={isSignoutOpen} 
+            setIsSignoutOpen={setIsSignoutOpen} 
+            appsRef={appsRef} 
+            isAppsOpen={isAppsOpen} 
+            setIsAppsOpen={setIsAppsOpen} 
+            imageQuery={imageQuery} 
+            onImageUpload={onImageUpload} 
+            removeImageQuery={removeImageQuery} 
+            fileInputRef={fileInputRef} 
+            userHistory={userHistory}
+            onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
+          />
         ) : (
           <ResultsView 
             key="results"
@@ -709,6 +775,16 @@ export default function App() {
             setImageQuery={setImageQuery}
             selectedImage={selectedImage}
             setSelectedImage={setSelectedImage}
+            aiRateLimited={aiRateLimited}
+            onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
+          />
+        )}
+        {isAnalyticsOpen && (
+          <AnalyticsDashboard 
+            events={analyticsEvents} 
+            onClose={() => setIsAnalyticsOpen(false)} 
+            loading={analyticsLoading}
+            refresh={fetchAnalytics}
           />
         )}
       </AnimatePresence>
@@ -728,7 +804,7 @@ export default function App() {
   );
 }
 
-function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory }: any) {
+function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics }: any) {
   return (
     <motion.div 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -20 }}
@@ -745,7 +821,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
            <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-white drop-shadow-lg">Scout</span>
         </div>
         <div className="flex items-center gap-4">
-          <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} isHome={true} />
+          <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} isHome={true} onOpenAnalytics={onOpenAnalytics} />
           <div ref={appsRef}>
             <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} isWhite={true} />
           </div>
@@ -871,7 +947,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
@@ -1099,9 +1175,22 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   </div>
                 ) : aiOverview && (
                   <div className="relative">
-                    <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[300px]' : 'max-h-none'}`} 
+                    <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[300px]' : 'max-h-none'}`} 
                          style={{ maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' }}>
-                      <Markdown remarkPlugins={[remarkGfm]}>{aiOverview.summary}</Markdown>
+                      <Markdown 
+                        remarkPlugins={[remarkGfm]} 
+                        components={{
+                          img: ({ ...props }) => (
+                            <img 
+                              {...props} 
+                              className="w-full max-w-lg aspect-video object-cover rounded-3xl border border-slate-100 shadow-sm transition-transform hover:scale-[1.02] cursor-zoom-in" 
+                              referrerPolicy="no-referrer"
+                            />
+                          )
+                        }}
+                      >
+                        {aiOverview.summary}
+                      </Markdown>
                     </div>
                     
                     <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-8`}>
@@ -1203,6 +1292,16 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   </div>
                 </div>
               </motion.div>
+            ) : aiRateLimited ? (
+              <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
+                <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
+                  <Zap size={20} />
+                </div>
+                <div>
+                  <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Overview hitting limits</h4>
+                  <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
+                </div>
+              </div>
             )}
 
             {loading ? (
@@ -1351,9 +1450,17 @@ function QuickSummary({ text }: { text: string }) {
   useEffect(() => {
     let isMounted = true;
     (async () => {
+      if (!API_KEY || API_KEY === 'AI-NOT-SET') {
+        if (isMounted) { setSummary(text); setLoading(false); }
+        return;
+      }
       try {
-        const resp = await axios.post('/api/ai/summarize', { text, max_tokens: 45 });
-        if (isMounted) setSummary(resp.data.summary);
+        const prompt = `Summarize precisely in one short sentence (max 15 words): "${text}"`;
+        const res = await genAI.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [{ role: 'user', parts: [{ text: prompt }] }]
+        });
+        if (isMounted) setSummary(res.text || text);
       } catch {
         if (isMounted) setSummary(text); // Fallback to snippet
       } finally {
@@ -1455,7 +1562,9 @@ function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOp
   );
 }
 
-function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen, isHome }: any) {
+function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen, isHome, onOpenAnalytics }: any) {
+  const isAdmin = user && ['komumech@gmail.com'].includes(user.email);
+
   return (
     <div className="relative">
       {user ? (
@@ -1480,6 +1589,16 @@ function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen,
                     <p className="text-xs text-slate-500 truncate">{user.email}</p>
                   </div>
                 </div>
+                
+                {isAdmin && (
+                  <button 
+                    onClick={() => { setIsSignoutOpen(false); onOpenAnalytics(); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-colors font-medium text-sm mb-1"
+                  >
+                    <BarChart3 size={16} /> Admin Analytics
+                  </button>
+                )}
+
                 <button 
                   onClick={onLogout}
                   className="w-full flex items-center gap-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium text-sm"
@@ -1565,9 +1684,8 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
     return () => clearInterval(timer);
   }, [domainImages.length]);
 
-  // Better site name extraction (handle subdomains like blog.example.com)
-  const hostname = new URL(res.url).hostname;
-  const parts = hostname.toLowerCase().replace('www.', '').split('.');
+  // Better site name extraction
+  const parts = res.displayUrl.toLowerCase().split('.');
   const siteName = parts[0] === 'www' ? parts[1] || parts[0] : parts[0];
   const displaySiteName = siteName.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 
@@ -1791,6 +1909,213 @@ function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
               </div>
             </div>
           )}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any[], onClose: () => void, loading: boolean, refresh: () => void }) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'queries' | 'performance'>('overview');
+
+  // Process data for charts
+  const queryCounts = events.reduce((acc: any, curr: any) => {
+    if (!curr.query) return acc;
+    acc[curr.query] = (acc[curr.query] || 0) + 1;
+    return acc;
+  }, {});
+
+  const queryData = Object.entries(queryCounts)
+    .sort(([, a]: any, [, b]: any) => b - a)
+    .slice(0, 10)
+    .map(([name, value]) => ({ name, value }));
+
+  const interactionMix = events.reduce((acc: any, curr: any) => {
+    acc[curr.type] = (acc[curr.type] || 0) + 1;
+    return acc;
+  }, {});
+
+  const pieData = Object.entries(interactionMix).map(([name, value]) => ({ name, value }));
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+  const timeGroups: Record<string, number> = {};
+  events.forEach(e => {
+    if (!e.timestamp) return;
+    const date = new Date(e.timestamp).toLocaleDateString();
+    timeGroups[date] = (timeGroups[date] || 0) + 1;
+  });
+
+  const trendData = Object.entries(timeGroups).map(([date, count]) => ({ date, count })).reverse();
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[3000] bg-slate-900/60 backdrop-blur-xl flex items-center justify-center p-4 md:p-10"
+      onClick={onClose}
+    >
+      <motion.div 
+        initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }}
+        className="w-full max-w-6xl h-[85vh] bg-white rounded-[40px] shadow-2xl flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between shrink-0" >
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
+              < BarChart3 size={24} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-display font-bold text-slate-900">Search Analytics</h2>
+              <p className="text-sm text-slate-500">Monitoring Scout's Collective Intelligence</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+             <button onClick={refresh} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-900 transition-all">
+                <Clock size={20} className={loading ? 'animate-spin' : ''} />
+             </button>
+             <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-900 transition-all">
+                <X size={24} />
+             </button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="px-8 py-2 bg-slate-50/50 border-b border-slate-100 flex gap-4 shrink-0">
+           {['Overview', 'Queries', 'Performance'].map(tab => (
+             <button 
+               key={tab} 
+               onClick={() => setActiveTab(tab.toLowerCase() as any)}
+               className={`px-4 py-2 text-sm font-bold rounded-xl transition-all ${activeTab === tab.toLowerCase() ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+             >
+               {tab}
+             </button>
+           ))}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-8">
+           {loading && events.length === 0 ? (
+             <div className="h-full flex items-center justify-center">
+                <Loader2 className="animate-spin text-blue-600" size={48} />
+             </div>
+           ) : (
+             <div className="space-y-10">
+                {activeTab === 'overview' && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                       {[
+                         { label: 'Total Events', val: events.length, icon: MousePointer2, color: 'text-blue-600', bg: 'bg-blue-50' },
+                         { label: 'Unique Queries', val: Object.keys(queryCounts).length, icon: Search, color: 'text-purple-600', bg: 'bg-purple-50' },
+                         { label: 'Success Rate', val: `${Math.round((interactionMix['success'] || 0) / (events.length || 1) * 100)}%`, icon: Target, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                         { label: 'Pogo Rate', val: `${Math.round((interactionMix['pogo'] || 0) / (events.length || 1) * 100)}%`, icon: TrendingUp, color: 'text-amber-600', bg: 'bg-amber-50' },
+                       ].map((stat, i) => (
+                         <div key={i} className="p-6 bg-white border border-slate-100 rounded-3xl shadow-sm">
+                            <div className={`p-3 w-fit ${stat.bg} ${stat.color} rounded-2xl mb-4`}>
+                               <stat.icon size={20} />
+                            </div>
+                            <div className="text-3xl font-black text-slate-900 mb-1">{stat.val}</div>
+                            <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">{stat.label}</div>
+                         </div>
+                       ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-[400px]">
+                       <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm flex flex-col">
+                          <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
+                             <TrendingUp size={18} className="text-blue-500" /> Interaction Volume
+                          </h4>
+                          <div className="flex-1 min-h-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                               <AreaChart data={trendData}>
+                                  <defs>
+                                    <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                    </linearGradient>
+                                  </defs>
+                                  <Tooltip />
+                                  <Area type="monotone" dataKey="count" stroke="#3b82f6" fillOpacity={1} fill="url(#colorCount)" strokeWidth={3} />
+                               </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+                       </div>
+                       
+                       <div className="bg-white border border-slate-100 rounded-[32px] p-6 shadow-sm flex flex-col">
+                          <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
+                             <Target size={18} className="text-purple-500" /> Event Distribution
+                          </h4>
+                          <div className="flex-1 min-h-0">
+                             <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                   <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                                      {pieData.map((_entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                      ))}
+                                   </Pie>
+                                   <Tooltip />
+                                </PieChart>
+                             </ResponsiveContainer>
+                          </div>
+                          <div className="flex justify-center gap-4 pt-4 flex-wrap">
+                             {pieData.map((d, i) => (
+                               <div key={i} className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                                  <span className="text-xs font-bold text-slate-500 lowercase">{d.name}</span>
+                               </div>
+                             ))}
+                          </div>
+                       </div>
+                    </div>
+                  </>
+                )}
+
+                {activeTab === 'queries' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                     <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm h-[500px] flex flex-col">
+                        <h4 className="font-bold text-slate-900 mb-8">Top 10 Resonant Queries</h4>
+                        <div className="flex-1 min-h-0">
+                           <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={queryData} layout="vertical">
+                                 <XAxis type="number" hide />
+                                 <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12, fontWeight: 'bold' }} />
+                                 <Tooltip />
+                                 <Bar dataKey="value" fill="#8b5cf6" radius={[0, 10, 10, 0]} />
+                              </BarChart>
+                           </ResponsiveContainer>
+                        </div>
+                     </div>
+                     
+                     <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm flex flex-col">
+                        <h4 className="font-bold text-slate-900 mb-6">Live Feed</h4>
+                        <div className="space-y-4 overflow-y-auto max-h-[440px] pr-2 custom-scrollbar">
+                           {events.slice(0, 50).map((e, i) => (
+                             <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-start justify-between gap-4">
+                                <div>
+                                   <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{new Date(e.timestamp).toLocaleTimeString()}</div>
+                                   <div className="text-sm font-bold text-slate-800 line-clamp-1 italic">"{e.query}"</div>
+                                   <div className="text-[11px] text-slate-500 mt-1 line-clamp-1">{e.url}</div>
+                                </div>
+                                <div className={`shrink-0 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter ${e.type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                   {e.type}
+                                </div>
+                             </div>
+                           ))}
+                        </div>
+                     </div>
+                  </div>
+                )}
+
+                {activeTab === 'performance' && (
+                   <div className="flex flex-col items-center justify-center py-20 text-center">
+                      <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-6">
+                         <Clock size={40} />
+                      </div>
+                      <h3 className="text-2xl font-display font-medium text-slate-900 mb-2">Technical Vitals</h3>
+                      <p className="text-slate-500 max-w-sm">Detailed performance metrics for local embedding vs. vector retrieval currently under development.</p>
+                   </div>
+                )}
+             </div>
+           )}
         </div>
       </motion.div>
     </motion.div>

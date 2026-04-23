@@ -77,8 +77,9 @@ BLACKLIST = [
   "wikiwand.com",
   "everipedia.org",
   "infogalactic.com",
-  "wikipediamirror.com"
-  "avid.wiki"
+  "wikipediamirror.com",
+  "avid.wiki",
+  "play.google.com"
   ]
 
 # --- DICTIONARY & PHRASE SEEDS FOR AUTONOMY ---

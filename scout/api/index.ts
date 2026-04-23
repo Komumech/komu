@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -7,12 +6,40 @@ import cors from 'cors';
 import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
-import { pipeline } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
+import * as admin from 'firebase-admin';
+import fs from 'fs';
+import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 
 dotenv.config();
 
+// --- SERVERLESS OPTIMIZATION ---
+// Ensure Transformers.js uses a writable directory for models in production
+env.allowLocalModels = false;
+if (process.env.NODE_ENV === 'production') {
+  env.cacheDir = '/tmp';
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize Firebase Admin (Server-side)
+let firebaseApp: admin.app.App | undefined;
+if (!admin.apps.length && firebaseConfig.projectId) {
+  try {
+    firebaseApp = admin.initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  } catch (err) {
+    console.error("❌ Firebase Init Error:", err);
+  }
+} else if (admin.apps.length) {
+  firebaseApp = admin.apps[0];
+}
+
+const db = (firebaseApp && (firebaseConfig as any).firestoreDatabaseId)
+  ? firebaseApp.firestore((firebaseConfig as any).firestoreDatabaseId) 
+  : (firebaseApp ? firebaseApp.firestore() : null);
 
 // --- CLEANUP: Removed Gemini initialization from backend ---
 // All AI calls moved to Frontend per security guidelines.
@@ -44,11 +71,21 @@ async function getPipes() {
 
 async function getEmbedding(text: string): Promise<number[] | null> {
   if (!text) return null;
+  const cacheKey = text.toLowerCase().trim();
+  if (embeddingCache.has(cacheKey)) return embeddingCache.get(cacheKey)!;
+  
   try {
     const pipes = await getPipes();
     if (pipes?.text_pipe) {
       const output = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
-      return Array.from(output.data);
+      const vector = Array.from(output.data) as number[];
+      embeddingCache.set(cacheKey, vector);
+      // Prune cache if too large
+      if (embeddingCache.size > 200) {
+        const firstKey = embeddingCache.keys().next().value;
+        if (firstKey) embeddingCache.delete(firstKey);
+      }
+      return vector;
     }
   } catch (err: any) {
     console.warn("⚠️ Local embedding failed:", err.message);
@@ -105,7 +142,6 @@ function prettifyTitle(title: string, url: string) {
   try {
     const parsed = new URL(url);
     const domainParts = parsed.hostname.toLowerCase().replace('www.', '').split('.');
-    // Better Brand Extraction: ignore common prefixes, take the recognizable "middle" part
     let domainName = domainParts[0];
     if (domainParts.length > 2 && (domainParts[0] === 'support' || domainParts[0] === 'api' || domainParts[0] === 'dev' || domainParts[0] === 'docs' || domainParts[0] === 'news' || domainParts[0] === 'blog')) {
       domainName = domainParts[1];
@@ -113,20 +149,17 @@ function prettifyTitle(title: string, url: string) {
     
     const brand = domainName.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
-    // 1. If title is placeholder/empty or generically titled
     if (!cleanTitle || /^(untitled|document|page|home|index|welcome|untitled page|web page)$/i.test(cleanTitle) || cleanTitle.length < 2) {
       if (parsed.pathname && parsed.pathname !== '/') {
         const segments = parsed.pathname.split('/').filter(s => s && s.length > 2 && !s.includes('.'));
         if (segments.length > 0) {
            const page = segments[segments.length - 1].replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-           // Ensure we don't just return ":" if brand is empty
            return brand ? `${brand}: ${page}` : page;
         }
       }
       return brand || "Web Page";
     }
 
-    // 2. If title is too generic (e.g. "Support")
     const lowerTitle = cleanTitle.toLowerCase();
     const isGeneric = genericTerms.some(term => lowerTitle === term) || 
                       (cleanTitle.length < 10 && genericTerms.some(term => lowerTitle.includes(term)));
@@ -135,7 +168,6 @@ function prettifyTitle(title: string, url: string) {
       const segments = parsed.pathname.split('/').filter(s => s && s.length > 2 && !s.includes('.'));
       if (segments.length > 1) {
          const specific = segments[segments.length - 1].replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-         // Avoid repeating the same word twice
          if (specific.toLowerCase() !== lowerTitle) {
             return `${brand}: ${cleanTitle} - ${specific}`;
          }
@@ -143,7 +175,6 @@ function prettifyTitle(title: string, url: string) {
       return `${brand}: ${cleanTitle}`;
     }
 
-    // 3. Ensure Brand is represented for shorter titles to provide context
     if (!lowerTitle.includes(brand.toLowerCase()) && cleanTitle.length < 40) {
       return `${brand}: ${cleanTitle}`;
     }
@@ -156,6 +187,9 @@ function prettifyTitle(title: string, url: string) {
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+
+// Simple Embedding Cache (Global)
+const embeddingCache = new Map<string, number[]>();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -201,9 +235,6 @@ app.get('/api/suggestions', async (req, res) => {
   }
 });
 
-// --- COLLECTIVE MEMORY / INTENT LOGIC ---
-// In a production environment, this would be a background job.
-// Here we implement "Active Learning" on every interaction.
 async function updateQueryIntent(queryText: string, docId: string, signal: 'success' | 'pogo') {
   const pc = getPinecone();
   if (!pc) return;
@@ -213,11 +244,9 @@ async function updateQueryIntent(queryText: string, docId: string, signal: 'succ
   const queryVector = await getEmbedding(queryText);
   if (!queryVector) return;
 
-  // We use a hashed ID for the query to prevent duplicate intent entries for the same query text
   const queryHash = Buffer.from(queryText.toLowerCase().trim()).toString('base64').slice(0, 50);
   
   try {
-    // 1. Fetch current intent state for this query
     const fetchRes = await index.namespace(namespace).fetch({ ids: [queryHash] });
     const record = fetchRes.records?.[queryHash];
     
@@ -226,19 +255,16 @@ async function updateQueryIntent(queryText: string, docId: string, signal: 'succ
       docWeights = JSON.parse(record.metadata.doc_weights as string);
     }
 
-    // 2. Adjust Weights based on Signal (Collaborative Ranking)
-    // A success is +1.0, a pogo (quick exit) is -0.5
     const currentWeight = docWeights[docId] || 0;
     const adjustment = signal === 'success' ? 1.0 : -0.5;
     docWeights[docId] = Math.max(0, currentWeight + adjustment);
 
-    // 3. Keep only top performers for this query to keep metadata size small
     const sortedDocs = Object.entries(docWeights)
       .sort(([, a], [, b]) => b - a)
       .slice(0, 10);
     const prunedWeights = Object.fromEntries(sortedDocs);
 
-    // 4. Update Intent Index
+    // Correct Pinecone SDK upsert syntax for version 7.x
     await index.namespace(namespace).upsert({
       records: [{
         id: queryHash,
@@ -264,10 +290,9 @@ app.post('/api/feedback', async (req, res) => {
 
     const pc = getPinecone();
     if (!pc) return res.status(503).json({ error: 'Database unavailable' });
-    const index = pc.Index(process.env.PINECONE_INDEX || 'scout');
+    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
-    // Fetch current state
     const fetchRes = await index.namespace(namespace).fetch({ ids: [id] });
     const record = fetchRes.records[id];
     if (!record) return res.status(404).json({ error: 'Record not found' });
@@ -281,13 +306,11 @@ app.post('/api/feedback', async (req, res) => {
       currentBoost = Math.max(0.5, currentBoost - 0.1); 
     }
 
-    // Update main index metadata (Global Popularity)
     await index.namespace(namespace).update({
       id,
       metadata: { ...record.metadata, popularity_boost: String(currentBoost) }
     });
 
-    // Phase 3: The "Learn" Phase (Collective Brain)
     if (queryText) {
       updateQueryIntent(queryText, id, type);
     }
@@ -310,6 +333,14 @@ app.post('/api/search', async (req, res) => {
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     let finalQuery = query;
+
+    if (imageQuery) {
+      console.warn("Visual search disabled in serverless mode to prevent memory crashes.");
+      return res.status(400).json({ 
+        error: "Feature Unavailable", 
+        message: "Visual search requires a high-memory environment not available in this tier." 
+      });
+    }
 
     const intentData = await detectLocalIntent(finalQuery);
     let dictionaryResult = null;
@@ -663,15 +694,62 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
 app.get('/api/me', (req, res) => res.json({ user: req.session?.user || null }));
 app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: true }); });
 
+// --- AI TRAINING EXPORT (Phase 3) ---
+const ADMIN_EMAILS = ['komumech@gmail.com']; // Your authorized email
+
+app.get('/api/admin/clickstream', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database not initialized' });
+  
+  // Admin Guard
+  const user = req.session?.user;
+  if (!user || !ADMIN_EMAILS.includes(user.email)) {
+    return res.status(403).json({ error: 'Unauthorized: Admin access only' });
+  }
+
+  try {
+    const snapshot = await db.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
+    const events = snapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => ({
+      id: doc.id,
+      ...doc.data(),
+      timestamp: doc.data().timestamp?.toDate()
+    }));
+    res.json(events);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to export clickstream', message: err.message });
+  }
+});
+
 // Vite Middleware
-if (process.env.NODE_ENV !== 'production') {
-  const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
-  app.use(vite.middlewares);
-} else {
-  const distPath = path.join(__dirname, 'dist');
+const isProduction = process.env.NODE_ENV === 'production';
+const distPath = path.join(process.cwd(), 'dist');
+const hasDist = fs.existsSync(path.join(distPath, 'index.html'));
+
+if (isProduction && hasDist) {
+  console.log("Serving production build from dist/");
   app.use(express.static(distPath));
   app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+} else if (!process.env.VERCEL) {
+  console.log("🚀 Starting Vite middleware...");
+  try {
+    const { createServer } = await import('vite');
+    const vite = await createServer({ 
+      server: { middlewareMode: true }, 
+      appType: 'spa' 
+    });
+    app.use(vite.middlewares);
+  } catch (err) {
+    console.error("❌ Failed to start Vite middleware:", err);
+  }
+} else {
+  // On Vercel, if we reach here, it's an API route or let rewrites handle it.
+  console.log("Vercel environment detected. Server ready for API requests.");
 }
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+
+// Start Server (Only when NOT on Vercel)
+if (!process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+export default app;
