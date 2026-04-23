@@ -104,7 +104,8 @@ SEARCH_TOPICS = [
 
 # --- INIT ENGINES ---
 print(f"🛰️  KOMU SCOUT v15.2 - DEEP-DIVE & AI ENABLED")
-model = SentenceTransformer('all-mpnet-base-v2')
+# Aligning with the Scout v3.5 latent space (768-dim CLIP)
+model = SentenceTransformer('clip-ViT-L-14')
 pc = Pinecone(api_key=PINECONE_KEY)
 pc_index = pc.Index(INDEX_NAME)
 

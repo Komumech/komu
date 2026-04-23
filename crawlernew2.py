@@ -38,7 +38,47 @@ session = requests.Session()
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
-BLACKLIST = ["nothing.com"]
+BLACKLIST = [
+  "wikipedia.org",
+  "wikimedia.org",
+  "mediawiki.org",
+  "wikidata.org",
+  "foundation.wikimedia.org",
+  
+ 
+  "grokipedia.com",
+  "wikiwand.com",
+  "simple.wikipedia.org",
+  "mirror.wikipedia.org",
+
+ 
+  "creativecommons.org",
+  "donate.wikimedia.org",
+  "wikipedia.org",
+  "wikimedia.org",
+  "wikimediafoundation.org",
+  "mediawiki.org",
+  "wikibooks.org",
+  "wikidata.org",
+  "wikinews.org",
+  "wikiquote.org",
+  "wikisource.org",
+  "wikiversity.org",
+  "wikivoyage.org",
+  "wiktionary.org",
+  "wikispecies.org",
+  "wikifunctions.org",
+
+  "wikitech.wikimedia.org",
+  "meta.wikimedia.org",
+  "outreach.wikimedia.org",
+  "incubator.wikimedia.org",
+  "answers.com",
+  "wikiwand.com",
+  "everipedia.org",
+  "infogalactic.com",
+  "wikipediamirror.com"
+  ]
 
 # --- DICTIONARY & PHRASE SEEDS FOR AUTONOMY ---
 POPULAR_PREFIXES = [

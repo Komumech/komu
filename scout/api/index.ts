@@ -38,6 +38,7 @@ async function getPipes() {
     console.log("🚀 Warming Multimodal Engines (768-dim)...");
     
     if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
+    if (!feature_pipe) feature_pipe = await pipeline('feature-extraction', 'Xenova/clip-vit-base-patch32');
     if (!vision_pipe) vision_pipe = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32');
 
     console.log("✅ Scout Multimodal Engines ready!");
@@ -55,8 +56,15 @@ async function getEmbedding(text: string): Promise<number[] | null> {
   try {
     const pipes = await getPipes();
     if (pipes?.text_pipe) {
-      const output = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
-      return Array.from(output.data);
+      // Generate MPNet embedding (768-dim)
+      const mpnetOutput = await pipes.text_pipe(text, { pooling: 'mean', normalize: true });
+      const mpnetVec = Array.from(mpnetOutput.data);
+
+      // Generate CLIP Text embedding (512-dim, padded to 768 to match index)
+      const clipOutput = await feature_pipe(text, { pooling: 'mean', normalize: true });
+      const clipVec = [...Array.from(clipOutput.data), ...Array(256).fill(0)];
+
+      return { mpnetVec, clipVec };
     }
   } catch (err: any) {
     console.warn("⚠️ Local embedding failed:", err.message);
@@ -240,7 +248,7 @@ app.post('/api/search', async (req, res) => {
         if (pipes?.vision_pipe) {
           try {
             // Use RawImage.read for stable data URL processing
-            const image = await RawImage.read(imageQuery); 
+            const image = await RawImage.read(imageQuery);
             const output = await pipes.vision_pipe(image);
             visualVector = Array.from(output.data);
             
@@ -300,30 +308,30 @@ app.post('/api/search', async (req, res) => {
       ]
     } : null;
 
-    let vector = providedVector || visualVector;
-    
-    // Safety check: Truncate to 768 if it's from a higher-dim model
-    if (vector && Array.isArray(vector) && vector.length > 768) {
-      vector = vector.slice(0, 768);
-    }
+    let mpnetVector: number[] | null = null;
+    let clipVector: number[] | null = null;
 
-    if (!vector && finalQuery) {
-      console.log("Scout: Generating semantic embedding for query...");
+    if (visualVector) {
+      clipVector = visualVector;
+    } else if (providedVector) {
+      mpnetVector = Array.isArray(providedVector) ? providedVector.slice(0, 768) : null;
+    } else if (finalQuery) {
+      console.log("Scout: Generating Dual-Engine embeddings...");
       const pipes = await getPipes();
       if (!pipes) {
-        return res.status(503).json({ 
-          error: "Neural Engines Warming Up", 
-          message: "Scout's semantic embedding engine is loading. Please try again in a few seconds." 
+        return res.status(503).json({
+          error: "Neural Engines Warming Up",
+          message: "Scout's semantic engines are loading. Please try again in a few seconds."
         });
       }
-      vector = await getEmbedding(finalQuery);
+      const embeddings: any = await getEmbedding(finalQuery);
+      mpnetVector = embeddings?.mpnetVec || null;
+      clipVector = embeddings?.clipVec || null;
     }
-    
-    if (!vector) vector = Array(768).fill(0);
 
     let filter: any = {};
-    if (type === 'images') filter = { is_image: { "$eq": true } };
-    else filter = { is_image: { "$ne": true } };
+    if (type === 'images') filter = { is_image: { $eq: true } };
+    else filter = { is_image: { $ne: true } };
 
     if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
     if (newsFilter) filter = { "$and": [filter, newsFilter] };
@@ -345,41 +353,42 @@ app.post('/api/search', async (req, res) => {
       `${qLower} official`
     ])];
 
-    const [vRes, kRes] = await Promise.all([
-      index.namespace(namespace || 'default')
-        .query({
-          vector,
-          topK: 500,
-          filter: Object.keys(filter).length > 0 ? filter : undefined,
-          includeMetadata: true,
-        })
-        .catch(err => {
-          console.error("Vector query failed:", err);
-          return { matches: [] };
-        }),
-      index.namespace(namespace || 'default')
-        .query({
-        vector: Array(vector.length).fill(0),
-        filter: {
-          ...filter,
-          "$or": [
-            { title: { "$in": variations } },
-            { text: { "$in": variations } },
-            { domain: { "$in": variations || [] } }
-          ]
-        },
-        topK: 100,
+    // Perform Multi-Vector Retrieval across both possible latent spaces
+    const [mpnetRes, clipRes, kRes] = await Promise.all([
+      mpnetVector ? index.namespace(namespace || 'default').query({
+        vector: mpnetVector,
+        topK: 250,
+        filter: Object.keys(filter).length > 0 ? filter : undefined,
         includeMetadata: true,
+      }).catch(() => ({ matches: [] })) : { matches: [] },
+
+      clipVector ? index.namespace(namespace || 'default').query({
+        vector: clipVector,
+        topK: 250,
+        filter: Object.keys(filter).length > 0 ? filter : undefined,
+        includeMetadata: true,
+      }).catch(() => ({ matches: [] })) : { matches: [] },
+
+      index.namespace(namespace || 'default')
+        .query({
+          vector: Array(768).fill(0),
+          filter: {
+            ...filter,
+            "$or": [
+              { title: { "$in": variations } },
+              { text: { "$in": variations } },
+              { domain: { "$in": variations || [] } }
+            ]
+          },
+          topK: 100,
+          includeMetadata: true,
       }).catch(err => {
         console.error("Keyword query failed:", err);
         return { matches: [] };
       })
     ]);
 
-    vectorResults = vRes;
-    keywordResults = kRes;
-
-    const allMatches = [...vectorResults.matches, ...keywordResults.matches];
+    const allMatches = [...mpnetRes.matches, ...clipRes.matches, ...kRes.matches];
     const seenIds = new Set();
     const uniqueMatches = allMatches.filter(match => {
       if (seenIds.has(match.id)) return false;
