@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import cookieSession from 'cookie-session';
+import { EventEmitter } from 'events';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
 import { pipeline, env } from '@xenova/transformers';
@@ -16,6 +17,11 @@ import fs from 'fs';
 import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 
 dotenv.config();
+
+// Increase the default limit for EventEmitters. Scout's architecture involves 
+// many concurrent network connections (Redis, Pinecone, Firebase, Wikipedia), 
+// which can collectively exceed the default Node.js limit of 10 listeners.
+EventEmitter.defaultMaxListeners = 25;
 
 // --- SERVERLESS OPTIMIZATION ---
 env.allowLocalModels = false;
