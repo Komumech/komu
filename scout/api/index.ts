@@ -196,6 +196,17 @@ async function detectLocalIntent(query: string) {
   return { is_dictionary: false, is_english_help: false, is_entity: false };
 }
 
+// Helper to prevent "Ghost Characters" in Redis keys
+function sanitizeRedisKeyPart(input: string): string {
+  if (!input) return '';
+  return input
+    .replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000\uFEFF]/g, ' ') // Kill all Unicode hidden spaces
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '') // Strip all special characters except letters and spaces
+    .trim()
+    .replace(/\s+/g, '_');      // Convert spaces to underscores
+}
+
 // Scout Knowledge: Subject & Category Extraction
 function extractKnowledgeIntent(query: string) {
   const doc = nlp(query);
@@ -243,8 +254,8 @@ async function learnFromWiki(topic: string, category: string) {
       learnedAt: new Date().toISOString()
     };
 
-    const cleanCategory = (category || 'general').trim().toLowerCase().replace(/\s+/g, '_');
-    const cleanTopic = topic.trim().toLowerCase().replace(/\s+/g, '_');
+    const cleanCategory = sanitizeRedisKeyPart(category || 'general');
+    const cleanTopic = sanitizeRedisKeyPart(topic);
     const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
 
     console.log("🧠 Scout Learning: Saving to Redis with key:", redisKey);
@@ -477,8 +488,8 @@ app.post('/api/search', async (req, res) => {
     const { topic, category } = extractKnowledgeIntent(finalQuery);
     let scoutKnowledge = null;
     if (topic) {
-      const cleanCategory = (category || 'general').trim().toLowerCase().replace(/\s+/g, '_');
-      const cleanTopic = topic.trim().toLowerCase().replace(/\s+/g, '_');
+      const cleanCategory = sanitizeRedisKeyPart(category || 'general');
+      const cleanTopic = sanitizeRedisKeyPart(topic);
       const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
 
       console.log("🔍 Scout Memory: Looking up key:", redisKey);
