@@ -26,7 +26,7 @@ if (process.env.NODE_ENV === 'production') {
 // --- REDIS (KNOWLEDGE GRAPH) INITIALIZATION ---
 const redis = new Redis({
   url: process.env.KV_REST_API_URL || '',
-  token: process.env.UPSTKV_REST_API_TOKEN || '',
+  token: process.env.KV_REST_API_TOKEN || '',
 });
 
 const __filename = fileURLToPath(import.meta.url);

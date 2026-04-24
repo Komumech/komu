@@ -5,7 +5,6 @@ import requests
 import trafilatura
 import urllib3
 from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
 from PIL import Image
 import re
 import random
@@ -39,8 +38,6 @@ session = requests.Session()
 LOG_FILE = "indexed_images.txt"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 50  # 🚀 Higher limit for dedicated image harvesting
-sitemaps_processed = set()
-sitemap_lock = threading.Lock()
 BLACKLIST = [
   "wikipedia.org", "wikimedia.org", "mediawiki.org", "wikidata.org",
   "facebook.com", "twitter.com", "instagram.com", "tiktok.com",
@@ -124,54 +121,6 @@ def smart_enqueue(url):
         url_queue.put(url)
     else:
         overflow_queue.put(url)
-
-def process_sitemap(sitemap_url, domain, t_name, depth=0):
-    if depth > 2: return # Prevent deep XML recursion
-    with sitemap_lock:
-        if sitemap_url in sitemaps_processed: return
-        sitemaps_processed.add(sitemap_url)
-    try:
-        resp = session.get(sitemap_url, timeout=15, verify=False)
-        if resp.status_code != 200: return
-        if "html" in resp.headers.get("Content-Type", "").lower(): return # Not a sitemap XML
-        root = ET.fromstring(resp.content)
-        ns = {'ns': root.tag.split('}')[0].strip('{')} if '}' in root.tag else {}
-        locs = root.findall('.//ns:loc', ns) if ns else root.findall('.//loc')
-        
-        # Filter out non-http/s links and empty locs early
-        locs = [loc for loc in locs if loc.text and loc.text.strip().startswith('http')]
-        
-        # Ensure unique URLs from sitemap
-        sitemap_urls = list(set([l.text.strip() for l in locs]))
-        
-        # THROTTLE: Only take a sample of URLs if sitemap is massive (Prevents Queue Bloat)
-        if len(sitemap_urls) > 200:
-            random.shuffle(sitemap_urls)
-            sitemap_urls = sitemap_urls[:200]
-
-        count = 0
-        for url in sitemap_urls:
-            if 'sitemap' in url.lower() and url.endswith('.xml'):
-                process_sitemap(url, domain, t_name, depth + 1)
-            else:
-                # smart_enqueue now handles the domain limit check centrally
-                with data_lock:
-                    if url not in visited:
-                        smart_enqueue(url)
-                        count += 1
-        if count > 0: tqdm.write(f"🗺️ [{t_name}] Sitemap Sampled: {count} URLs from {domain}")
-    except: pass
-
-def discover_sitemaps(root_url, domain, t_name):
-    try:
-        robots_url = urljoin(root_url, "/robots.txt")
-        resp = session.get(robots_url, timeout=5, verify=False)
-        if resp.status_code == 200:
-            for sm in re.findall(r'^Sitemap:\s*(.*)', resp.text, re.M | re.I):
-                process_sitemap(sm.strip(), domain, t_name)
-    except: pass
-    for loc in ["/sitemap.xml", "/sitemap_index.xml"]:
-        process_sitemap(urljoin(root_url, loc), domain, t_name)
 
 def index_to_pinecone(url, alt_text, domain, t_name):
     try:
@@ -262,9 +211,6 @@ def crawler_worker():
                                 pbar.update(imgs_found)
                                 pbar.set_postfix(sites=total_sites_session)
                 except: pass
-
-                if parsed_current.path in ["", "/"]:
-                    discover_sitemaps(url, domain, t_name)
 
                 # --- DEEP-CRAWL DISCOVERY ---
                 raw_links = re.findall(r'href=["\'](https?://[^\s"\']+|/[^\s"\']+)["\']', resp.text)

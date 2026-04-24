@@ -5,6 +5,7 @@ import requests
 import trafilatura
 import urllib3
 from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 from PIL import Image
 import re
 import random
@@ -38,6 +39,8 @@ session = requests.Session()
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
+sitemaps_processed = set()
+sitemap_lock = threading.Lock()
 BLACKLIST = [
   "wikipedia.org",
   "wikimedia.org",
@@ -665,6 +668,48 @@ def get_seeds_robust(queries):
     except: pass
     return list(set(seeds))
 
+def process_sitemap(sitemap_url, domain, t_name):
+    """Parses XML sitemaps and index files to extract URLs."""
+    with sitemap_lock:
+        if sitemap_url in sitemaps_processed: return
+        sitemaps_processed.add(sitemap_url)
+
+    try:
+        resp = session.get(sitemap_url, timeout=10, verify=False)
+        if resp.status_code != 200: return
+        
+        root = ET.fromstring(resp.content)
+        ns = {'ns': root.tag.split('}')[0].strip('{')} if '}' in root.tag else {}
+        
+        if 'sitemapindex' in root.tag:
+            locs = root.findall('.//ns:loc', ns) if ns else root.findall('.//loc')
+            for loc in locs:
+                process_sitemap(loc.text.strip(), domain, t_name)
+        else:
+            locs = root.findall('.//ns:loc', ns) if ns else root.findall('.//loc')
+            count = 0
+            for loc in locs:
+                url = loc.text.strip()
+                with data_lock:
+                    if url not in visited:
+                        url_queue.put(url)
+                        count += 1
+            if count > 0:
+                tqdm.write(f"🗺️ [{t_name}] Sitemap Extracted: {count} URLs from {sitemap_url}")
+    except: pass
+
+def discover_sitemaps(root_url, domain, t_name):
+    """Attempts to find sitemaps via robots.txt or common paths."""
+    try:
+        robots_url = urljoin(root_url, "/robots.txt")
+        resp = session.get(robots_url, timeout=5, verify=False)
+        if resp.status_code == 200:
+            for sm in re.findall(r'^Sitemap:\s*(.*)', resp.text, re.M | re.I):
+                process_sitemap(sm.strip(), domain, t_name)
+    except: pass
+    for loc in ["/sitemap.xml", "/sitemap_index.xml"]:
+        process_sitemap(urljoin(root_url, loc), domain, t_name)
+
 def index_to_pinecone(url, content, domain, is_image=False, alt_text="", t_name="Unknown"):
     try:
         # Encoding content (truncating text to maintain performance)
@@ -756,6 +801,8 @@ def crawler_worker():
 
                 # --- 2. MAIN DOMAIN FIX: Lower thresholds & Metadata fallback ---
                 is_root = parsed_current.path in ["", "/"]
+                if is_root:
+                    discover_sitemaps(url, domain, t_name)
 
                 if is_root and len(text) < 300:
                     meta_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\'](.*?)["\']', resp.text, re.I)
