@@ -242,7 +242,8 @@ async function learnFromWiki(topic: string, category: string) {
     const [summary, mainImage] = await Promise.all([
       page.summary(),
       page.mainImage().catch(() => null)
-    ]);
+    ]); 
+    
 
     const wikiData = {
       title: topic,
