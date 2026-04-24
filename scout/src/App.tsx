@@ -1299,15 +1299,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {activeTab === 'all' && scoutKnowledge && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                className="backdrop-blur-xl bg-blue-600/5 border border-blue-600/20 rounded-[32px] p-8 mb-6 shadow-2xl relative overflow-hidden group"
+                className="backdrop-blur-xl bg-blue-600/5 rounded-[32px] p-8 mb-6 relative overflow-hidden group"
               >
-                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
-                   <Sparkles size={120} className="text-blue-600" />
-                </div>
                 <div className="relative z-10">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <div className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">Scout Knowledge</div>
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Category: {scoutKnowledge.category}</span>
                     </div>
                     {scoutKnowledge.image && (

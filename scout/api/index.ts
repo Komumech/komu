@@ -233,7 +233,7 @@ async function learnFromWiki(topic: string, category: string) {
       page.mainImage().catch(() => null)
     ]);
 
-    const info = {
+    const wikiData = {
       title: topic,
       description: summary.slice(0, 500) + "...",
       url: (page as any).fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(topic)}`,
@@ -242,8 +242,14 @@ async function learnFromWiki(topic: string, category: string) {
       category,
       learnedAt: new Date().toISOString()
     };
-    await redis.set(`scout:knowledge:${category}:${topic.toLowerCase()}`, info);
-    return info;
+
+    const cleanCategory = (category || 'general').trim().toLowerCase().replace(/\s+/g, '_');
+    const cleanTopic = topic.trim().toLowerCase().replace(/\s+/g, '_');
+    const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
+
+    console.log("🧠 Scout Learning: Saving to Redis with key:", redisKey);
+    await redis.set(redisKey, wikiData);
+    return wikiData;
   } catch (e) { return null; }
 }
 
@@ -471,7 +477,11 @@ app.post('/api/search', async (req, res) => {
     const { topic, category } = extractKnowledgeIntent(finalQuery);
     let scoutKnowledge = null;
     if (topic) {
-      const redisKey = `scout:knowledge:${category}:${topic.toLowerCase()}`;
+      const cleanCategory = (category || 'general').trim().toLowerCase().replace(/\s+/g, '_');
+      const cleanTopic = topic.trim().toLowerCase().replace(/\s+/g, '_');
+      const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
+
+      console.log("🔍 Scout Memory: Looking up key:", redisKey);
       scoutKnowledge = await redis.get(redisKey);
       
       if (!scoutKnowledge) {
