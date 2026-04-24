@@ -61,6 +61,7 @@ export default function App() {
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
+  const sessionId = useRef(`sess-${Math.random().toString(36).substring(2, 15)}`).current;
   const lastQueryRef = useRef<string>('');
   const lastClickRef = useRef<{ id: string; url: string; time: number; query: string } | null>(null);
   const appsRef = useRef<HTMLDivElement>(null);
@@ -108,6 +109,7 @@ export default function App() {
           query: lastClickRef.current.query,
           url: lastClickRef.current.url,
           duration: durationSeconds,
+          sessionId: sessionId,
           uid: user?.sub || 'guest'
         }).catch(() => {});
 
@@ -478,6 +480,7 @@ export default function App() {
           query: finalQuery,
           url: '',
           position: null,
+          sessionId: sessionId,
           uid: user?.sub || 'guest'
         }).catch(() => {}); // Silent fail for analytics
       }
@@ -644,6 +647,7 @@ export default function App() {
       query: lastQueryRef.current,
       url: url,
       position: position,
+      sessionId: sessionId,
       uid: user?.sub || 'guest'
     }).catch(() => {});
 
@@ -1417,7 +1421,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       key={res.id} 
                       onClick={() => {
                         setSelectedImage(res);
-                        handleResultClick(res.id, res.url, idx + 1);
+                        onResultClick(res.id, res.url, idx + 1);
                       }} 
                       className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
                     >
