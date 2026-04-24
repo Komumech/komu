@@ -780,13 +780,15 @@ app.post('/api/admin/clickstream', async (req, res) => {
       return res.status(503).json({ error: "Database unavailable" });
     }
 
-    const { type, query, url, uid } = req.body;
+    const { type, query, url, uid, position, duration } = req.body;
 
     // This is what forces the creation of the collection
     await db.collection('clickstream').add({
       type: type || 'search',
       query: query || '',
       url: url || '',
+      position: position || null,
+      duration: duration || null,
       uid: uid || 'anonymous',
       timestamp: new Date()
     });

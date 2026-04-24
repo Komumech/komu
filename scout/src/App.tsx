@@ -101,6 +101,16 @@ export default function App() {
           queryText: lastClickRef.current.query,
           durationMs
         }).catch(() => {});
+
+        // AI Training Log: dwell_update for Learning to Rank
+        axios.post('/api/admin/clickstream', {
+          type: 'dwell_update',
+          query: lastClickRef.current.query,
+          url: lastClickRef.current.url,
+          duration: durationSeconds,
+          uid: user?.sub || 'guest'
+        }).catch(() => {});
+
         lastClickRef.current = null;
       }
     };
@@ -619,12 +629,21 @@ export default function App() {
     }
   };
 
-  const handleResultClick = (id: string, url: string) => {
+  const handleResultClick = (id: string, url: string, position: number) => {
     // Record for behavioral signals (Pogo-sticking detection)
     lastClickRef.current = { id, url, time: Date.now(), query: lastQueryRef.current };
 
     // Immediate NavBoost "Interest" signal
     axios.post('/api/feedback', { id, type: 'click', queryText: lastQueryRef.current }).catch(() => {});
+
+    // AI Training Log: capture position for Learning to Rank
+    axios.post('/api/admin/clickstream', {
+      type: 'click',
+      query: lastQueryRef.current,
+      url: url,
+      position: position,
+      uid: user?.sub || 'guest'
+    }).catch(() => {});
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
@@ -1422,17 +1441,17 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       )}
                       
                       {item.type === 'single' ? (
-                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
+                        <ResultCard res={item.result} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
                       ) : (
                         <div className="space-y-4 py-4 mb-8">
-                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
+                          <ResultCard res={item.primary} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
                           <div className="ml-4 sm:ml-12 flex flex-col -mt-4">
                             <div className="border-t border-slate-100 mt-2 mb-4" />
                             <div className="space-y-0">
                               {item.secondaries.map((s: any, sIdx: number) => (
                                 <div key={s.id} className="group/sub">
                                   <a 
-                                    onClick={() => onResultClick?.(s.id, s.url)} 
+                                    onClick={() => onResultClick?.(s.id, s.url, idx + 1)} 
                                     href={s.url} 
                                     target="_blank" 
                                     rel="noreferrer" 
@@ -1743,7 +1762,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   );
 }
 
-function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick }: any) {
+function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick }: any) {
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -1803,7 +1822,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           </div>
 
           <div className="relative group/title inline-block">
-            <a onClick={() => onResultClick?.(res.id, res.url)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
+            <a onClick={() => onResultClick?.(res.id, res.url, position)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
               <h3 className="text-xl md:text-2xl font-display font-medium text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
                 {res.title}
               </h3>
