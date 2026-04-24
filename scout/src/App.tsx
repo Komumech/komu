@@ -476,6 +476,8 @@ export default function App() {
         axios.post('/api/admin/clickstream', {
           type: 'search',
           query: finalQuery,
+          url: '',
+          position: null,
           uid: user?.sub || 'guest'
         }).catch(() => {}); // Silent fail for analytics
       }
@@ -825,6 +827,7 @@ export default function App() {
             allResults={results} 
             onClose={() => setSelectedImage(null)} 
             onSelect={(img: any) => setSelectedImage(img)}
+            onResultClick={handleResultClick}
           />
         )}
       </AnimatePresence>
@@ -1409,10 +1412,13 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             ) : filteredResults.length > 0 ? (
               activeTab === 'images' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
-                  {filteredResults.map((res: any) => (
+                  {filteredResults.map((res: any, idx: number) => (
                     <div 
                       key={res.id} 
-                      onClick={() => setSelectedImage(res)} 
+                      onClick={() => {
+                        setSelectedImage(res);
+                        handleResultClick(res.id, res.url, idx + 1);
+                      }} 
                       className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
                     >
                       <img src={isImageUrl(res.url) ? res.url : res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
@@ -1428,7 +1434,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
-                        <ImageStrip results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
+                        <ImageStrip 
+                          results={results} 
+                          onMore={() => setActiveTab('images')} 
+                          onImageClick={(img: any, pos: number) => { setSelectedImage(img); onResultClick?.(img.id, img.url, pos); }} 
+                        />
                       )}
 
                       {/* First FAQ after 3 results */}
@@ -1590,7 +1600,7 @@ function QuickSummary({ text }: { text: string }) {
   );
 }
 
-function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void, onImageClick?: (img: any) => void }) {
+function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[], onMore: () => void, onImageClick?: (img: any, pos: number) => void }) {
   const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
   if (imagesWithMeta.length < 3) return null;
 
@@ -1606,8 +1616,8 @@ function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results:
         </button>
       </div>
       <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
-        {imagesWithMeta.map((img) => (
-          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
+        {imagesWithMeta.map((img, idx) => (
+          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img, idx + 1); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
             <div className="aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1">
               <img src={img.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={img.title} />
             </div>
@@ -1918,7 +1928,7 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
   );
 }
 
-function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
+function ImageDetailView({ image, allResults, onClose, onSelect, onResultClick }: any) {
   const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
   
   const relatedImages = allResults.filter((res: any) => {
@@ -1978,6 +1988,7 @@ function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
             <h2 className="text-2xl md:text-3xl font-display font-medium text-slate-900 mb-4">{image.title}</h2>
             <p className="text-slate-600 text-lg leading-relaxed mb-6">{image.snippet}</p>
             <a 
+              onClick={() => onResultClick?.(image.id, image.url, 0)}
               href={image.url}
               target="_blank"
               rel="noreferrer"

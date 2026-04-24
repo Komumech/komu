@@ -45,7 +45,7 @@ BLACKLIST = [
   "wikidata.org",
   "foundation.wikimedia.org",
   
- 
+ "en.wikipedia.org",
   "grokipedia.com",
   "wikiwand.com",
   "simple.wikipedia.org",
