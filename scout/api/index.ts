@@ -193,26 +193,45 @@ async function detectLocalIntent(query: string) {
 // Scout Knowledge: Subject & Category Extraction
 function extractKnowledgeIntent(query: string) {
   const doc = nlp(query);
-  const topic = doc.topics().first().text();
+  const topic = doc.topics().first().text() || doc.nouns().first().text();
+  
+  if (!topic) return { topic: null, category: 'general' };
   
   // Automatic Categorization Logic
+  const categories = [
+    { name: 'geography', match: '#Place' },
+    { name: 'biography', match: '#Person' },
+    { name: 'science', match: '(science|physics|biology|chemistry|math|astronomy|medicine)' },
+    { name: 'finance', match: '(finance|money|stock|economy|crypto|bitcoin|trading)' },
+    { name: 'anime', match: '(anime|manga|studio ghibli|naruto|one piece|animation|otaku)' },
+    { name: 'coding', match: '(coding|programming|software|developer|javascript|python|rust|github|api|linux)' },
+    { name: 'robotics', match: '(robotics|robot|automation|android|ai|artificial intelligence)' }
+  ];
+
   let category = 'general';
-  if (doc.match('#Place').json().length > 0) category = 'geography';
-  else if (doc.match('#Person').json().length > 0) category = 'biography';
-  else if (doc.match('(science|physics|biology|chemistry|math)').json().length > 0) category = 'science';
-  else if (doc.match('(finance|money|stock|economy)').json().length > 0) category = 'finance';
+  for (const cat of categories) {
+    if (doc.match(cat.match).json().length > 0) {
+      category = cat.name;
+      break;
+    }
+  }
   
   return { topic, category };
 }
 
 async function learnFromWiki(topic: string, category: string) {
   try {
-
     const page = await (wiki() as any).page(topic);
-    const summary = await page.summary();
+    const [summary, mainImage] = await Promise.all([
+      page.summary(),
+      page.mainImage().catch(() => null)
+    ]);
+
     const info = {
       title: topic,
       description: summary.slice(0, 500) + "...",
+      url: (page as any).fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(topic)}`,
+      image: mainImage,
       source: "Wikipedia",
       category,
       learnedAt: new Date().toISOString()

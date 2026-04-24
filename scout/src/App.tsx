@@ -1305,14 +1305,26 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                    <Sparkles size={120} className="text-blue-600" />
                 </div>
                 <div className="relative z-10">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">Scout Knowledge</div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Category: {scoutKnowledge.category}</span>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <div className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">Scout Knowledge</div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Category: {scoutKnowledge.category}</span>
+                    </div>
+                    {scoutKnowledge.image && (
+                      <img src={scoutKnowledge.image} className="w-16 h-16 rounded-2xl object-cover border border-white/40 shadow-xl" referrerPolicy="no-referrer" />
+                    )}
                   </div>
                   <h2 className="text-3xl font-display font-bold text-slate-900 mb-4">{scoutKnowledge.title}</h2>
                   <p className="text-slate-600 text-lg leading-relaxed mb-6 line-clamp-4">{scoutKnowledge.description}</p>
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest pt-6 border-t border-slate-100">
-                    <span>Source: {scoutKnowledge.source}</span>
+                    <div className="flex gap-4">
+                      <span>Source: {scoutKnowledge.source}</span>
+                      {scoutKnowledge.url && (
+                        <a href={scoutKnowledge.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline flex items-center gap-1">
+                          Wikipedia <ExternalLink size={10} />
+                        </a>
+                      )}
+                    </div>
                     <span>Learned: {new Date(scoutKnowledge.learnedAt).toLocaleDateString()}</span>
                   </div>
                 </div>
