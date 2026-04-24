@@ -7,6 +7,9 @@ import cookieSession from 'cookie-session';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
 import { pipeline, env } from '@xenova/transformers';
+import nlp from 'compromise';
+import wiki from 'wikijs';
+import { Redis } from '@upstash/redis';
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
@@ -19,6 +22,12 @@ env.allowLocalModels = false;
 if (process.env.NODE_ENV === 'production') {
   env.cacheDir = '/tmp';
 }
+
+// --- REDIS (KNOWLEDGE GRAPH) INITIALIZATION ---
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL || '',
+  token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,6 +161,23 @@ async function detectLocalIntent(query: string) {
     return { is_dictionary: false, is_english_help: true, is_entity: false };
   }
 
+  // Geographic and Factual patterns for Knowledge Cards
+  const factualPatterns = [
+    { regex: /(.+)\s+in what continent|what continent is (.+) in/i, type: 'continent' },
+    { regex: /capital of (.+)|what is the capital of (.+)/i, type: 'capital' },
+    { regex: /population of (.+)|what is the population of (.+)/i, type: 'population' },
+    { regex: /how old is (.+)|age of (.+)/i, type: 'age' },
+    { regex: /who is the (?:president|leader) of (.+)/i, type: 'leader' }
+  ];
+
+  for (const pattern of factualPatterns) {
+    const match = q.match(pattern.regex);
+    if (match) {
+      const subject = (match[1] || match[2]).trim();
+      return { is_dictionary: false, is_english_help: false, is_entity: true, entity_name: subject, factual_type: pattern.type };
+    }
+  }
+
   const entityWords = ['who is', 'what is', 'where is', 'tell me about', 'biography of', 'history of'];
   const entityMatch = entityWords.find(w => q.startsWith(w));
   if (entityMatch) {
@@ -162,6 +188,38 @@ async function detectLocalIntent(query: string) {
   }
 
   return { is_dictionary: false, is_english_help: false, is_entity: false };
+}
+
+// Scout Knowledge: Subject & Category Extraction
+function extractKnowledgeIntent(query: string) {
+  const doc = nlp(query);
+  const topic = doc.topics().first().text();
+  
+  // Automatic Categorization Logic
+  let category = 'general';
+  if (doc.match('#Place').json().length > 0) category = 'geography';
+  else if (doc.match('#Person').json().length > 0) category = 'biography';
+  else if (doc.match('(science|physics|biology|chemistry|math)').json().length > 0) category = 'science';
+  else if (doc.match('(finance|money|stock|economy)').json().length > 0) category = 'finance';
+  
+  return { topic, category };
+}
+
+async function learnFromWiki(topic: string, category: string) {
+  try {
+
+    const page = await (wiki() as any).page(topic);
+    const summary = await page.summary();
+    const info = {
+      title: topic,
+      description: summary.slice(0, 500) + "...",
+      source: "Wikipedia",
+      category,
+      learnedAt: new Date().toISOString()
+    };
+    await redis.set(`scout:knowledge:${category}:${topic.toLowerCase()}`, info);
+    return info;
+  } catch (e) { return null; }
 }
 
 function cleanSnippet(text: string) {
@@ -383,6 +441,21 @@ app.post('/api/search', async (req, res) => {
     const intentData = await detectLocalIntent(finalQuery);
     let dictionaryResult = null;
     let suggestKnowledgePanel = intentData?.is_entity || false;
+    
+    // --- KNOWLEDGE GRAPH LOOKUP (Redis) ---
+    const { topic, category } = extractKnowledgeIntent(finalQuery);
+    let scoutKnowledge = null;
+    if (topic) {
+      const redisKey = `scout:knowledge:${category}:${topic.toLowerCase()}`;
+      scoutKnowledge = await redis.get(redisKey);
+      
+      if (!scoutKnowledge) {
+        // Asynchronously learn for next time
+        learnFromWiki(topic, category).catch(() => {});
+      }
+    }
+
+    let factualType = (intentData as any)?.factual_type || null;
     let detectedEntity = intentData?.is_entity ? { name: intentData.entity_name, type: null } : null;
     let isEnglishHelp = intentData?.is_english_help || false;
 
@@ -670,9 +743,11 @@ app.post('/api/search', async (req, res) => {
 
     res.json({ 
       results: resultsWithOptionalImages,
+      scoutKnowledge,
       dictionary: dictionaryResult,
       suggestKnowledgePanel,
       detectedEntity,
+      factualType,
       isEnglishHelp,
       correction: null, 
       originalQuery: null,

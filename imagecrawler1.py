@@ -72,9 +72,12 @@ pc_index = pc.Index(INDEX_NAME)
 ai_client = OpenAI(api_key=AI_API_KEY, base_url=AI_BASE_URL)
 
 url_queue = Queue()
+overflow_queue = Queue() # 🚀 NEW: Storage for backpressure management
 visited = set()         
 runtime_indexed = [] 
 domain_image_counts = {}
+domain_page_counts = {} # 🚀 NEW: Track pages visited to prevent domain stalling
+total_sites_session = 0
 active_workers = 0 
 data_lock = threading.Lock()
 pbar = None 
@@ -109,23 +112,54 @@ def is_high_quality(url):
     if re.search(r'\.(zip|exe|mp4|pdf|iso)$', url.lower()): return False
     return True
 
-def process_sitemap(sitemap_url, domain, t_name):
+def smart_enqueue(url):
+    """Routes URLs to the active queue or overflow, enforcing domain limits."""
+    domain = urlparse(url).netloc
+    with data_lock:
+        # 🛑 DOMAIN GUARD: Don't queue if we hit the image limit OR a safety page limit
+        if domain_image_counts.get(domain, 0) >= DOMAIN_LIMIT: return
+        if domain_page_counts.get(domain, 0) >= 100: return # Max 100 pages per domain
+
+    if url_queue.qsize() < 5000:
+        url_queue.put(url)
+    else:
+        overflow_queue.put(url)
+
+def process_sitemap(sitemap_url, domain, t_name, depth=0):
+    if depth > 2: return # Prevent deep XML recursion
     with sitemap_lock:
         if sitemap_url in sitemaps_processed: return
         sitemaps_processed.add(sitemap_url)
     try:
-        resp = session.get(sitemap_url, timeout=10, verify=False)
+        resp = session.get(sitemap_url, timeout=15, verify=False)
         if resp.status_code != 200: return
+        if "html" in resp.headers.get("Content-Type", "").lower(): return # Not a sitemap XML
         root = ET.fromstring(resp.content)
         ns = {'ns': root.tag.split('}')[0].strip('{')} if '}' in root.tag else {}
         locs = root.findall('.//ns:loc', ns) if ns else root.findall('.//loc')
+        
+        # Filter out non-http/s links and empty locs early
+        locs = [loc for loc in locs if loc.text and loc.text.strip().startswith('http')]
+        
+        # Ensure unique URLs from sitemap
+        sitemap_urls = list(set([l.text.strip() for l in locs]))
+        
+        # THROTTLE: Only take a sample of URLs if sitemap is massive (Prevents Queue Bloat)
+        if len(sitemap_urls) > 200:
+            random.shuffle(sitemap_urls)
+            sitemap_urls = sitemap_urls[:200]
+
         count = 0
-        for loc in locs:
-            url = loc.text.strip()
-            with data_lock:
-                if url not in visited:
-                    url_queue.put(url); count += 1
-        if count > 0: tqdm.write(f"🗺️ [{t_name}] Sitemap Extracted: {count} URLs from {sitemap_url}")
+        for url in sitemap_urls:
+            if 'sitemap' in url.lower() and url.endswith('.xml'):
+                process_sitemap(url, domain, t_name, depth + 1)
+            else:
+                # smart_enqueue now handles the domain limit check centrally
+                with data_lock:
+                    if url not in visited:
+                        smart_enqueue(url)
+                        count += 1
+        if count > 0: tqdm.write(f"🗺️ [{t_name}] Sitemap Sampled: {count} URLs from {domain}")
     except: pass
 
 def discover_sitemaps(root_url, domain, t_name):
@@ -157,7 +191,7 @@ def index_to_pinecone(url, alt_text, domain, t_name):
 
         pc_index.upsert(
             vectors=[{"id": v_id, "values": vector, "metadata": metadata}],
-            namespace=NAMESPACE
+            namespace=NAMESPACE or "default"
         )
         return True
     except Exception as e:
@@ -178,11 +212,13 @@ def crawler_worker():
         domain = parsed_current.netloc
 
         with data_lock:
-            if clean_url in visited or not is_high_quality(clean_url):
+            # 🛑 DOUBLE-CHECK: Skip if domain limit was reached while this URL sat in queue
+            if clean_url in visited or not is_high_quality(clean_url) or domain_image_counts.get(domain, 0) >= DOMAIN_LIMIT:
                 active_workers -= 1
                 url_queue.task_done()
                 continue
             visited.add(clean_url)
+            domain_page_counts[domain] = domain_page_counts.get(domain, 0) + 1
 
         if parsed_current.path not in ["", "/"]:
             root_url = f"{parsed_current.scheme}://{domain}"
@@ -191,7 +227,7 @@ def crawler_worker():
 
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0'}
-            resp = session.get(url, headers=headers, timeout=12, verify=False)
+            resp = session.get(url, headers=headers, timeout=15, verify=False)
 
             if resp.status_code == 200:
                 # --- IMAGE HARVESTING MODE ---
@@ -218,8 +254,13 @@ def crawler_worker():
                                                 domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
                                                 imgs_found += 1
                     if imgs_found > 0:
-                        tqdm.write(f"🖼️ [{t_name}] Harvested {imgs_found} images from {domain}")
-                        with data_lock: runtime_indexed.append(clean_url); pbar.update(1)
+                        tqdm.write(f"🖼️ [{t_name}] Harvested {imgs_found} images from {domain} (Page: {url})")
+                        with data_lock: 
+                            runtime_indexed.append(clean_url)
+                            total_sites_session += 1
+                            if pbar:
+                                pbar.update(imgs_found)
+                                pbar.set_postfix(sites=total_sites_session)
                 except: pass
 
                 if parsed_current.path in ["", "/"]:
@@ -227,16 +268,15 @@ def crawler_worker():
 
                 # --- DEEP-CRAWL DISCOVERY ---
                 raw_links = re.findall(r'href=["\'](https?://[^\s"\']+|/[^\s"\']+)["\']', resp.text)
+                
                 for l in raw_links:
                     full_link = urljoin(url, l).split('#')[0].rstrip('/')
                     l_domain = urlparse(full_link).netloc
                     with data_lock:
                         if l_domain and full_link not in visited:
-                            if l_domain == domain:
-                                url_queue.put(full_link)
-                            else:
-                                # Limit branching to prevent queue explosion
-                                if len(visited) % 50 == 0: url_queue.put(full_link)
+                            # Limits are now handled centrally in smart_enqueue
+                            if l_domain == domain: smart_enqueue(full_link)
+                            elif len(visited) % 50 == 0: smart_enqueue(full_link) 
         except: pass
         finally:
             with data_lock: active_workers -= 1
@@ -254,6 +294,8 @@ def run_komu_autonomous():
 
     # Seeds for Image Discovery
     current_topics = [
+"https://duolingo.com/",
+"https://nickelodeon.com/",
 "https://www.figma.com/",
 "https://huggingface.co/",
 "https://perplexity.ai/",
@@ -641,6 +683,10 @@ def run_komu_autonomous():
 "https://www.mountainproject.com/",
 "https://www.adventureprojects.net/",
  "https://github.com/",
+ "open lp",
+"obs studio",
+"gospel songs",
+"lyrics of songs",
 "https://stackoverflow.com/",
 "https://www.codecademy.com/",
 "https://news.ycombinator.com/",
@@ -721,26 +767,46 @@ def run_komu_autonomous():
 "https://www.gamespot.com/"
     ] + get_autonomous_seeds(5)
 
+    # 🚀 SHUFFLE BEFORE START: Ensure fresh paths every time
+    random.shuffle(current_topics)
+
     try:
         with DDGS() as ddgs:
             for q in current_topics:
-                if q.startswith("http"): url_queue.put(q)
+                if q.startswith("http"): smart_enqueue(q)
                 else:
                     results = ddgs.text(q, max_results=5)
-                    for r in results: url_queue.put(r['href'])
+                    for r in results: smart_enqueue(r['href'])
                     time.sleep(1)
     except: pass
 
     print(f"🚀 KOMU IMAGE SCOUT READY. Parallel harvesting active.")
-    pbar = tqdm(total=None, desc="Images Harvested", unit="site", colour="green")
+    pbar = tqdm(total=None, desc="Total Images Harvested", unit="img", colour="green")
     
     for i in range(MAX_THREADS):
         threading.Thread(target=crawler_worker, name=f"Scout-{i+1}", daemon=True).start()
 
     try:
         while True:
+            # Heartbeat: Show status so user knows it isn't frozen
+            with data_lock:
+                q_size = url_queue.qsize()
+                ov_size = overflow_queue.qsize()
+                busy = active_workers
+                img_count = pbar.n if pbar else 0
+                site_count = total_sites_session
+
+            tqdm.write(f"⚙️  Scout Heartbeat: [Queue: {q_size}/5000 | Overflow: {ov_size} | Busy: {busy} | Harvested: {img_count} img from {site_count} sites]")
+
+            # REFILL LOGIC: If main queue drains, pull from the overflow
+            if q_size < 1000 and ov_size > 0:
+                tqdm.write(f"🔄 Refilling active queue from overflow...")
+                while not overflow_queue.empty() and url_queue.qsize() < 5000:
+                    url_queue.put(overflow_queue.get())
+                q_size = url_queue.qsize()
+            
             time.sleep(15)
-            if url_queue.qsize() < 10:
+            if q_size < MAX_THREADS * 5: # Only brainstorm new seeds if queue is manageable
                 recent_domains = [urlparse(u).netloc for u in list(visited)[-5:]]
                 ai_topics = generate_ai_topics(current_topics[-3:], recent_domains)
                 random_injects = get_autonomous_seeds(2)
@@ -752,7 +818,7 @@ def run_komu_autonomous():
                         with DDGS() as ddgs:
                             for s in combined_new[:5]:
                                 results = ddgs.text(s, max_results=5)
-                                for r in results: url_queue.put(r['href'])
+                                for r in results: smart_enqueue(r['href'])
                                 time.sleep(1.2)
                     except: pass
 

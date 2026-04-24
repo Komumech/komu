@@ -30,6 +30,7 @@ export default function App() {
   const [aiOverview, setAiOverview] = useState<AIOverview | null>(null);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
   const [aiRateLimited, setAiRateLimited] = useState(false);
+  const [scoutKnowledge, setScoutKnowledge] = useState<any>(null);
   const [faq, setFaq] = useState<{ question: string; answer: string }[]>([]);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -44,6 +45,7 @@ export default function App() {
   const [micError, setMicError] = useState<string | null>(null);
   const [homeBg, setHomeBg] = useState<string>('');
   const [dictionary, setDictionary] = useState<any>(null);
+  const [directAnswer, setDirectAnswer] = useState<any>(null);
   const [correction, setCorrection] = useState<string | null>(null);
   const [originalQuery, setOriginalQuery] = useState<string | null>(null);
   const [userHistory, setUserHistory] = useState<string[]>([]);
@@ -347,7 +349,9 @@ export default function App() {
     setVisualMathProblem(null);
     setVisualAnalysis(null);
     setAiOverview(null);
+    setScoutKnowledge(null);
     setDictionary(null);
+    setDirectAnswer(null);
     setKnowledgePanel(null);
     setIsEnglishHelp(false);
     setFaq([]);
@@ -446,10 +450,16 @@ export default function App() {
       }
 
       const pineconeResults = data.results || [];
+      setScoutKnowledge(data.scoutKnowledge || null);
       setTotalPages(data.totalPages || 1);
       setDictionary(data.dictionary || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
       
+      // Trigger Direct Answer if factual intent detected
+      if (data.factualType && data.detectedEntity) {
+        generateDirectAnswer(finalQuery, data.factualType, data.detectedEntity.name);
+      }
+
       const rawResults: SearchResult[] = pineconeResults.map((r: any) => ({
         id: r.id,
         title: r.title || 'Untitled Page',
@@ -506,6 +516,31 @@ export default function App() {
       setError(error.message || "Something went wrong.");
       setLoading(false);
     }
+  };
+
+  const generateDirectAnswer = async (queryText: string, type: string, subject: string) => {
+    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
+    try {
+      const prompt = `Provide a concise, authoritative "Knowledge Card" answer for: "${queryText}". 
+      Type: "${type}", Subject: "${subject}". 
+      Return ONLY a JSON object: 
+      { 
+        "answer": "Main factual answer (e.g. North America)", 
+        "label": "Context hierarchy (e.g. Canada > Continent)", 
+        "description": "One sentence explanation", 
+        "details": [{"label": "Factual Key", "value": "Factual Value"}],
+        "image_hint": "A single word for a relevant high-res photo"
+      }`;
+
+      const result = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" }
+      });
+      
+      const data = JSON.parse(result.text || 'null');
+      if (data) setDirectAnswer(data);
+    } catch (e) { console.error("Direct Answer failed", e); }
   };
 
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
@@ -810,6 +845,8 @@ export default function App() {
             selectedImage={selectedImage}
             setSelectedImage={setSelectedImage}
             aiRateLimited={aiRateLimited}
+            scoutKnowledge={scoutKnowledge}
+            directAnswer={directAnswer}
             onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
           />
         )}
@@ -1050,7 +1087,7 @@ function VisualMathDisplay({ problem, stage, image, analysis }: any) {
     </motion.div>
   );
 }
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
@@ -1256,6 +1293,30 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {/* Visual Math Analysis Display */}
             {imageQuery && (
               <VisualMathDisplay problem={visualMathProblem} stage={searchStage} image={imageQuery} analysis={visualAnalysis} />
+            )}
+
+            {/* Scout Knowledge Graph Card (Redis) */}
+            {activeTab === 'all' && scoutKnowledge && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                className="backdrop-blur-xl bg-blue-600/5 border border-blue-600/20 rounded-[32px] p-8 mb-6 shadow-2xl relative overflow-hidden group"
+              >
+                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+                   <Sparkles size={120} className="text-blue-600" />
+                </div>
+                <div className="relative z-10">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-full">Scout Knowledge</div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Category: {scoutKnowledge.category}</span>
+                  </div>
+                  <h2 className="text-3xl font-display font-bold text-slate-900 mb-4">{scoutKnowledge.title}</h2>
+                  <p className="text-slate-600 text-lg leading-relaxed mb-6 line-clamp-4">{scoutKnowledge.description}</p>
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest pt-6 border-t border-slate-100">
+                    <span>Source: {scoutKnowledge.source}</span>
+                    <span>Learned: {new Date(scoutKnowledge.learnedAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </motion.div>
             )}
 
             {/* AI Overview */}
