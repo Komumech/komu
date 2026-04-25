@@ -63,6 +63,7 @@ export default function App() {
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
   const [selectedVideo, setSelectedVideo] = useState<any>(null); // New state for video modal
+  const [inlinePlayingId, setInlinePlayingId] = useState<string | null>(null); // Track which result is playing inline
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
   const sessionId = useRef(`sess-${Math.random().toString(36).substring(2, 15)}`).current;
   const lastQueryRef = useRef<string>('');
@@ -859,6 +860,8 @@ export default function App() {
             selectedVideo={selectedVideo} // Pass to ResultsView
             setSelectedImage={setSelectedImage}
             setSelectedVideo={setSelectedVideo}
+            inlinePlayingId={inlinePlayingId}
+            setInlinePlayingId={setInlinePlayingId}
             aiRateLimited={aiRateLimited}
             scoutKnowledge={scoutKnowledge}
             directAnswer={directAnswer}
@@ -1109,7 +1112,7 @@ function VisualMathDisplay({ problem, stage, image, analysis }: any) {
     </motion.div>
   );
 }
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, selectedVideo, setSelectedVideo, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, selectedVideo, setSelectedVideo, inlinePlayingId, setInlinePlayingId, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
   const isVideoUrl = (url: string) => url.includes('youtube.com/watch?v=') || url.includes('youtu.be/');
@@ -1574,10 +1577,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       )}
                       
                       {item.type === 'single' ? (
-                        <ResultCard res={item.result} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
+                        <ResultCard res={item.result} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} onVideoClick={(vid: any) => setSelectedVideo(vid)} isPlayingInline={inlinePlayingId === item.result.id} setPlayingInline={(id: string | null) => setInlinePlayingId(id)} />
                       ) : (
                         <div className="space-y-4 py-4 mb-8">
-                          <ResultCard res={item.primary} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} />
+                          <ResultCard res={item.primary} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} onVideoClick={(vid: any) => setSelectedVideo(vid)} isPlayingInline={inlinePlayingId === item.primary.id} setPlayingInline={(id: string | null) => setInlinePlayingId(id)} />
                           <div className="ml-4 sm:ml-12 flex flex-col -mt-4">
                             <div className="border-t border-slate-100 mt-2 mb-4" />
                             <div className="space-y-0">
@@ -1934,7 +1937,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   );
 }
 
-function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, onVideoClick }: any) {
+function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, onVideoClick, isPlayingInline, setPlayingInline }: any) {
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -2030,11 +2033,11 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
           {/* Play Video Button if it's a video result */}
           {res.is_video && res.embed_url && (
             <button 
-              onClick={() => onVideoClick?.(res)}
+              onClick={() => setPlayingInline(isPlayingInline ? null : res.id)}
               className="flex items-center gap-1.5 text-[11px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-full transition-all active:scale-95 border border-purple-100 mt-4"
             >
-              <PlayCircle size={12} />
-              Watch Video
+              {isPlayingInline ? <X size={12} /> : <PlayCircle size={12} />}
+              {isPlayingInline ? 'Close Player' : 'Watch Video'}
             </button>
           )}
 

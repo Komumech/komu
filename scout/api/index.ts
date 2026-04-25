@@ -699,13 +699,19 @@ app.post('/api/search', async (req, res) => {
       };
 
       // --- AUTO-DETECT YOUTUBE VIDEOS ---
-      const ytMatch = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
+      // Improved Regex for all YouTube formats (Shorts, Embeds, Standard)
+      const ytMatch = url.match(/(?:v=|v\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/i);
       if (ytMatch) {
         const videoId = ytMatch[1];
+        // High-Res Thumbnail Pattern
+        const thumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+        const fallback = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+        
         res.is_video = true;
-        res.thumbnail_url = res.thumbnail_url || res.image || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-        res.embed_url = res.embed_url || `https://www.youtube.com/embed/${videoId}`;
-        res.image = res.image || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+        res.thumbnail_url = res.thumbnail_url || thumb;
+        res.embed_url = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0`;
+        res.image = res.image || thumb;
+        res.videoId = videoId;
         res.source = res.source || "YouTube";
       }
 
