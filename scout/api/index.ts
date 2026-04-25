@@ -681,7 +681,7 @@ app.post('/api/search', async (req, res) => {
       const isRootDomain = dom.split('.').length <= 3 && !dom.includes('github') && !dom.includes('theverge'); 
       const boost = parseFloat(meta.popularity_boost) || 1.0;
 
-      return {
+      const res: any = {
         ...meta,
         id: match.id,
         score: match.score || 0,
@@ -697,6 +697,19 @@ app.post('/api/search', async (req, res) => {
         image: meta.image || meta.thumbnail || meta.ogImage || meta.imageUrl || null,
         sourceIcon: `https://icons.duckduckgo.com/ip3/${dom}.ico`,
       };
+
+      // --- AUTO-DETECT YOUTUBE VIDEOS ---
+      const ytMatch = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
+      if (ytMatch) {
+        const videoId = ytMatch[1];
+        res.is_video = true;
+        res.thumbnail_url = res.thumbnail_url || res.image || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+        res.embed_url = res.embed_url || `https://www.youtube.com/embed/${videoId}`;
+        res.image = res.image || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+        res.source = res.source || "YouTube";
+      }
+
+      return res;
     });
 
     const reranked = allResults.sort((a, b) => {
@@ -793,12 +806,15 @@ app.post('/api/search', async (req, res) => {
     const paginatedResults = finalOrdered.slice(skip, skip + pageSize);
     const totalPagesCount = Math.ceil(finalOrdered.length / pageSize);
 
-    // If 'all' tab, we mix in top images and videos for the UI strips
-    let resultsWithOptionalMedia = paginatedResults;
+    // If 'all' tab, we mix in top images and videos for the UI strips (avoiding duplicates)
+    let resultsWithOptionalMedia = [...paginatedResults];
     if (type === 'all') {
-       // Bundling media ensures Strips have data without breaking pagination flow
-       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...imageResults.slice(0, 10)];
-       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...videoResults.slice(0, 10)];
+       const seenIds = new Set(paginatedResults.map(r => r.id));
+       
+       const extraImages = imageResults.filter(r => !seenIds.has(r.id)).slice(0, 10);
+       const extraVideos = videoResults.filter(r => !seenIds.has(r.id)).slice(0, 10);
+       
+       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...extraImages, ...extraVideos];
     }
 
     res.json({ 

@@ -1758,7 +1758,7 @@ function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[]
 // New VideoStrip component
 function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[], onMore: () => void, onVideoClick?: (vid: any, pos: number) => void }) {
   const videosWithMeta = results.filter(r => r.is_video).slice(0, 8);
-  if (videosWithMeta.length < 3) return null;
+  if (videosWithMeta.length < 1) return null;
 
   return (
     <div className="py-8 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -1959,7 +1959,8 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
   const siteName = parts[0] === 'www' ? parts[1] || parts[0] : parts[0];
   const displaySiteName = siteName.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 
-  const activeImage = domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : res.image;
+  // Priority: Domain Carousel > Video Thumbnail > Static Image
+  const activeImage = domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : (res.thumbnail_url || res.image);
 
   return (
     <article className="group py-5 transition-all border-b border-slate-100 last:border-0 pl-0 overflow-hidden">
