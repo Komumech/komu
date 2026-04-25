@@ -793,17 +793,16 @@ app.post('/api/search', async (req, res) => {
     const paginatedResults = finalOrdered.slice(skip, skip + pageSize);
     const totalPagesCount = Math.ceil(finalOrdered.length / pageSize);
 
-    // If 'all' tab, we mix in some top images so the ImageStrip always works on page 1
-    // We add them at the end of the results array for the frontend to handle
-    let resultsWithOptionalImages = paginatedResults;
-    if (type === 'all' && imageResults.length > 0) {
-       // Only add images to the payload if they aren't already represented 
-       // This ensures ResultsView has image data for the strip without breaking pagination
-       resultsWithOptionalImages = [...paginatedResults, ...imageResults.slice(0, 10)];
+    // If 'all' tab, we mix in top images and videos for the UI strips
+    let resultsWithOptionalMedia = paginatedResults;
+    if (type === 'all') {
+       // Bundling media ensures Strips have data without breaking pagination flow
+       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...imageResults.slice(0, 10)];
+       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...videoResults.slice(0, 10)];
     }
 
     res.json({ 
-      results: resultsWithOptionalImages,
+      results: resultsWithOptionalMedia,
       scoutKnowledge,
       dictionary: dictionaryResult,
       suggestKnowledgePanel,

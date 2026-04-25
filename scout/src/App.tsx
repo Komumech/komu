@@ -858,6 +858,7 @@ export default function App() {
             selectedImage={selectedImage}
             selectedVideo={selectedVideo} // Pass to ResultsView
             setSelectedImage={setSelectedImage}
+            setSelectedVideo={setSelectedVideo}
             aiRateLimited={aiRateLimited}
             scoutKnowledge={scoutKnowledge}
             directAnswer={directAnswer}
@@ -1108,7 +1109,7 @@ function VisualMathDisplay({ problem, stage, image, analysis }: any) {
     </motion.div>
   );
 }
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, selectedVideo, setSelectedVideo, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
   const isVideoUrl = (url: string) => url.includes('youtube.com/watch?v=') || url.includes('youtu.be/');
@@ -1557,7 +1558,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
                         <ImageStrip 
-                          results={results.filter((res: any) => res.image)} // Pass only image results
+                          results={results.filter((res: any) => res.image && !res.is_video)} 
                           onMore={() => setActiveTab('images')} 
                           onImageClick={(img: any, pos: number) => { setSelectedImage(img); onResultClick?.(img.id, img.url, pos); }} 
                         />
@@ -2060,8 +2061,12 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
         {activeImage && (
           <div 
             onClick={() => {
-              const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
-              onImageClick?.(imgData);
+              if (res.is_video) {
+                onVideoClick?.(res);
+              } else {
+                const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
+                onImageClick?.(imgData);
+              }
             }}
             className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer"
           >
@@ -2078,6 +2083,13 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
               />
             </AnimatePresence>
             
+            {/* Play button overlay if it's a video result */}
+            {res.is_video && (
+               <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover/carousel:bg-black/40 transition-colors">
+                  <PlayCircle size={44} className="text-white drop-shadow-2xl" />
+               </div>
+            )}
+
             <button 
               onClick={() => onVisualSearch?.(activeImage)}
               className="absolute top-2 right-2 p-2 bg-black/40 backdrop-blur-md text-white rounded-full opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 shadow-lg"
@@ -2205,63 +2217,50 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[2200] flex justify-end bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/90 backdrop-blur-md"
       onClick={onClose}
     >
       <motion.div 
-        initial={isMobile ? { y: '100%' } : { x: '100%' }}
-        animate={isMobile ? { y: 0 } : { x: 0 }}
-        exit={isMobile ? { y: '100%' } : { x: '100%' }}
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className={`relative w-full md:w-[600px] lg:w-[800px] h-full bg-white shadow-2xl overflow-y-auto flex flex-col p-0`}
+        className="relative w-full max-w-5xl aspect-video bg-black shadow-2xl flex flex-col overflow-hidden rounded-3xl mx-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between p-4 md:p-6">
-          <div className="flex items-center gap-3 overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 z-20 bg-linear-to-b from-black/80 to-transparent flex items-center justify-between p-4 md:p-6 opacity-0 hover:opacity-100 transition-opacity duration-300">
+          <div className="flex items-center gap-3">
             <img 
                src={`https://www.google.com/s2/favicons?domain=${new URL(video.url).hostname}&sz=64`} 
-               className="w-6 h-6 rounded-full shrink-0" 
+               className="w-6 h-6 rounded-full bg-white p-0.5" 
             />
-            <span className="text-sm font-bold text-slate-500 truncate">{new URL(video.url).hostname.replace('www.', '')}</span>
+            <span className="text-sm font-bold text-white truncate drop-shadow-md">{video.title}</span>
           </div>
-          <button 
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-all active:scale-95"
-          >
-            <X size={24} />
-          </button>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all"><X size={24} /></button>
         </div>
 
-        <div className="flex-1 p-4 md:p-10">
-          {/* Embedded Video Player */}
-          {video.embed_url && (
-            <div className="aspect-video w-full bg-black rounded-3xl overflow-hidden border border-slate-100 mb-8">
-              <iframe
-                width="100%"
-                height="100%"
-                src={video.embed_url + "?autoplay=1"} // Autoplay when opened
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                title={video.title}
-              ></iframe>
-            </div>
-          )}
+        {/* Embedded Video Player */}
+        {video.embed_url && (
+          <iframe
+            width="100%"
+            height="100%"
+            src={`${video.embed_url}?autoplay=1&modestbranding=1&rel=0`} 
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            title={video.title}
+            className="flex-1"
+          ></iframe>
+        )}
 
-          <div className="mb-10">
-            <h2 className="text-2xl md:text-3xl font-display font-medium text-slate-900 mb-4">{video.title}</h2>
-            <p className="text-slate-600 text-lg leading-relaxed mb-6">{video.snippet}</p>
-            <a 
-              onClick={() => onResultClick?.(video.id, video.url, 0)} // Position 0 for modal view, assuming it's a direct interaction
-              href={video.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100"
-            >
-              Watch on YouTube <ExternalLink size={16} />
-            </a>
-          </div>
+        {/* Integrated Footer Link */}
+        <div className="absolute bottom-0 left-0 right-0 z-20 bg-linear-to-t from-black/80 to-transparent p-6 opacity-0 hover:opacity-100 transition-opacity duration-300 flex items-center justify-between">
+           <div className="text-white">
+              <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">{video.source}</p>
+              <h3 className="font-bold text-lg line-clamp-1">{video.title}</h3>
+           </div>
+           <a href={video.url} target="_blank" rel="noreferrer" onClick={() => onResultClick?.(video.id, video.url, 0)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 transition-all shadow-xl shadow-red-900/20">YouTube <ExternalLink size={14} /></a>
         </div>
       </motion.div>
     </motion.div>
