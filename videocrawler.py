@@ -128,7 +128,8 @@ def extract_youtube_video_info(page_url, html_content):
         if video_id and video_id not in visited_video_ids:
             youtube_url = f"https://www.youtube.com/watch?v={video_id}"
             embed_url = f"https://www.youtube.com/embed/{video_id}"
-            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" # High quality thumbnail
+            # YouTube HD Thumbnail Pattern
+            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
 
             # Try to get title from the link text or surrounding elements
             title = a_tag.get_text(strip=True)
@@ -142,12 +143,18 @@ def extract_youtube_video_info(page_url, html_content):
                 else:
                     title = f"YouTube Video from {urlparse(page_url).netloc}" # Generic fallback
 
+            # Get description from meta tags if available
+            desc_tag = soup.find('meta', property='og:description') or soup.find('meta', name='description')
+            description = desc_tag.get('content') if desc_tag else ""
+
             videos_found.append({
                 'title': title,
                 'youtube_url': youtube_url,
                 'embed_url': embed_url,
                 'thumbnail_url': thumbnail_url,
                 'video_id': video_id,
+                'description': description,
+                'timestamp': datetime.now().isoformat(),
                 'page_url': page_url # Store the page where it was found
             })
             visited_video_ids.add(video_id) # Mark as visited to avoid duplicates
@@ -169,6 +176,8 @@ def index_video_to_pinecone(video_data, t_name="Unknown"):
             "embed_url": video_data['embed_url'],
             "thumbnail_url": video_data['thumbnail_url'],
             "source": "YouTube",
+            "description": video_data.get('description', ''),
+            "timestamp": video_data.get('timestamp'),
             "is_video": True,
             "page_found_on": video_data['page_url'] # Useful for debugging/context
         }

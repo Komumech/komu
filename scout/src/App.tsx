@@ -2211,6 +2211,33 @@ function ImageDetailView({ image, allResults, onClose, onSelect, onResultClick }
 // New VideoDetailView component
 function VideoDetailView({ video, onClose, onResultClick }: any) {
   const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
+  const generateVideoSummary = async () => {
+    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
+    setIsSummarizing(true);
+    try {
+      const prompt = `Act as an AI video analyst for Scout. 
+      Video Title: "${video.title}"
+      Video Context: "${video.snippet || video.description}"
+      
+      Provide a 3-bullet point summary of what the user can expect to learn from this video. 
+      Keep it punchy and professional. Respond in Markdown.`;
+
+      const result = await genAI.models.generateContent({
+        model: "gemini-1.5-flash", // Using flash for speed
+        contents: [{ role: 'user', parts: [{ text: prompt }] }]
+      });
+      
+      setAiSummary(result.text || "Summary unavailable.");
+    } catch (e) {
+      console.error("Video summary failed", e);
+      setAiSummary("Could not generate AI insights at this time.");
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
 
   return (
     <motion.div 
@@ -2225,7 +2252,7 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="relative w-full max-w-5xl aspect-video bg-black shadow-2xl flex flex-col overflow-hidden rounded-3xl mx-4"
+        className="relative w-full max-w-6xl bg-slate-950 shadow-2xl flex flex-col md:flex-row overflow-hidden rounded-[32px] mx-4 border border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
