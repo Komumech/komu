@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Fragment } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, PlayCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -62,6 +62,7 @@ export default function App() {
   const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
+  const [selectedVideo, setSelectedVideo] = useState<any>(null); // New state for video modal
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
   const sessionId = useRef(`sess-${Math.random().toString(36).substring(2, 15)}`).current;
   const lastQueryRef = useRef<string>('');
@@ -340,6 +341,14 @@ export default function App() {
     let finalQuery = typeof e === 'string' ? e : query;
     const currentVisualQuery = visualQuery || imageQuery;
     
+    // If searching keyword from Results header, reset to 'All' tab so panel shows
+    const isFreshSearch = e !== undefined && requestedPage === 1 && !visualQuery;
+    if (isFreshSearch && activeTab !== 'all') {
+      if (typeof e === 'string') setQuery(e);
+      setActiveTab('all');
+      return; // setActiveTab triggers useEffect which calls handleSearch again
+    }
+
     if (!finalQuery.trim() && !currentVisualQuery) return;
 
     setLoading(true);
@@ -451,6 +460,10 @@ export default function App() {
 
       const pineconeResults = data.results || [];
       setScoutKnowledge(data.scoutKnowledge || null);
+      if (data.scoutKnowledge) {
+        console.log(`🧠 Knowledge Panel: Sourced from ${data.scoutKnowledge.source}`);
+      }
+
       setTotalPages(data.totalPages || 1);
       setDictionary(data.dictionary || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
@@ -843,6 +856,7 @@ export default function App() {
             visualAnalysis={visualAnalysis}
             setImageQuery={setImageQuery}
             selectedImage={selectedImage}
+            selectedVideo={selectedVideo} // Pass to ResultsView
             setSelectedImage={setSelectedImage}
             aiRateLimited={aiRateLimited}
             scoutKnowledge={scoutKnowledge}
@@ -868,6 +882,13 @@ export default function App() {
             allResults={results} 
             onClose={() => setSelectedImage(null)} 
             onSelect={(img: any) => setSelectedImage(img)}
+            onResultClick={handleResultClick}
+          />
+        )}
+        {selectedVideo && ( // New: Video Detail View
+          <VideoDetailView
+            video={selectedVideo}
+            onClose={() => setSelectedVideo(null)}
             onResultClick={handleResultClick}
           />
         )}
@@ -1090,13 +1111,16 @@ function VisualMathDisplay({ problem, stage, image, analysis }: any) {
 function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
-
+  const isVideoUrl = (url: string) => url.includes('youtube.com/watch?v=') || url.includes('youtu.be/');
   // Group images by domain for the carousel
   const carouselImages = results.filter((res: any) => isImageUrl(res.url));
 
   const filteredResults = activeTab === 'images' 
     ? results.filter((res: any) => isImageUrl(res.url) || res.image)
     : results.filter((res: any) => !isImageUrl(res.url)); // Keep 'all' list focused on webpages, but results still contains images
+
+  const videoResults = results.filter((res: any) => res.is_video);
+
 
   // Group results by domain (simple grouping)
   const groupedResults: any[] = [];
@@ -1128,8 +1152,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       }
       processedDomains.add(groupKey);
     });
+  } else if (activeTab === 'videos') {
+    videoResults.forEach((res: SearchResult) => groupedResults.push({ type: 'single', result: res }));
   } else {
-    // For other tabs, don't group or use simple list
+    // For images and news tabs, don't group or use simple list
+    // Note: news tab results are already filtered by the backend
     filteredResults.forEach((res: SearchResult) => groupedResults.push({ type: 'single', result: res }));
   }
 
@@ -1186,7 +1213,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   <Mic size={18} />
                 </button>
                 <div className="w-px h-4 bg-slate-200 mx-1" />
-                <Search size={18} className="text-purple-600 cursor-pointer hover:scale-110 transition-transform" onClick={() => onSearch()} />
+                <Search size={18} className="text-purple-600 cursor-pointer hover:scale-110 transition-transform" onClick={(ev) => onSearch(ev)} />
               </div>
             </form>
             <AnimatePresence>
@@ -1222,7 +1249,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
         </div>
         <div className="px-4 md:px-8 lg:px-24 xl:px-[170px] max-w-[1700px] border-t border-slate-50 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-8 pt-4">
-            {['All', 'Images', 'News'].map(tab => (
+            {['All', 'Images', 'Videos', 'News'].map(tab => (
               <button key={tab} className={`pb-3 text-sm font-bold border-b-2 transition-all ${activeTab === tab.toLowerCase() ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-transparent hover:text-slate-700'}`} onClick={() => setActiveTab(tab.toLowerCase())}>{tab}</button>
             ))}
           </div>
@@ -1477,6 +1504,28 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 </div>
               </div>
             )}
+            
+            {/* Video Results Display */}
+            {activeTab === 'videos' && videoResults.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                {videoResults.map((res: any, idx: number) => (
+                  <div 
+                    key={res.id} 
+                    onClick={() => {
+                      setSelectedVideo(res);
+                      onResultClick(res.id, res.url, idx + 1);
+                    }} 
+                    className="group relative aspect-video bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
+                  >
+                    <img src={res.thumbnail_url || res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                      <span className="text-white text-sm font-medium truncate">{res.title}</span>
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><PlayCircle size={48} className="text-white/80" /></div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {loading ? (
               <div className="space-y-6">
@@ -1508,7 +1557,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
                         <ImageStrip 
-                          results={results} 
+                          results={results.filter((res: any) => res.image)} // Pass only image results
                           onMore={() => setActiveTab('images')} 
                           onImageClick={(img: any, pos: number) => { setSelectedImage(img); onResultClick?.(img.id, img.url, pos); }} 
                         />
@@ -1705,6 +1754,45 @@ function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[]
   );
 }
 
+// New VideoStrip component
+function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[], onMore: () => void, onVideoClick?: (vid: any, pos: number) => void }) {
+  const videosWithMeta = results.filter(r => r.is_video).slice(0, 8);
+  if (videosWithMeta.length < 3) return null;
+
+  return (
+    <div className="py-8 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="flex items-center justify-between mb-5 px-1">
+        <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Videos for {results[0]?.title.split(' ')[0] || 'your search'}</h2>
+        <button 
+          onClick={onMore} 
+          className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100"
+        >
+          View all <ChevronRight size={14} />
+        </button>
+      </div>
+      <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
+        {videosWithMeta.map((vid, idx) => (
+          <div key={vid.id} onClick={(e) => { e.preventDefault(); onVideoClick?.(vid, idx + 1); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
+            <div className="aspect-[16/9] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1 relative">
+              <img src={vid.thumbnail_url || vid.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={vid.title} />
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                <PlayCircle size={36} className="text-white/90" />
+              </div>
+            </div>
+            <div className="mt-2 text-[12px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{vid.title}</div>
+            <div className="mt-1 text-[10px] text-slate-400 line-clamp-1 flex items-center gap-1.5 font-bold uppercase tracking-wider">
+               {vid.source || vid.displayUrl.replace('www.', '')}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+
+
 function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOpen: (v: boolean) => void, isWhite?: boolean }) {
   const apps = [
     { name: 'Search', url: 'https://komu-search.streamlit.app/', icon: 'https://komuhost.vercel.app/favicon.ico' },
@@ -1845,7 +1933,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   );
 }
 
-function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick }: any) {
+function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, onVideoClick }: any) {
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -1936,6 +2024,17 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
                </div>
             )}
           </div>
+
+          {/* Play Video Button if it's a video result */}
+          {res.is_video && res.embed_url && (
+            <button 
+              onClick={() => onVideoClick?.(res)}
+              className="flex items-center gap-1.5 text-[11px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-full transition-all active:scale-95 border border-purple-100 mt-4"
+            >
+              <PlayCircle size={12} />
+              Watch Video
+            </button>
+          )}
 
           {/* Inline miniature strip */}
           {domainImages.length > 0 && (
@@ -2096,6 +2195,78 @@ function ImageDetailView({ image, allResults, onClose, onSelect, onResultClick }
     </motion.div>
   );
  }
+
+// New VideoDetailView component
+function VideoDetailView({ video, onClose, onResultClick }: any) {
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[2200] flex justify-end bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div 
+        initial={isMobile ? { y: '100%' } : { x: '100%' }}
+        animate={isMobile ? { y: 0 } : { x: 0 }}
+        exit={isMobile ? { y: '100%' } : { x: '100%' }}
+        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        className={`relative w-full md:w-[600px] lg:w-[800px] h-full bg-white shadow-2xl overflow-y-auto flex flex-col p-0`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between p-4 md:p-6">
+          <div className="flex items-center gap-3 overflow-hidden">
+            <img 
+               src={`https://www.google.com/s2/favicons?domain=${new URL(video.url).hostname}&sz=64`} 
+               className="w-6 h-6 rounded-full shrink-0" 
+            />
+            <span className="text-sm font-bold text-slate-500 truncate">{new URL(video.url).hostname.replace('www.', '')}</span>
+          </div>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-900 transition-all active:scale-95"
+          >
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 p-4 md:p-10">
+          {/* Embedded Video Player */}
+          {video.embed_url && (
+            <div className="aspect-video w-full bg-black rounded-3xl overflow-hidden border border-slate-100 mb-8">
+              <iframe
+                width="100%"
+                height="100%"
+                src={video.embed_url + "?autoplay=1"} // Autoplay when opened
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                title={video.title}
+              ></iframe>
+            </div>
+          )}
+
+          <div className="mb-10">
+            <h2 className="text-2xl md:text-3xl font-display font-medium text-slate-900 mb-4">{video.title}</h2>
+            <p className="text-slate-600 text-lg leading-relaxed mb-6">{video.snippet}</p>
+            <a 
+              onClick={() => onResultClick?.(video.id, video.url, 0)} // Position 0 for modal view, assuming it's a direct interaction
+              href={video.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-full font-bold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-100"
+            >
+              Watch on YouTube <ExternalLink size={16} />
+            </a>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
 
  function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any[], onClose: () => void, loading: boolean, refresh: () => void }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'queries' | 'performance'>('overview');

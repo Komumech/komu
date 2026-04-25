@@ -486,19 +486,29 @@ app.post('/api/search', async (req, res) => {
     let suggestKnowledgePanel = intentData?.is_entity || false;
     
     // --- KNOWLEDGE GRAPH LOOKUP (Redis) ---
-    const { topic, category } = extractKnowledgeIntent(finalQuery);
+    const nlpIntent = extractKnowledgeIntent(finalQuery);
+    const topic = intentData?.is_entity ? intentData.entity_name : nlpIntent.topic;
+    const category = nlpIntent.category;
+    
     let scoutKnowledge = null;
     if (topic) {
       const cleanCategory = sanitizeRedisKeyPart(category || 'general');
       const cleanTopic = sanitizeRedisKeyPart(topic);
       const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
 
-      console.log("🔍 Scout Memory: Looking up key:", redisKey);
-      scoutKnowledge = await redis.get(redisKey);
+      console.log(`🔍 [SCOUT MEMORY] Checking cache for: "${cleanTopic}"`);
+      const cached: any = await redis.get(redisKey);
       
-      if (!scoutKnowledge) {
-        // Asynchronously learn for next time
-        learnFromWiki(topic, category).catch(() => {});
+      if (cached) {
+        console.log(`✅ [MEMORY HIT] Found "${topic}" in Redis.`);
+        scoutKnowledge = { ...cached, source: "Redis Cache" };
+      } else {
+        console.log(`❌ [MEMORY MISS] Querying Wikipedia for "${topic}"...`);
+        const wikiData = await learnFromWiki(topic, category);
+        if (wikiData) {
+          console.log(`🌐 [LEARNING SUCCESS] Knowledge cached for "${topic}".`);
+          scoutKnowledge = { ...wikiData, source: "Wikipedia (Live)" };
+        }
       }
     }
 
@@ -563,7 +573,8 @@ app.post('/api/search', async (req, res) => {
     if (!vector) vector = Array(768).fill(0);
 
     let filter: any = {};
-    if (type === 'images') filter = { is_image: { "$eq": true } };
+    if (type === 'images') filter = { is_image: { "$eq": true } }; // Filter for images tab
+    if (type === 'videos') filter = { is_video: { "$eq": true } }; // Filter for videos tab
     // 'all' type now includes images by not having an explicit negative filter
 
     if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
@@ -737,6 +748,7 @@ app.post('/api/search', async (req, res) => {
     // --- SEGREGATION FOR TAB-SPECIFIC PAGINATION ---
     const webResults = reranked.filter(r => !r.is_image);
     const imageResults = reranked.filter(r => r.is_image);
+    const videoResults = reranked.filter(r => r.is_video);
 
     // Decide which pool to paginate based on the tab
     let poolToPaginate = webResults;
@@ -745,6 +757,8 @@ app.post('/api/search', async (req, res) => {
     } else if (type === 'news') {
       poolToPaginate = webResults;
     }
+    // If 'videos' tab is active, use videoResults
+    if (type === 'videos') poolToPaginate = videoResults;
 
     // Step 5: Diversity & Nesting Limit for Web Results (only if in 'all' or 'news' tab)
     let finalOrdered: any[] = [];
