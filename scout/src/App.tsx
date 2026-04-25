@@ -132,7 +132,7 @@ export default function App() {
   // SWITCH TAB SEARCH
   useEffect(() => {
     if (isSearching && query.trim()) {
-      handleSearch(query, 1);
+      handleSearch(undefined, 1);
     }
   }, [activeTab]);
 
