@@ -242,7 +242,8 @@ async function learnFromWiki(topic: string, category: string) {
     const [summary, mainImage] = await Promise.all([
       page.summary(),
       page.mainImage().catch(() => null)
-    ]);
+    ]); 
+    
 
     const wikiData = {
       title: topic,
@@ -485,19 +486,29 @@ app.post('/api/search', async (req, res) => {
     let suggestKnowledgePanel = intentData?.is_entity || false;
     
     // --- KNOWLEDGE GRAPH LOOKUP (Redis) ---
-    const { topic, category } = extractKnowledgeIntent(finalQuery);
+    const nlpIntent = extractKnowledgeIntent(finalQuery);
+    const topic = intentData?.is_entity ? intentData.entity_name : nlpIntent.topic;
+    const category = nlpIntent.category;
+    
     let scoutKnowledge = null;
     if (topic) {
       const cleanCategory = sanitizeRedisKeyPart(category || 'general');
       const cleanTopic = sanitizeRedisKeyPart(topic);
       const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
 
-      console.log("🔍 Scout Memory: Looking up key:", redisKey);
-      scoutKnowledge = await redis.get(redisKey);
+      console.log(`🔍 [SCOUT MEMORY] Checking cache for: "${cleanTopic}"`);
+      const cached: any = await redis.get(redisKey);
       
-      if (!scoutKnowledge) {
-        // Asynchronously learn for next time
-        learnFromWiki(topic, category).catch(() => {});
+      if (cached) {
+        console.log(`✅ [MEMORY HIT] Found "${topic}" in Redis.`);
+        scoutKnowledge = { ...cached, source: "Redis Cache" };
+      } else {
+        console.log(`❌ [MEMORY MISS] Querying Wikipedia for "${topic}"...`);
+        const wikiData = await learnFromWiki(topic, category);
+        if (wikiData) {
+          console.log(`🌐 [LEARNING SUCCESS] Knowledge cached for "${topic}".`);
+          scoutKnowledge = { ...wikiData, source: "Wikipedia (Live)" };
+        }
       }
     }
 
@@ -562,7 +573,8 @@ app.post('/api/search', async (req, res) => {
     if (!vector) vector = Array(768).fill(0);
 
     let filter: any = {};
-    if (type === 'images') filter = { is_image: { "$eq": true } };
+    if (type === 'images') filter = { is_image: { "$eq": true } }; // Filter for images tab
+    if (type === 'videos') filter = { is_video: { "$eq": true } }; // Filter for videos tab
     // 'all' type now includes images by not having an explicit negative filter
 
     if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
@@ -669,7 +681,7 @@ app.post('/api/search', async (req, res) => {
       const isRootDomain = dom.split('.').length <= 3 && !dom.includes('github') && !dom.includes('theverge'); 
       const boost = parseFloat(meta.popularity_boost) || 1.0;
 
-      return {
+      const res: any = {
         ...meta,
         id: match.id,
         score: match.score || 0,
@@ -685,6 +697,25 @@ app.post('/api/search', async (req, res) => {
         image: meta.image || meta.thumbnail || meta.ogImage || meta.imageUrl || null,
         sourceIcon: `https://icons.duckduckgo.com/ip3/${dom}.ico`,
       };
+
+      // --- AUTO-DETECT YOUTUBE VIDEOS ---
+      // Improved Regex for all YouTube formats (Shorts, Embeds, Standard)
+      const ytMatch = url.match(/(?:v=|v\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/i);
+      if (ytMatch) {
+        const videoId = ytMatch[1];
+        // High-Res Thumbnail Pattern
+        const thumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+        const fallback = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+        
+        res.is_video = true;
+        res.thumbnail_url = res.thumbnail_url || thumb;
+        res.embed_url = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0`;
+        res.image = res.image || thumb;
+        res.videoId = videoId;
+        res.source = res.source || "YouTube";
+      }
+
+      return res;
     });
 
     const reranked = allResults.sort((a, b) => {
@@ -736,6 +767,7 @@ app.post('/api/search', async (req, res) => {
     // --- SEGREGATION FOR TAB-SPECIFIC PAGINATION ---
     const webResults = reranked.filter(r => !r.is_image);
     const imageResults = reranked.filter(r => r.is_image);
+    const videoResults = reranked.filter(r => r.is_video);
 
     // Decide which pool to paginate based on the tab
     let poolToPaginate = webResults;
@@ -744,6 +776,8 @@ app.post('/api/search', async (req, res) => {
     } else if (type === 'news') {
       poolToPaginate = webResults;
     }
+    // If 'videos' tab is active, use videoResults
+    if (type === 'videos') poolToPaginate = videoResults;
 
     // Step 5: Diversity & Nesting Limit for Web Results (only if in 'all' or 'news' tab)
     let finalOrdered: any[] = [];
@@ -778,17 +812,19 @@ app.post('/api/search', async (req, res) => {
     const paginatedResults = finalOrdered.slice(skip, skip + pageSize);
     const totalPagesCount = Math.ceil(finalOrdered.length / pageSize);
 
-    // If 'all' tab, we mix in some top images so the ImageStrip always works on page 1
-    // We add them at the end of the results array for the frontend to handle
-    let resultsWithOptionalImages = paginatedResults;
-    if (type === 'all' && imageResults.length > 0) {
-       // Only add images to the payload if they aren't already represented 
-       // This ensures ResultsView has image data for the strip without breaking pagination
-       resultsWithOptionalImages = [...paginatedResults, ...imageResults.slice(0, 10)];
+    // If 'all' tab, we mix in top images and videos for the UI strips (avoiding duplicates)
+    let resultsWithOptionalMedia = [...paginatedResults];
+    if (type === 'all') {
+       const seenIds = new Set(paginatedResults.map(r => r.id));
+       
+       const extraImages = imageResults.filter(r => !seenIds.has(r.id)).slice(0, 10);
+       const extraVideos = videoResults.filter(r => !seenIds.has(r.id)).slice(0, 10);
+       
+       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...extraImages, ...extraVideos];
     }
 
     res.json({ 
-      results: resultsWithOptionalImages,
+      results: resultsWithOptionalMedia,
       scoutKnowledge,
       dictionary: dictionaryResult,
       suggestKnowledgePanel,
