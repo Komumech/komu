@@ -1599,7 +1599,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                         <ImageStrip 
                           results={results.filter((res: any) => res.image && !res.is_video)} 
                           onMore={() => setActiveTab('images')} 
-                          onImageClick={(img: any, pos: number) => { setSelectedImage(img); onResultClick?.(img.id, img.url, pos); }} 
+                          onImageClick={(img: any, pos?: number) => { setSelectedImage(img); onResultClick?.(img.id, img.url, pos || 0); }} 
                         />
                       )}
 
@@ -1762,7 +1762,7 @@ function QuickSummary({ text }: { text: string }) {
   );
 }
 
-function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[], onMore: () => void, onImageClick?: (img: any, pos: number) => void }) {
+function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[], onMore: () => void, onImageClick?: (img: any, pos?: number) => void }) {
   const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
   if (imagesWithMeta.length < 3) return null;
 
@@ -1795,15 +1795,14 @@ function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[]
 }
 
 // New VideoStrip component
-function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[], onMore: () => void, onVideoClick?: (vid: any, pos: number) => void }) {
-  const videosWithMeta = results.filter(r => r.is_video).slice(0, 8);
-  const videosWithMeta = results.filter(r => r.is_video).slice(0, 4);
+function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[], onMore: () => void, onVideoClick?: (vid: any, pos?: number) => void }) {
+  const videosWithMeta = results.filter((r: any) => r.is_video).slice(0, 8);
   if (videosWithMeta.length < 1) return null;
 
   return (
     <div className="py-8 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between mb-5 px-1">
-        <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Videos for {results[0]?.title.split(' ')[0] || 'your search'}</h2>
+        <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Videos</h2>
         <button 
           onClick={onMore} 
           className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100"
@@ -1812,51 +1811,28 @@ function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[]
         </button>
       </div>
       <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
-    <div className="py-6 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <h2 className="text-xl font-display font-medium text-slate-900 mb-6 px-1">Videos</h2>
-      <div className="space-y-6">
-        {videosWithMeta.map((vid, idx) => (
-          <div key={vid.id} onClick={(e) => { e.preventDefault(); onVideoClick?.(vid, idx + 1); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
-            <div className="aspect-[16/9] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1 relative">
+        {videosWithMeta.map((vid: any, idx: number) => (
+          <div key={vid.id} onClick={() => onVideoClick?.(vid, idx + 1)} className="shrink-0 w-64 group snap-start cursor-pointer">
+            <div className="aspect-video rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1 relative">
               <img src={vid.thumbnail_url || vid.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={vid.title} />
-              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
-                <PlayCircle size={36} className="text-white/90" />
-          <div key={vid.id} className="flex gap-4 group cursor-pointer" onClick={() => onVideoClick?.(vid, idx + 1)}>
-            <div className="relative shrink-0 w-[140px] md:w-[180px] aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-100 shadow-sm">
-              <img src={vid.thumbnail_url || vid.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
               {vid.duration && (
-                 <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md backdrop-blur-md">
-                    {vid.duration}
-                 </div>
+                <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md backdrop-blur-md">
+                  {vid.duration}
+                </div>
               )}
               <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors">
-                 <div className="w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-red-600 shadow-xl scale-90 group-hover:scale-100 transition-transform">
-                    <PlayCircle fill="currentColor" size={24} className="text-red-600" />
-                 </div>
+                <div className="w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-red-600 shadow-xl scale-90 group-hover:scale-100 transition-transform">
+                  <PlayCircle fill="currentColor" size={24} className="text-red-600" />
+                </div>
               </div>
             </div>
-            <div className="mt-2 text-[12px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{vid.title}</div>
-            <div className="mt-1 text-[10px] text-slate-400 line-clamp-1 flex items-center gap-1.5 font-bold uppercase tracking-wider">
-               {vid.source || vid.displayUrl.replace('www.', '')}
-            <div className="flex-1 min-w-0">
-               <h4 className="text-[17px] font-display font-medium text-[#1a0dab] group-hover:underline line-clamp-2 leading-tight mb-1">{vid.title}</h4>
-               <div className="flex items-center gap-1 text-[13px] text-slate-500 font-medium">
-                  <span>{vid.source}</span>
-                  {vid.author && (<span>· {vid.author}</span>)}
-               </div>
-               <div className="text-[12px] text-slate-400 mt-0.5">
-                  {vid.timestamp ? new Date(vid.timestamp).toLocaleDateString('en-GB', { day: 'j', month: 'short', year: 'numeric' }) : 'Recent'}
-               </div>
-               <p className="text-[13px] text-slate-600 line-clamp-2 mt-2 leading-relaxed hidden md:block">
-                  {vid.snippet}
-               </p>
+            <div className="mt-2 text-[14px] font-display font-medium text-[#1a0dab] line-clamp-2 group-hover:underline">{vid.title}</div>
+            <div className="mt-1 text-[12px] text-slate-500 line-clamp-1 flex items-center gap-1.5 font-medium">
+               {vid.source || vid.displayUrl?.replace('www.', '')}
             </div>
           </div>
         ))}
       </div>
-      <button onClick={onMore} className="w-full mt-6 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
-        View all <ChevronRight size={16} />
-      </button>
     </div>
   );
 }
