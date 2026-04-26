@@ -38,6 +38,7 @@ session = requests.Session()
 LOG_FILE = "indexed_sites.txt"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
+IMAGE_DOMAIN_LIMIT = 15 # 📸 Higher limit for more visual coverage
 BLACKLIST = [
   "wikipedia.org",
   "wikimedia.org",
@@ -82,6 +83,12 @@ BLACKLIST = [
   "play.google.com"
   ]
 
+# --- IMAGE FILTERING ---
+UI_IMAGE_KEYWORDS = [
+    "icon", "avatar", "nav", "button", "spacer", "pixel", 
+    "loading", "ad", "advertisement", "search", "menu"
+]
+
 # --- DICTIONARY & PHRASE SEEDS FOR AUTONOMY ---
 POPULAR_PREFIXES = [
     "how to", "best", "future of", "trends in", "guide to", "latest", 
@@ -117,11 +124,23 @@ def get_autonomous_seeds(count=5):
     return final_seeds
 
 SEARCH_TOPICS = [ 
-"https://komunotes.vercel.app/",
-"https://komumech.vercel.app/",
-"https://komucalendar.vercel.app/",
-"https://komuthemedashboard.vercel.app/",
-"https://komu-t8i7.vercel.app/",
+"https://komunotes.vercel.app",
+"https://komumech.vercel.app",
+"https://komucalendar.vercel.app",
+"https://komuthemedashboard.vercel.app",
+"https://komu-t8i7.vercel.app",
+"https://www.infinixmobility.com/",
+"https://www.mi.com/ng/product-list",
+"https://www.tecno-mobile.com",
+"https://www.pexels.com,"
+"https://chatgpt.com/",
+"https://pixabay.com"
+"https://blog.google/products-and-platforms/devices/pixel/",
+"https://support.google.com/pixelphone/?hl=en#topic=7078250",
+"https://www.ldoceonline.com/dictionary/pixel",
+"https://store.google.com/us/category/phones?hl=en-US",
+"https://www.apple.com/ng/iphone/",
+"https://shop.mtn.ng/?utm_source=Search&utm_medium=Text&utm_campaign=MTN_eShop_Campaign&gad_source=1&gad_campaignid=23733215514&gbraid=0AAAAADJ0y-2sXx8txlVq8bbdlx8HUN4Xe&gclid=Cj0KCQjw77bPBhC_ARIsAGAjjV-EpsCJEpWX9uMPSZE973qxiEZwwZ5DbRnZItXEi7J7zTT3yjKopPcaAvceEALw_wcB",
 "Komumech",
 "Gmail",
 "Chatgpt",
@@ -184,6 +203,197 @@ SEARCH_TOPICS = [
 "https://proton.me/",
 "https://haveibeenpwned.com/",
 "https://brave.com/",
+"https://www.kiplinger.com/",
+"https://www.morningstar.com/",
+"https://www.tradingview.com/",
+"https://www.coinmarketcap.com/",
+"https://www.coindesk.com/",
+"https://www.realtor.com/",
+"https://www.apartments.com/",
+"https://www.ziprecruiter.com/",
+"https://www.simplyhired.com/",
+"https://www.careerbuilder.com/",
+"https://www.dice.com/",
+"https://www.theladders.com/",
+"https://www.crunchbase.com/",
+"https://www.owler.com/",
+"https://www.builtwith.com/",
+"https://www.similarweb.com/",
+"https://www.semrush.com/",
+"https://www.spyfu.com/",
+"https://www.ubersuggest.com/",
+"https://www.moz.com/",
+"https://www.ahrefs.com/",
+"https://www.buffer.com/",
+"https://www.hootsuite.com/",
+"https://www.sproutsocial.com/",
+"https://www.mailchimp.com/",
+"https://www.constantcontact.com/",
+"https://www.sendgrid.com/",
+"https://www.twilio.com/",
+"https://www.stripe.com/",
+"https://www.paypal.com/",
+"https://www.square.com/",
+"https://www.shopify.com/",
+"https://www.magento.com/",
+"https://www.bigcommerce.com/",
+"https://www.woocommerce.com/",
+"https://www.wix.com/",
+"https://www.squarespace.com/",
+"https://www.weebly.com/",
+"https://www.jimdo.com/",
+"https://www.godaddy.com/",
+"https://www.bluehost.com/",
+"https://www.siteground.com/",
+"https://www.dreamhost.com/",
+"https://www.hostgator.com/",
+"https://www.a2hosting.com/",
+"https://www.inmotionhosting.com/",
+"https://www.wpengine.com/",
+"https://www.kinsta.com/",
+"https://www.cloudflare.com/",
+"https://www.akamai.com/",
+"https://www.fastly.com/",
+"https://www.linode.com/",
+"https://www.vultr.com/",
+"https://www.mongodb.com/",
+"https://www.oracle.com/",
+"https://www.sap.com/",
+"https://www.salesforce.com/",
+"https://www.hubspot.com/",
+"https://www.zendesk.com/",
+"https://www.intercom.com/",
+"https://www.drift.com/",
+"https://www.g2.com/",
+"https://www.capterra.com/",
+"https://www.trustpilot.com/",
+"https://www.yelp.com/",
+"https://www.vrbo.com/",
+"https://www.hotels.com/",
+"https://www.priceline.com/",
+"https://www.orbitz.com/",
+"https://www.travelocity.com/",
+"https://www.agoda.com/",
+"https://www.trivago.com/",
+"https://www.hostelworld.com/",
+"https://www.couchsurfing.com/",
+"https://www.viamichelin.com/",
+"https://www.rome2rio.com/",
+"https://www.google.com/flights",
+"https://www.uber.com/",
+"https://www.lyft.com/",
+"https://www.blablacar.com/",
+"https://www.turo.com/",
+"https://www.getaround.com/",
+"https://www.zipcar.com/",
+"https://www.enterprise.com/",
+"https://www.hertz.com/",
+"https://www.avis.com/",
+"https://www.budget.com/",
+"https://www.sixt.com/",
+"https://www.thrifty.com/",
+"https://www.dollar.com/",
+"https://www.nationalcar.com/",
+"https://www.alamo.com/",
+"https://www.europcar.com/",
+"https://www.momondo.com/",
+"https://www.cheapflights.com/",
+"https://www.kiwi.com/",
+"https://www.bing.com/maps",
+"https://www.openstreetmap.org/",
+"https://www.waze.com/",
+"https://www.mapquest.com/",
+"https://www.citymapper.com/",
+"https://www.transitapp.com/",
+"https://www.moovitapp.com/",
+"https://www.strava.com/",
+"https://www.komoot.com/",
+"https://www.alltrails.com/",
+"https://www.trailforks.com/",
+"https://www.mtbproject.com/",
+"https://www.hikingproject.com/",
+"https://www.powderproject.com/",
+"https://www.mountainproject.com/",
+"https://www.adventureprojects.net/",
+ "https://github.com/",
+"https://stackoverflow.com/",
+"https://www.codecademy.com/",
+"https://news.ycombinator.com/",
+"https://leetcode.com/",
+"https://codepen.io/",
+"https://www.freecodecamp.org/",
+"https://developer.mozilla.org/",
+"https://www.khanacademy.org/",
+"https://www.coursera.org/",
+"https://www.edx.org/",
+"https://www.jstor.org/",
+"https://quizlet.com/",
+"https://www.udemy.com/",
+"https://scholar.google.com/",
+"https://www.ted.com/",
+"https://www.mayoclinic.org/",
+"https://www.webmd.com/",
+"https://www.myfitnesspal.com/",
+"https://pubmed.ncbi.nlm.nih.gov/",
+"https://www.healthline.com/",
+"https://www.nih.gov/",
+"https://www.who.int/",
+"https://www.reuters.com/",
+"https://apnews.com/",
+"https://www.bbc.com/news",
+"https://www.npr.org/",
+"https://www.wsj.com/",
+"https://www.theguardian.com/",
+"https://www.aljazeera.com/",
+"https://www.investopedia.com/",
+"https://www.bloomberg.com/",
+"https://www.nerdwallet.com/",
+"https://finance.yahoo.com/",
+"https://www.forbes.com/",
+"https://www.cnbc.com/",
+"https://www.tripadvisor.com/",
+"https://www.booking.com/",
+"https://www.airbnb.com/",
+"https://www.skyscanner.net/",
+"https://www.expedia.com/",
+"https://www.kayak.com/",
+"https://www.lonelyplanet.com/",
+"https://www.ifixit.com/",
+"https://www.instructables.com/",
+"https://www.familyhandyman.com/",
+"https://www.houzz.com/",
+"https://www.thespruce.com/",
+"https://www.allrecipes.com/",
+"https://www.seriouseats.com/",
+"https://www.foodnetwork.com/",
+"https://tasty.co/",
+"https://www.epicurious.com/",
+"https://www.nasa.gov/",
+"https://www.nature.com/",
+"https://www.scientificamerican.com/",
+"https://www.nationalgeographic.com/",
+"https://www.smithsonianmag.com/",
+"https://www.behance.net/",
+"https://dribbble.com/",
+"https://www.deviantart.com/",
+"https://www.artstation.com/",
+"https://trello.com/",
+"https://slack.com/",
+"https://notion.so/",
+"https://www.wolframalpha.com/",
+"https://asana.com/",
+"https://zoom.us/",
+"https://www.wikipedia.org/",
+"https://archive.org/",
+"https://www.gutenberg.org/",
+"https://openlibrary.org/",
+"https://www.merriam-webster.com/",
+"https://www.dictionary.com/",
+"https://www.imdb.com/",
+"https://www.rottentomatoes.com/",
+"https://www.goodreads.com/",
+"https://www.ign.com/",
+"https://www.gamespot.com/",
 "https://www.theatlantic.com/",
 "https://www.newyorker.com/",
 "https://www.ft.com/",
@@ -419,198 +629,8 @@ SEARCH_TOPICS = [
 "https://hbr.org/",
 "https://www.inc.com/",
 "https://www.entrepreneur.com/",
-"https://www.thebalance.com/",
-"https://www.kiplinger.com/",
-"https://www.morningstar.com/",
-"https://www.tradingview.com/",
-"https://www.coinmarketcap.com/",
-"https://www.coindesk.com/",
-"https://www.realtor.com/",
-"https://www.apartments.com/",
-"https://www.ziprecruiter.com/",
-"https://www.simplyhired.com/",
-"https://www.careerbuilder.com/",
-"https://www.dice.com/",
-"https://www.theladders.com/",
-"https://www.crunchbase.com/",
-"https://www.owler.com/",
-"https://www.builtwith.com/",
-"https://www.similarweb.com/",
-"https://www.semrush.com/",
-"https://www.spyfu.com/",
-"https://www.ubersuggest.com/",
-"https://www.moz.com/",
-"https://www.ahrefs.com/",
-"https://www.buffer.com/",
-"https://www.hootsuite.com/",
-"https://www.sproutsocial.com/",
-"https://www.mailchimp.com/",
-"https://www.constantcontact.com/",
-"https://www.sendgrid.com/",
-"https://www.twilio.com/",
-"https://www.stripe.com/",
-"https://www.paypal.com/",
-"https://www.square.com/",
-"https://www.shopify.com/",
-"https://www.magento.com/",
-"https://www.bigcommerce.com/",
-"https://www.woocommerce.com/",
-"https://www.wix.com/",
-"https://www.squarespace.com/",
-"https://www.weebly.com/",
-"https://www.jimdo.com/",
-"https://www.godaddy.com/",
-"https://www.bluehost.com/",
-"https://www.siteground.com/",
-"https://www.dreamhost.com/",
-"https://www.hostgator.com/",
-"https://www.a2hosting.com/",
-"https://www.inmotionhosting.com/",
-"https://www.wpengine.com/",
-"https://www.kinsta.com/",
-"https://www.cloudflare.com/",
-"https://www.akamai.com/",
-"https://www.fastly.com/",
-"https://www.linode.com/",
-"https://www.vultr.com/",
-"https://www.mongodb.com/",
-"https://www.oracle.com/",
-"https://www.sap.com/",
-"https://www.salesforce.com/",
-"https://www.hubspot.com/",
-"https://www.zendesk.com/",
-"https://www.intercom.com/",
-"https://www.drift.com/",
-"https://www.g2.com/",
-"https://www.capterra.com/",
-"https://www.trustpilot.com/",
-"https://www.yelp.com/",
-"https://www.vrbo.com/",
-"https://www.hotels.com/",
-"https://www.priceline.com/",
-"https://www.orbitz.com/",
-"https://www.travelocity.com/",
-"https://www.agoda.com/",
-"https://www.trivago.com/",
-"https://www.hostelworld.com/",
-"https://www.couchsurfing.com/",
-"https://www.viamichelin.com/",
-"https://www.rome2rio.com/",
-"https://www.google.com/flights",
-"https://www.uber.com/",
-"https://www.lyft.com/",
-"https://www.blablacar.com/",
-"https://www.turo.com/",
-"https://www.getaround.com/",
-"https://www.zipcar.com/",
-"https://www.enterprise.com/",
-"https://www.hertz.com/",
-"https://www.avis.com/",
-"https://www.budget.com/",
-"https://www.sixt.com/",
-"https://www.thrifty.com/",
-"https://www.dollar.com/",
-"https://www.nationalcar.com/",
-"https://www.alamo.com/",
-"https://www.europcar.com/",
-"https://www.momondo.com/",
-"https://www.cheapflights.com/",
-"https://www.kiwi.com/",
-"https://www.bing.com/maps",
-"https://www.openstreetmap.org/",
-"https://www.waze.com/",
-"https://www.mapquest.com/",
-"https://www.citymapper.com/",
-"https://www.transitapp.com/",
-"https://www.moovitapp.com/",
-"https://www.strava.com/",
-"https://www.komoot.com/",
-"https://www.alltrails.com/",
-"https://www.trailforks.com/",
-"https://www.mtbproject.com/",
-"https://www.hikingproject.com/",
-"https://www.powderproject.com/",
-"https://www.mountainproject.com/",
-"https://www.adventureprojects.net/",
- "https://github.com/",
-"https://stackoverflow.com/",
-"https://www.codecademy.com/",
-"https://news.ycombinator.com/",
-"https://leetcode.com/",
-"https://codepen.io/",
-"https://www.freecodecamp.org/",
-"https://developer.mozilla.org/",
-"https://www.khanacademy.org/",
-"https://www.coursera.org/",
-"https://www.edx.org/",
-"https://www.jstor.org/",
-"https://quizlet.com/",
-"https://www.udemy.com/",
-"https://scholar.google.com/",
-"https://www.ted.com/",
-"https://www.mayoclinic.org/",
-"https://www.webmd.com/",
-"https://www.myfitnesspal.com/",
-"https://pubmed.ncbi.nlm.nih.gov/",
-"https://www.healthline.com/",
-"https://www.nih.gov/",
-"https://www.who.int/",
-"https://www.reuters.com/",
-"https://apnews.com/",
-"https://www.bbc.com/news",
-"https://www.npr.org/",
-"https://www.wsj.com/",
-"https://www.theguardian.com/",
-"https://www.aljazeera.com/",
-"https://www.investopedia.com/",
-"https://www.bloomberg.com/",
-"https://www.nerdwallet.com/",
-"https://finance.yahoo.com/",
-"https://www.forbes.com/",
-"https://www.cnbc.com/",
-"https://www.tripadvisor.com/",
-"https://www.booking.com/",
-"https://www.airbnb.com/",
-"https://www.skyscanner.net/",
-"https://www.expedia.com/",
-"https://www.kayak.com/",
-"https://www.lonelyplanet.com/",
-"https://www.ifixit.com/",
-"https://www.instructables.com/",
-"https://www.familyhandyman.com/",
-"https://www.houzz.com/",
-"https://www.thespruce.com/",
-"https://www.allrecipes.com/",
-"https://www.seriouseats.com/",
-"https://www.foodnetwork.com/",
-"https://tasty.co/",
-"https://www.epicurious.com/",
-"https://www.nasa.gov/",
-"https://www.nature.com/",
-"https://www.scientificamerican.com/",
-"https://www.nationalgeographic.com/",
-"https://www.smithsonianmag.com/",
-"https://www.behance.net/",
-"https://dribbble.com/",
-"https://www.deviantart.com/",
-"https://www.artstation.com/",
-"https://trello.com/",
-"https://slack.com/",
-"https://notion.so/",
-"https://www.wolframalpha.com/",
-"https://asana.com/",
-"https://zoom.us/",
-"https://www.wikipedia.org/",
-"https://archive.org/",
-"https://www.gutenberg.org/",
-"https://openlibrary.org/",
-"https://www.merriam-webster.com/",
-"https://www.dictionary.com/",
-"https://www.imdb.com/",
-"https://www.rottentomatoes.com/",
-"https://www.goodreads.com/",
-"https://www.ign.com/",
-"https://www.gamespot.com/"
+"https://www.thebalance.com/"
+
 ]
 
 # --- INIT ENGINES ---
@@ -725,6 +745,13 @@ def index_to_pinecone(url, content, domain, is_image=False, alt_text="", t_name=
         tqdm.write(f"❌ [{t_name}] Pinecone Error: {str(e)[:100]}")
         return False
 
+def is_useful_image(img_url, alt_text):
+    """Filters out UI junk like logos and icons to find real content."""
+    u, a = img_url.lower(), alt_text.lower()
+    if any(k in u for k in UI_IMAGE_KEYWORDS): return False
+    if any(k in a for k in UI_IMAGE_KEYWORDS): return False
+    return True
+
 def crawler_worker():
     global active_workers
     t_name = threading.current_thread().name
@@ -757,27 +784,67 @@ def crawler_worker():
             resp = session.get(url, headers=headers, timeout=12, verify=False)
 
             if resp.status_code == 200:
-                # --- IMAGE INDEXING: Max 3 per site, requiring Alt Text ---
+                # --- IMAGE INDEXING: Refined & Deep logic ---
                 try:
                     soup = BeautifulSoup(resp.text, 'html.parser')
-                    for img in soup.find_all('img', alt=True):
-                        alt_text = img.get('alt', '').strip()
-                        src = img.get('src', '')
-                        # Only index if alt text is meaningful (avoid icons/spacers)
-                        if len(alt_text) > 5 and src:
+                    
+                    # 1. First, try to index the OpenGraph image (the most "useful" one)
+                    og_match = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\'](.*?)["\']', resp.text, re.I)
+                    if og_match:
+                        og_url = urljoin(url, og_match.group(1)).split('?')[0].rstrip('/')
+                        # Get site title as alt text for the OG image
+                        site_title = soup.title.string if soup.title else domain
+                        if og_url not in visited:
+                            if index_to_pinecone(og_url, None, domain, is_image=True, alt_text=f"Featured image for {site_title}", t_name=t_name):
+                                with data_lock:
+                                    visited.add(og_url)
+                                    domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
+
+                    # 2. Detect background images from style attributes or inline CSS
+                    bg_matches = re.findall(r'background-image:\s*url\(["\']?(.*?\.(?:jpg|jpeg|png|webp|avif))["\']?\)', resp.text, re.I)
+                    for bg_url in bg_matches:
+                        full_bg_url = urljoin(url, bg_url).split('?')[0].rstrip('/')
+                        if full_bg_url not in visited and is_useful_image(full_bg_url, ""):
+                            with data_lock:
+                                current_count = domain_image_counts.get(domain, 0)
+                                if current_count < IMAGE_DOMAIN_LIMIT:
+                                    if index_to_pinecone(full_bg_url, None, domain, is_image=True, alt_text=f"Background visual from {domain}", t_name=t_name):
+                                        visited.add(full_bg_url)
+                                        domain_image_counts[domain] = current_count + 1
+                                        tqdm.write(f"🖼️ [{t_name}] BG IMAGE INDEXED: {full_bg_url}")
+
+                    # 3. Extract more images from content containers (articles, logos, banners)
+                    # Priority containers where "useful" images usually live
+                    content_areas = soup.find_all(['article', 'main', 'section', 'header', 'footer'])
+                    search_targets = content_areas if content_areas else [soup]
+                    
+                    found_images = []
+                    for target in search_targets:
+                        found_images.extend(target.find_all(['img', 'source']))
+
+                    for img in found_images:
+                        alt_text = (img.get('alt') or img.get('title') or "").strip()
+                        src = img.get('src') or img.get('data-src') or img.get('srcset', '').split(' ')[0]
+                        
+                        # Heuristic: Allow logos (shorter alt text ok) or descriptive content images
+                        is_logo = "logo" in (src or "").lower() or "logo" in alt_text.lower()
+                        is_descriptive = len(alt_text) > 8
+                        
+                        if (is_descriptive or is_logo) and src:
                             img_url = urljoin(url, src).split('?')[0].rstrip('/')
-                            if any(img_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp']):
-                                if not any(bad in img_url for bad in BLACKLIST):
+                            # Check extensions and blacklist
+                            if any(img_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp', '.avif']):
+                                if not any(bad in img_url for bad in BLACKLIST) and is_useful_image(img_url, alt_text):
                                     with data_lock:
-                                        needs_indexing = domain_image_counts.get(domain, 0) < 3 and img_url not in visited
+                                        current_count = domain_image_counts.get(domain, 0)
+                                        needs_indexing = current_count < IMAGE_DOMAIN_LIMIT and img_url not in visited
                                     
                                     if needs_indexing:
                                         try:
-                                            # Using None for img_obj because MPNet only needs the alt_text
                                             if index_to_pinecone(img_url, None, domain, is_image=True, alt_text=alt_text, t_name=t_name):
                                                 with data_lock:
                                                     visited.add(img_url)
-                                                    domain_image_counts[domain] = domain_image_counts.get(domain, 0) + 1
+                                                    domain_image_counts[domain] = current_count + 1
                                                     tqdm.write(f"🖼️ [{t_name}] IMAGE INDEXED: {img_url}")
                                         except Exception: pass
                 except Exception: pass

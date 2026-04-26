@@ -1131,7 +1131,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   // Group results by domain (simple grouping)
   const groupedResults: any[] = [];
   const processedDomains = new Set();
-  const maxNested = 3; // Nesting limit
+  const maxNested = 2; // Nesting limit
   
   if (activeTab === 'all') {
     results.filter((res: any) => !isImageUrl(res.url)).forEach((res: any) => {

@@ -463,7 +463,7 @@ app.post('/api/feedback', async (req, res) => {
 app.post('/api/search', async (req, res) => {
   try {
     const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
-    const pageSize = 40;
+    const pageSize = 15;
     const skip = (page - 1) * pageSize;
     
     const pc = getPinecone();
