@@ -101,63 +101,118 @@ def is_high_quality_domain(url):
 def get_seeds_robust(queries):
     seeds = []
     try:
-        with DDGS() as ddgs:
-            for q in queries:
-                tqdm.write(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Seed Scouting: {q}")
-                results = ddgs.text(q, max_results=5)
-                for r in results: seeds.append(r['href'])
-                time.sleep(1.2) # Be polite
+        for q in queries:
+            tqdm.write(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Scouting: {q}")
+            try:
+                with DDGS() as ddgs:
+                    # Try specialized video search first
+                    results = list(ddgs.videos(q, max_results=10))
+                    if results:
+                        for r in results:
+                            url = r.get('content') or r.get('url')
+                            if url: seeds.append(url)
+                    else:
+                        # Fallback to text search with site filter
+                        tqdm.write(f"  ↳ Video search empty, trying text-fallback for: {q}")
+                        txt_results = list(ddgs.text(f"{q} site:youtube.com", max_results=10))
+                        for r in txt_results: seeds.append(r['href'])
+            except Exception as inner_e:
+                tqdm.write(f"  ⚠️ Search for '{q}' failed: {str(inner_e)[:50]}")
+            time.sleep(2.0) # Longer sleep to avoid rate limits
     except Exception as e:
         tqdm.write(f"⚠️ DDGS seed generation failed: {e}")
+
+    if not seeds:
+        tqdm.write("🆘 All search methods failed. Injecting emergency YouTube seeds...")
+        seeds = [
+            "https://www.youtube.com/c/GoogleDevelopers/videos",
+            "https://www.youtube.com/user/Computerphile/videos",
+            "https://www.youtube.com/c/Fireship/videos",
+            "https://www.youtube.com/c/Veritasium/videos"
+        ]
     return list(set(seeds))
 
-def extract_youtube_video_info(page_url, html_content):
+def get_video_detailed_metadata(url):
+    """Visits the video page to extract duration and author name."""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0'}
+        resp = session.get(url, headers=headers, timeout=5, verify=False)
+        if resp.status_code != 200: return None, None
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        duration = None
+        author = None
+
+        # YouTube Specific meta tags
+        duration_meta = soup.find('meta', itemprop='duration')
+        if duration_meta:
+            # Convert PT17M24S to 17:24
+            pt = duration_meta.get('content', '')
+            matches = re.findall(r'(\d+)', pt)
+            if len(matches) == 2: duration = f"{matches[0]}:{matches[1].zfill(2)}"
+            elif len(matches) == 3: duration = f"{matches[0]}:{matches[1].zfill(2)}:{matches[2].zfill(2)}"
+
+        author_meta = soup.find('link', itemprop='name') or soup.find('meta', property='og:site_name')
+        if author_meta: author = author_meta.get('content') or author_meta.get('href')
+
+        return duration, author
+    except: return None, None
+
+def extract_video_info(page_url, html_content):
     videos_found = []
     soup = BeautifulSoup(html_content, 'html.parser')
 
-    # Find YouTube links in <a> tags
-    for a_tag in soup.find_all('a', href=True):
-        href = a_tag['href']
+    def process_url(href, link_text=""):
+        if href in visited_video_ids: return None
+        
         video_id = None
-
-        # Standard YouTube watch URL
-        match_watch = re.search(r'(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})', href)
+        match_watch = re.search(r'(?:v=|v\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})', href)
         if match_watch:
             video_id = match_watch.group(1)
         
-        if video_id and video_id not in visited_video_ids:
-            youtube_url = f"https://www.youtube.com/watch?v={video_id}"
-            embed_url = f"https://www.youtube.com/embed/{video_id}"
-            # YouTube HD Thumbnail Pattern
-            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+        is_direct_file = re.search(r'\.(mp4|webm|ogg|mov)$', href.lower())
 
-            # Try to get title from the link text or surrounding elements
-            title = a_tag.get_text(strip=True)
+        if video_id or is_direct_file:
+            video_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else urljoin(page_url, href)
+            
+            # Fetch deep metadata (Author, Duration) for browser playability
+            duration, author = None, None
+            if video_id:
+                duration, author = get_video_detailed_metadata(video_url)
+
+            embed_url = f"https://www.youtube.com/embed/{video_id}" if video_id else video_url
+            thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg" if video_id else ""
+            
+            title = link_text.strip()
             if not title or len(title) < 5:
-                # Fallback to page title or og:title if link text is poor
                 og_title = soup.find('meta', property='og:title')
-                if og_title and og_title.get('content'):
-                    title = og_title['content']
-                elif soup.title and soup.title.string:
-                    title = soup.title.string
-                else:
-                    title = f"YouTube Video from {urlparse(page_url).netloc}" # Generic fallback
+                title = og_title.get('content') if og_title else (soup.title.string if soup.title else f"Video from {urlparse(page_url).netloc}")
 
-            # Get description from meta tags if available
             desc_tag = soup.find('meta', property='og:description') or soup.find('meta', name='description')
             description = desc_tag.get('content') if desc_tag else ""
 
-            videos_found.append({
-                'title': title,
-                'youtube_url': youtube_url,
+            return {
+                'title': title or "Untitled Video",
+                'url': video_url,
                 'embed_url': embed_url,
                 'thumbnail_url': thumbnail_url,
-                'video_id': video_id,
+                'duration': duration,
+                'author': author,
                 'description': description,
+                'is_youtube': bool(video_id),
+                'video_id': video_id,
                 'timestamp': datetime.now().isoformat(),
-                'page_url': page_url # Store the page where it was found
-            })
-            visited_video_ids.add(video_id) # Mark as visited to avoid duplicates
+                'page_url': page_url
+            }
+        return None
+
+    # Check if page itself is a video, then scan <a> tags
+    self_data = process_url(page_url)
+    if self_data: videos_found.append(self_data); visited_video_ids.add(page_url)
+
+    for a_tag in soup.find_all('a', href=True):
+        data = process_url(a_tag['href'], a_tag.get_text(strip=True))
+        if data: videos_found.append(data); visited_video_ids.add(a_tag['href'])
 
     return videos_found
 
@@ -168,18 +223,20 @@ def index_video_to_pinecone(video_data, t_name="Unknown"):
         vector = model.encode(input_text).tolist()
         
         # Use video_id as Pinecone ID for uniqueness within the video namespace
-        v_id = f"youtube-{video_data['video_id']}"
+        v_id = f"youtube-{video_data['video_id']}" if video_data.get('video_id') else f"video-{re.sub(r'\W+', '_', video_data['url'])[:50]}"
         
         metadata = {
-            "url": video_data['youtube_url'], 
+            "url": video_data['url'], 
             "title": video_data['title'],
             "embed_url": video_data['embed_url'],
             "thumbnail_url": video_data['thumbnail_url'],
-            "source": "YouTube",
-            "description": video_data.get('description', ''),
+            "duration": video_data.get('duration'),
+            "author": video_data.get('author'),
+            "source": "YouTube" if video_data['is_youtube'] else urlparse(video_data['url']).netloc,
+            "snippet": video_data.get('description', '')[:500], # Truncate description for Pinecone metadata
             "timestamp": video_data.get('timestamp'),
             "is_video": True,
-            "page_found_on": video_data['page_url'] # Useful for debugging/context
+            "page_found_on": video_data['page_url']
         }
 
         pc_index.upsert(
@@ -188,7 +245,7 @@ def index_video_to_pinecone(video_data, t_name="Unknown"):
         )
         return True
     except Exception as e:
-        tqdm.write(f"❌ [{t_name}] Pinecone Video Indexing Error for {video_data.get('youtube_url', 'N/A')}: {str(e)[:100]}")
+        tqdm.write(f"❌ [{t_name}] Pinecone Video Indexing Error for {video_data.get('url', 'N/A')}: {str(e)[:100]}")
         return False
 
 def crawler_worker():
@@ -217,13 +274,13 @@ def crawler_worker():
             
             if resp.status_code == 200:
                 # Extract and index YouTube videos
-                videos = extract_youtube_video_info(clean_url, resp.text)
+                videos = extract_video_info(clean_url, resp.text)
                 for video in videos:
                     if index_video_to_pinecone(video, t_name):
                         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        tqdm.write(f"▶️ [{now}] [{t_name}] VIDEO INDEXED: {video['title']} ({video['youtube_url']})")
+                        tqdm.write(f"▶️ [{now}] [{t_name}] VIDEO INDEXED: {video['title']} ({video['url']})")
                         with data_lock:
-                            runtime_indexed_videos.append(video['youtube_url'])
+                            runtime_indexed_videos.append(video['url'])
                             pbar.update(1)
 
                 # Find new links to crawl (deep-dive)

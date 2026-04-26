@@ -481,7 +481,9 @@ export default function App() {
         displayUrl: r.displayUrl || 'unknown',
         snippet: r.snippet || 'No description available.',
         sourceIcon: r.sourceIcon || '🌐',
-        image: r.image || null
+        image: r.image || null,
+        isNavIntent: r.isNavIntent,
+        isExactMatch: r.isExactMatch
       }));
 
       // IMMEDIATE UPDATE FOR SPEED
@@ -1261,12 +1263,12 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className={`flex flex-col lg:flex-row gap-12 p-4 md:p-8 lg:px-24 xl:px-[170px] max-w-[1700px]`}>
+        <div className={`flex flex-col lg:flex-row lg:items-start gap-12 p-4 md:p-8 lg:pl-10 lg:pr-4 xl:pl-[120px] xl:pr-[60px] max-w-[1700px]`}>
           {activeTab === 'all' && knowledgePanel && (
-            <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[400px]">
+            <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[480px] lg:shrink-0">
                <motion.div 
                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                 className="bg-white border border-slate-100 rounded-3xl overflow-hidden sticky top-36"
+                 className="bg-white border border-slate-100 rounded-3xl overflow-hidden sticky top-28 z-10 shadow-sm"
                >
                  <div className="p-6 md:p-8">
                    <h2 className="text-3xl font-display font-medium text-slate-900 mb-1">{knowledgePanel.title}</h2>
@@ -1298,7 +1300,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             </aside>
           )}
 
-          <div className="w-full max-w-3xl space-y-6 order-2 lg:order-1">
+          <div className="flex-1 max-w-3xl space-y-6 order-2 lg:order-1">
             {/* Autocorrect / Did you mean */}
             {correction && (
               <div className="mb-10 animate-in fade-in slide-in-from-top-4 duration-500">
@@ -1324,6 +1326,40 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {/* Visual Math Analysis Display */}
             {imageQuery && (
               <VisualMathDisplay problem={visualMathProblem} stage={searchStage} image={imageQuery} analysis={visualAnalysis} />
+            )}
+
+            {/* Featured Site Hero Card (Navigational Intent) */}
+            {page === 1 && activeTab === 'all' && results[0] && (results[0].isNavIntent || results[0].isExactMatch) && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                className="w-full bg-slate-50/50 border border-slate-100 rounded-[32px] p-6 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 hover:bg-slate-50 transition-colors shadow-sm group"
+              >
+                <div className="flex items-center gap-5 flex-1 min-w-0">
+                  <div className="w-16 h-16 rounded-2xl bg-white shadow-xs flex items-center justify-center p-3 shrink-0 border border-slate-50 transition-transform group-hover:scale-110">
+                    <img 
+                      src={results[0].sourceIcon} 
+                      className="w-full h-full object-contain" 
+                      onError={(e:any) => { e.target.src=`https://www.google.com/s2/favicons?domain=${results[0].displayUrl}&sz=128`; }} 
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h2 className="text-2xl font-display font-black text-slate-900 truncate tracking-tight">{results[0].displayUrl.split('.')[0].replace(/-/g, ' ').replace(/\b\w/g, (l: any) => l.toUpperCase())}</h2>
+                      <div className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-black uppercase rounded-md tracking-widest">Official</div>
+                    </div>
+                    <p className="text-slate-600 text-[15px] line-clamp-1 italic font-medium leading-tight">
+                      {results[0].snippet}
+                    </p>
+                  </div>
+                </div>
+                <a 
+                  href={results[0].url} target="_blank" rel="noreferrer" 
+                  onClick={() => onResultClick(results[0].id, results[0].url, 1)}
+                  className="px-8 py-3 bg-[#1a73e8] hover:bg-blue-700 text-white rounded-full font-bold text-sm transition-all shadow-lg shadow-blue-100 flex items-center gap-2 whitespace-nowrap active:scale-95"
+                >
+                  Visit Site <ExternalLink size={16} />
+                </a>
+              </motion.div>
             )}
 
             {/* Scout Knowledge Graph Card (Redis) */}
@@ -1761,6 +1797,7 @@ function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[]
 // New VideoStrip component
 function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[], onMore: () => void, onVideoClick?: (vid: any, pos: number) => void }) {
   const videosWithMeta = results.filter(r => r.is_video).slice(0, 8);
+  const videosWithMeta = results.filter(r => r.is_video).slice(0, 4);
   if (videosWithMeta.length < 1) return null;
 
   return (
@@ -1775,21 +1812,51 @@ function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[]
         </button>
       </div>
       <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
+    <div className="py-6 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <h2 className="text-xl font-display font-medium text-slate-900 mb-6 px-1">Videos</h2>
+      <div className="space-y-6">
         {videosWithMeta.map((vid, idx) => (
           <div key={vid.id} onClick={(e) => { e.preventDefault(); onVideoClick?.(vid, idx + 1); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
             <div className="aspect-[16/9] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1 relative">
               <img src={vid.thumbnail_url || vid.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={vid.title} />
               <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
                 <PlayCircle size={36} className="text-white/90" />
+          <div key={vid.id} className="flex gap-4 group cursor-pointer" onClick={() => onVideoClick?.(vid, idx + 1)}>
+            <div className="relative shrink-0 w-[140px] md:w-[180px] aspect-video rounded-xl overflow-hidden bg-slate-100 border border-slate-100 shadow-sm">
+              <img src={vid.thumbnail_url || vid.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+              {vid.duration && (
+                 <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md backdrop-blur-md">
+                    {vid.duration}
+                 </div>
+              )}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors">
+                 <div className="w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-red-600 shadow-xl scale-90 group-hover:scale-100 transition-transform">
+                    <PlayCircle fill="currentColor" size={24} className="text-red-600" />
+                 </div>
               </div>
             </div>
             <div className="mt-2 text-[12px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{vid.title}</div>
             <div className="mt-1 text-[10px] text-slate-400 line-clamp-1 flex items-center gap-1.5 font-bold uppercase tracking-wider">
                {vid.source || vid.displayUrl.replace('www.', '')}
+            <div className="flex-1 min-w-0">
+               <h4 className="text-[17px] font-display font-medium text-[#1a0dab] group-hover:underline line-clamp-2 leading-tight mb-1">{vid.title}</h4>
+               <div className="flex items-center gap-1 text-[13px] text-slate-500 font-medium">
+                  <span>{vid.source}</span>
+                  {vid.author && (<span>· {vid.author}</span>)}
+               </div>
+               <div className="text-[12px] text-slate-400 mt-0.5">
+                  {vid.timestamp ? new Date(vid.timestamp).toLocaleDateString('en-GB', { day: 'j', month: 'short', year: 'numeric' }) : 'Recent'}
+               </div>
+               <p className="text-[13px] text-slate-600 line-clamp-2 mt-2 leading-relaxed hidden md:block">
+                  {vid.snippet}
+               </p>
             </div>
           </div>
         ))}
       </div>
+      <button onClick={onMore} className="w-full mt-6 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+        View all <ChevronRight size={16} />
+      </button>
     </div>
   );
 }
