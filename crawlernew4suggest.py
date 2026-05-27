@@ -10,6 +10,11 @@ from PIL import Image
 import re
 import random
 import threading
+import hashlib
+import importlib
+import sys
+import json
+import shutil
 from datetime import datetime
 from queue import Queue, Empty
 from tqdm import tqdm
@@ -17,9 +22,66 @@ from urllib.parse import urlparse, urljoin
 from ddgs import DDGS 
 from openai import OpenAI 
 
+# --- GOOGLE COLAB OPTIMIZATION ---
+def _run_colab_setup():
+    """Ensures all necessary libraries are installed and ready for Google Colab."""
+    try:
+        import google.colab
+        print("☁️ Detected Google Colab. Verifying system dependencies...")
+        import subprocess
+        required = [
+            "trafilatura", "pinecone", "sentence-transformers", 
+            "duckduckgo-search", "openai", "google-genai", "tqdm"
+        ]
+        for package in required:
+            try:
+                # Map package names to import names
+                check_name = package.replace('-', '_')
+                if check_name == "google_genai": check_name = "google.genai"
+                __import__(check_name)
+                
+                # Deep check for Pinecone integrity
+                if package == "pinecone":
+                    import pinecone
+                    if not hasattr(pinecone, 'Pinecone'):
+                        raise ImportError("Pinecone class missing")
+
+            except (ImportError, AttributeError, Exception):
+                print(f"📦 Installing/Repairing {package}...")
+                
+                if package == "pinecone":
+                    # 1. Remove local folder that might be shadowing the library
+                    if os.path.isdir("pinecone"):
+                        print("🗑️ Removing local 'pinecone' directory shadowing the library.")
+                        shutil.rmtree("pinecone", ignore_errors=True)
+                    
+                    # 2. Force clean install
+                    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "pinecone-client", "pinecone"], capture_output=True)
+                
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", package])
+                importlib.invalidate_caches()
+                # Clear the module from cache to force Python to re-scan the site-packages directory
+                if "pinecone" in sys.modules:
+                    del sys.modules["pinecone"]
+        print("✅ Environment ready.")
+        return True
+    except ImportError:
+        return False
+
+# Run environment setup BEFORE importing third-party vector libs
+IS_COLAB = _run_colab_setup()
+
 # --- VECTOR ENGINE ---
 from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
+
+# --- LINK TO INDEXER MODULE ---
+try:
+    import indexer
+    print("✅ Indexer module linked successfully.")
+except ImportError:
+    print("⚠️ Warning: indexer.py not found in the same directory. Using internal crawler logic.")
+    indexer = None
 
 # --- LOAD SECURE KEYS ---
 try:
@@ -38,6 +100,7 @@ session = requests.Session()
 # --- GLOBAL CONFIG ---
 LOG_FILE = "indexed_sites.txt"
 SUGGESTIONS_LOG = "search_suggestions_history.txt"
+STATE_FILE = "crawler_state.json"
 MAX_THREADS = 8 
 DOMAIN_LIMIT = 20  # 🚀 Limit to 20 pages per domain to ensure index diversity
 sitemaps_processed = set()
@@ -150,8 +213,13 @@ SEARCH_TOPICS = [
 
 # --- INIT ENGINES ---
 print(f"🛰️  KOMU SCOUT v15.2 - DEEP-DIVE & AI ENABLED")
-# Standardizing to MPNet for maximum text retrieval accuracy (768-dim)
-model = SentenceTransformer('all-mpnet-base-v2')
+
+# Shared Visual Brain: Link to indexer model if available to save RAM on Colab
+if indexer and hasattr(indexer, 'visual_engine'):
+    model = indexer.visual_engine
+    print("✅ Using shared AI model from Indexer module.")
+else:
+    model = SentenceTransformer('all-mpnet-base-v2')
 print("✅ Model Loaded: all-mpnet-base-v2 (768 Dimensions)")
 # Double check the dimension before starting the crawl
 sample_encoding = model.encode("Verify 768")
@@ -170,6 +238,24 @@ domain_image_counts = {}
 active_workers = 0 
 data_lock = threading.Lock()
 pbar = None 
+
+# --- STATE PERSISTENCE ---
+def save_state(pointer):
+    """Saves the current suggestion pointer to disk."""
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump({"suggestion_pointer": pointer}, f)
+    except Exception as e:
+        tqdm.write(f"⚠️ Failed to save state: {e}")
+
+def load_state():
+    """Loads the suggestion pointer from disk."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f).get("suggestion_pointer", 0)
+        except: pass
+    return 0
 
 # --- GOOGLE SUGGESTIONS ENGINE ---
 def get_google_suggestions(query):
@@ -235,7 +321,7 @@ def get_seeds_robust(queries):
                 tqdm.write(f"🔍 [{datetime.now().strftime('%H:%M:%S')}] Seed Scouting: {q}")
                 results = ddgs.text(q, max_results=5)
                 for r in results: seeds.append(r['href'])
-                time.sleep(1.2)
+                time.sleep(0.5) # Reduced sleep for faster cycle time
     except: pass
     return list(set(seeds))
 
@@ -361,7 +447,11 @@ def index_to_pinecone(url, content, domain, is_image=False, alt_text="", t_name=
         # For images, we vectorize the alt_text since MPNet is text-only
         input_data = (alt_text if is_image else str(content))[:1000]
         vector = model.encode(input_data).tolist()
-        v_id = f"{re.sub(r'\W+', '_', url)[:450]}_{chunk_idx}"
+        
+        # Use MD5 hash for ID to guarantee ASCII and unique fixed length
+        # This prevents the "Vector ID must contain only ASCII characters" error
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+        v_id = f"{url_hash}_{chunk_idx}"
         
         if is_image:
             metadata = {
@@ -394,10 +484,9 @@ def crawler_worker():
     global active_workers
     t_name = threading.current_thread().name
     while True:
-        try:
-            url = url_queue.get(timeout=30) 
-        except Empty: break
-
+        # Remove timeout to prevent agents from dying during the long scouting phase
+        url = url_queue.get() 
+        
         with data_lock: active_workers += 1
         clean_url = url.lower().strip().rstrip('/')
         parsed_current = urlparse(clean_url)
@@ -424,9 +513,14 @@ def crawler_worker():
             if resp.status_code == 200:
                 # Use BeautifulSoup for both image and content prioritization
                 soup = BeautifulSoup(resp.text, 'html.parser')
+                raw_html_len = len(resp.text)
                 
                 # NEW: Extract Structured Data (Strategy 4)
-                structured_data = extract_structured_data(soup)
+                # Use refined extraction logic from indexer if linked
+                if indexer and hasattr(indexer, 'extract_structured_data'):
+                    structured_data = indexer.extract_structured_data(soup)
+                else:
+                    structured_data = extract_structured_data(soup)
                 
                 # NEW: Get Meta Tags (OG / Twitter)
                 og_desc = soup.find("meta", property="og:description")
@@ -461,21 +555,32 @@ def crawler_worker():
                     index_to_pinecone(url, faq_content, domain, chunk_idx=f"faq_{i}", extra_meta={"faqs": True})
 
                 # NEW: Semantic Extraction (Strategy 1, 2, 3)
-                chunks = get_semantic_segments(soup)
+                # Link to indexer's segmentation logic for consistency
+                if indexer and hasattr(indexer, 'get_semantic_segments'):
+                    chunks = indexer.get_semantic_segments(soup)
+                else:
+                    chunks = get_semantic_segments(soup)
                 
                 # Fallback to Trafilatura if hierarchy extraction was too thin
                 if not chunks or len("".join(chunks)) < 500:
                     fallback_text = trafilatura.extract(resp.text, include_comments=False, target_language='en') or ""
                     if fallback_text: chunks = [fallback_text[i:i+800] for i in range(0, len(fallback_text), 700)]
 
+                # Limit to 10 semantic chunks per page to optimize vector usage
+                chunks = chunks[:10]
+
                 indexed_any = False
                 for i, chunk in enumerate(chunks):
                     if index_to_pinecone(url, chunk, domain, chunk_idx=i, extra_meta=structured_data):
                         indexed_any = True
 
+                # Explicitly clean up soup to free RAM
+                del soup
+                del structured_data
+
                 if indexed_any:
                     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    tqdm.write(f"✅ [{now}] [{t_name}] INDEXED: {url} ({len(chunks)} semantic chunks)")
+                    tqdm.write(f"✅ [{now}] [{t_name}] INDEXED: {url} ({len(chunks)} chunks) | HTML: {raw_html_len//1024}KB")
                     with data_lock:
                         runtime_indexed.append(clean_url)
                         domain_counts[domain] = domain_counts.get(domain, 0) + 1
@@ -514,7 +619,9 @@ def run_komu_autonomous():
     
     # 1. Clean and load topics from suggestion history
     all_suggestions = clean_suggestions_file()
-    suggestion_pointer = 0
+    suggestion_pointer = load_state()
+    if suggestion_pointer > 0:
+        tqdm.write(f"⏯️  Resuming from history index: {suggestion_pointer}")
 
     # 2. Load visited URLs from log
     if os.path.exists(LOG_FILE):
@@ -537,12 +644,28 @@ def run_komu_autonomous():
                 # Extract next batch of 200 topics from the cleaned list
                 batch = all_suggestions[suggestion_pointer : suggestion_pointer + 200]
                 suggestion_pointer += len(batch)
+                save_state(suggestion_pointer)
 
                 tqdm.write(f"📥 Batch Injection: Refilling queue with {len(batch)} topics from history file...")
                 new_seeds = get_seeds_robust(batch)
-                for s in new_seeds: url_queue.put(s)
+                
+                # Fallback if the search engine is being stubborn or rate-limited
+                if not new_seeds:
+                    tqdm.write("⚠️  Search returned no seeds. Injecting autonomous emergency topics...")
+                    new_seeds = get_seeds_robust(get_autonomous_seeds(5))
+                
+                if new_seeds:
+                    for s in new_seeds: url_queue.put(s)
+                
+                # Update pointer only after scouting attempt
+                suggestion_pointer += len(batch)
+                save_state(suggestion_pointer)
+            
+            # 4. Infinite Loop Fix: If we reached the end of the history file, restart from beginning
             elif url_queue.empty() and suggestion_pointer >= len(all_suggestions) and active_workers == 0:
-                tqdm.write("🏁 Finished: All suggestions from the history file have been processed.")
+                tqdm.write("🔄 Reached end of history file. Restarting from the beginning to ensure deep index coverage...")
+                suggestion_pointer = 0
+                save_state(0)
 
             # Save progress
             if len(runtime_indexed) >= 5:
@@ -551,11 +674,8 @@ def run_komu_autonomous():
                         for url in runtime_indexed:
                             f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {url}\n")
                     runtime_indexed = []
-                    
-            if len(visited) > 20000: # Increased memory limit
-                with data_lock: visited.clear()
 
-            time.sleep(10) # Check status every 10 seconds
+            time.sleep(20) 
 
     except KeyboardInterrupt:
         print(f"\n🛑 Manual Stop. Saving final data...")

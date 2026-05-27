@@ -15,13 +15,15 @@ import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestor
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI, Type } from "@google/genai";
 import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
-// Ensure these are correctly marked with 'export' in src/components/SearchWidgets.tsx
-import * as SearchWidgets from './components/SearchWidgets';
+import { 
+  shouldShowColorPicker, ColorPickerWidget,
+  shouldShowCalculator, CalculatorWidget,
+  shouldShowCurrency, CurrencyConverterWidget
+} from './components/SearchWidgets';
 import { PageIntelligencePanel } from './components/PageIntelligence';
 
 // Initialize Gemini on the Frontend
-// Note: In Vite, use import.meta.env and prefix your variable with VITE_ for client-side access
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
+const API_KEY = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenAI({ apiKey: API_KEY || 'AI-NOT-SET' });
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -157,75 +159,82 @@ export default function App() {
     return () => clearInterval(interval);
   }, [bgRotationMode]);
 
-  // SPEECH RECOGNITION SETUP
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      
-      recognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
-        }
-        
-        const currentText = finalTranscript || interimTranscript;
-        if (currentText) {
-          setQuery(currentText);
-        }
-
-        if (finalTranscript) {
-          try {
-            recognition.stop();
-          } catch (e) {}
-          setIsListening(false);
-          // Let currentText sink in visually, then trigger search
-          setTimeout(() => {
-            handleSearchRef.current(finalTranscript);
-          }, 400);
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        if (event.error === 'not-allowed') {
-          setMicError("Microphone access is blocked. Please enable it in your browser settings.");
-          setTimeout(() => setMicError(null), 5000);
-        }
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-    }
-  }, []);
-
+  // SPEECH RECOGNITION SETUP - Dynamically initialized on demand to ensure seamless access
   const toggleListening = () => {
     if (isListening) {
-      try {
-        recognitionRef.current?.stop();
-      } catch (e) {}
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
       setIsListening(false);
     } else {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setMicError("Speech recognition is not supported in this browser. Please try Chrome or Safari.");
+        setTimeout(() => setMicError(null), 5000);
+        return;
+      }
+
       try {
         setQuery('');
-        recognitionRef.current?.start();
-      } catch (e) {
-        console.error('Failed to start recognition:', e);
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+          
+          const currentText = finalTranscript || interimTranscript;
+          if (currentText) {
+            setQuery(currentText);
+          }
+
+          if (finalTranscript) {
+            try {
+              recognition.stop();
+            } catch (e) {}
+            setIsListening(false);
+            setTimeout(() => {
+              handleSearchRef.current(finalTranscript);
+            }, 500);
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          if (event.error === 'not-allowed') {
+            setMicError("Microphone access is blocked. Please allow microphone permissions in page settings.");
+            setTimeout(() => setMicError(null), 5000);
+          } else {
+            setMicError(`Speech error: ${event.error}`);
+            setTimeout(() => setMicError(null), 4000);
+          }
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (err: any) {
+        console.error('Failed to start recognition:', err);
+        setMicError("Unable to open speech recognition interface.");
+        setTimeout(() => setMicError(null), 4500);
         setIsListening(false);
       }
     }
@@ -570,7 +579,7 @@ export default function App() {
     if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
     try {
       const context = contextResults.slice(0, 8).map(r => r.snippet).join("\n");
-      const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 5 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
+      const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
       const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -592,7 +601,7 @@ export default function App() {
       });
       
       const data = JSON.parse(response.text || '[]');
-      setFaq(data);
+      setFaq(data.slice(0, 3));
     } catch (e) {
       console.error("FAQ generation failed:", e);
     }
@@ -1351,14 +1360,14 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
           <div className="w-full max-w-3xl space-y-6 order-2 lg:order-1">
             {/* Interactive Search Tool Widgets */}
-            {activeTab === 'all' && (SearchWidgets as any).shouldShowColorPicker?.(query) && (
-              <SearchWidgets.ColorPickerWidget query={query} />
+            {activeTab === 'all' && shouldShowColorPicker(query) && (
+              <ColorPickerWidget query={query} />
             )}
-            {activeTab === 'all' && (SearchWidgets as any).shouldShowCalculator?.(query) && (
-              <SearchWidgets.CalculatorWidget query={query} />
+            {activeTab === 'all' && shouldShowCalculator(query) && (
+              <CalculatorWidget query={query} />
             )}
-            {activeTab === 'all' && (SearchWidgets as any).shouldShowCurrency?.(query) && (
-              <SearchWidgets.CurrencyConverterWidget query={query} />
+            {activeTab === 'all' && shouldShowCurrency(query) && (
+              <CurrencyConverterWidget query={query} />
             )}
 
             {/* Autocorrect / Did you mean */}
@@ -1569,10 +1578,6 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       {/* First FAQ after 3 results */}
                       {idx === 3 && faq.length > 0 && (
                         <FAQBlock faq={faq.slice(0, 3)} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
-                      )}
-                      {/* Second FAQ after 7 results */}
-                      {idx === 7 && faq.length > 3 && (
-                        <FAQBlock faq={faq.slice(3)} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
                       )}
                       
                       {item.type === 'single' ? (
@@ -1868,7 +1873,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
               onClick={() => openFaqIndex === item.question ? setOpenFaqIndex(null) : setOpenFaqIndex(item.question)}
               className="w-full flex items-center justify-between text-left group"
             >
-              <span className="text-base md:text-lg font-normal text-slate-800 group-hover:text-blue-600 transition-colors">
+              <span className="text-base md:text-lg font-normal text-slate-800 transition-colors">
                 {item.question}
               </span>
               <ChevronRight 
@@ -2446,3 +2451,4 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
     </motion.div>
   );
 }
+

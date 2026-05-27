@@ -149,23 +149,70 @@ function cleanSnippet(text: string) {
 function isMostlyEnglish(text: string): boolean {
   if (!text) return true;
   
-  // Cyrillic, Arabic, Chinese/Japanese/Korean/EastAsian, Hindi/Devanagari, Hebrew, Tamil, Thai, Kannada, Telugu, Bengali
+  const cleanText = text.trim();
+  if (cleanText.length === 0) return true;
+
+  // 1. Cyrillic, Arabic, Chinese/Japanese/Korean/EastAsian, Hindi/Devanagari, Hebrew, Tamil, Thai, Kannada, Telugu, Bengali
   const nonLatinRegex = /[\u0400-\u04FF\u0600-\u06FF\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u0900-\u097f\u0590-\u05ff\u0b80-\u0bff\u0e00-\u0e7f\u0c80-\u0cff\u0c00-\u0c7f\u0980-\u09ff]/;
-  if (nonLatinRegex.test(text)) {
+  if (nonLatinRegex.test(cleanText)) {
     return false;
   }
-  
-  // Match common English basic operational words or stopwords with boundary constraints
-  const englishStopwords = /\b(the|and|of|to|is|in|it|you|that|this|for|are|on|with|as|at|by|an|be|from|or|was|but|not|your|we|can|have|has|are|with)\b/i;
-  if (englishStopwords.test(text)) {
-    return true;
-  }
-  
-  const parsedLength = text.replace(/[^a-zA-Z0-9\s.,\/#!$%\^&\*;:{}=\-_`~()?'"+\\|[\]]/g, '').length;
-  if (text.length > 0 && parsedLength / text.length < 0.6) {
+
+  // 2. Check for UTF-8 mojibake patterns of Cyrillic (words mis-decoded as Latin-1 containing frequent Ð and Ñ)
+  const mojibakeCount = (cleanText.match(/[\u00D0\u00D1]/g) || []).length;
+  if (mojibakeCount > 3 && mojibakeCount / cleanText.length > 0.05) {
     return false;
   }
+
+  // 3. Score against common English stopwords
+  const words = cleanText.toLowerCase().split(/[^a-z\'\-]+/);
   
+  const englishWords = new Set([
+    'the', 'and', 'of', 'to', 'is', 'you', 'that', 'it', 'he', 'was', 'for', 'on', 'are', 'as', 'with', 
+    'his', 'they', 'i', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'but', 
+    'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'there', 'use', 'an', 'each', 
+    'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 
+    'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 
+    'look', 'two', 'more', 'write', 'go', 'see', 'no', 'way', 'could', 'people', 'my', 'than', 
+    'first', 'been', 'call', 'who', 'its', 'now', 'find'
+  ]);
+
+  const nonEnglishIdentifiers = new Set([
+    // French
+    'les', 'des', 'pour', 'dans', 'avec', 'mais', 'nous', 'vous', 'leur',
+    // Spanish / Portuguese
+    'los', 'las', 'para', 'con', 'pero', 'como', 'este', 'esta', 'mais',
+    // German
+    'der', 'die', 'das', 'den', 'dem', 'des', 'mit', 'und', 'ist', 'sind', 'von',
+    // Finnish
+    'ja', 'se', 'ei', 'hän', 'he', 'että', 'mutta', 'tai', 'vai', 'onko', 'kyse',
+    // Norwegian / Danish / Swedish
+    'og', 'jeg', 'det', 'eller', 'men', 'på', 'til', 'vi', 'de', 'ikke'
+  ]);
+
+  let englishCount = 0;
+  let nonEnglishCount = 0;
+  let totalWordsChecked = 0;
+
+  for (const w of words) {
+    if (w.length > 1) {
+      totalWordsChecked++;
+      if (englishWords.has(w)) {
+        englishCount++;
+      } else if (nonEnglishIdentifiers.has(w)) {
+        nonEnglishCount++;
+      }
+    }
+  }
+
+  if (nonEnglishCount > englishCount && nonEnglishCount > 0) {
+    return false;
+  }
+
+  if (totalWordsChecked > 5 && englishCount === 0) {
+    return false;
+  }
+
   return true;
 }
 
@@ -359,7 +406,7 @@ app.post('/api/feedback', async (req, res) => {
 app.post('/api/search', async (req, res) => {
   try {
     const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
-    const pageSize = 40;
+    const pageSize = 6;
     const skip = (page - 1) * pageSize;
     
     if (imageQuery) {
@@ -523,7 +570,7 @@ app.post('/api/search', async (req, res) => {
 
       const titleStr = meta.title || meta.name || '';
       const snippetStr = meta.snippet || meta.text || meta.description || '';
-      const isEnglish = isMostlyEnglish(`${titleStr} ${snippetStr}`);
+      const isEnglish = isMostlyEnglish(snippetStr);
 
       return {
         ...meta,

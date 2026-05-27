@@ -905,8 +905,8 @@ def crawler_worker():
     t_name = threading.current_thread().name
     while True:
         try:
-            url = url_queue.get(timeout=30) 
-        except Empty: break
+            url = url_queue.get(timeout=60) 
+        except Empty: continue # Don't break, just wait for the next injection
 
         with data_lock: active_workers += 1
         clean_url = url.lower().strip().rstrip('/')
@@ -1066,33 +1066,37 @@ def run_komu_autonomous():
     for i in range(MAX_THREADS):
         threading.Thread(target=crawler_worker, name=f"Agent-{i+1}", daemon=True).start()
 
-    try:
-        while True:
-            time.sleep(15)
+    while True:
+        try:
+            time.sleep(10)
             
             # --- EVOLUTION ENGINE: AI + GOOGLE + DICTIONARY ---
-            if url_queue.qsize() < 15:
-                recent_domains = [urlparse(u).netloc for u in list(visited)[-5:]]
-                
-                # 1. Stay Relevant: Get Google Suggestions for a successful recent topic
-                base_topic = random.choice(current_topics[-15:])
-                trending_topics = get_google_suggestions(base_topic)
-                
-                # 2. Stay Smart: Augment with AI for hyper-specific 2026 niches
-                ai_topics = generate_ai_topics(current_topics[-3:], recent_domains)
-                
-                # 3. Stay Random: Inject 2 purely random dictionary-based trending topics
-                random_injects = get_autonomous_seeds(2)
-                
-                combined_new = list(set(trending_topics + ai_topics + random_injects))
-                
-                if combined_new:
-                    tqdm.write(f"🌟 Evolution: Found {len(combined_new)} new paths (Google + AI + Dictionary)")
-                    current_topics.extend(combined_new)
-                    new_seeds = get_seeds_robust(combined_new[:8])
-                    for s in new_seeds: url_queue.put(s)
-                
-                if len(current_topics) > 100: current_topics = current_topics[-50:]
+            # Increased threshold to 30 to ensure workers always have work
+            if url_queue.qsize() < 30:
+                try:
+                    recent_domains = [urlparse(u).netloc for u in list(visited)[-5:]]
+                    
+                    # 1. Stay Relevant: Get Google Suggestions for a successful recent topic
+                    base_topic = random.choice(current_topics[-15:])
+                    trending_topics = get_google_suggestions(base_topic)
+                    
+                    # 2. Stay Smart: Augment with AI for hyper-specific 2026 niches
+                    ai_topics = generate_ai_topics(current_topics[-3:], recent_domains)
+                    
+                    # 3. Stay Random: Inject 2 purely random dictionary-based trending topics
+                    random_injects = get_autonomous_seeds(2)
+                    
+                    combined_new = list(set(trending_topics + ai_topics + random_injects))
+                    
+                    if combined_new:
+                        tqdm.write(f"🌟 Evolution: Found {len(combined_new)} new paths")
+                        current_topics.extend(combined_new)
+                        new_seeds = get_seeds_robust(combined_new[:10])
+                        for s in new_seeds: url_queue.put(s)
+                    
+                    if len(current_topics) > 150: current_topics = current_topics[-75:]
+                except Exception as e:
+                    tqdm.write(f"⚠️ Evolution Step Failed: {e}")
 
             # Save progress
             if len(runtime_indexed) >= 5:
@@ -1102,13 +1106,19 @@ def run_komu_autonomous():
                             f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {url}\n")
                     runtime_indexed = []
                     
-            if len(visited) > 20000: # Increased memory limit
-                with data_lock: visited.clear()
+            if len(visited) > 30000: # Slightly higher limit to avoid instant re-crawling
+                # Instead of clearing all, keep the last 5000 to prevent immediate loops
+                with data_lock:
+                    visited_list = list(visited)
+                    visited = set(visited_list[-5000:])
 
-    except KeyboardInterrupt:
-        print(f"\n🛑 Manual Stop. Saving final data...")
-    finally:
-        pbar.close()
+        except KeyboardInterrupt:
+            print(f"\n🛑 Manual Stop. Saving final data...")
+            pbar.close()
+            break
+        except Exception as e:
+            tqdm.write(f"🧨 Global Loop Error: {e}. Continuing in 5s...")
+            time.sleep(5)
 
 if __name__ == "__main__":
     run_komu_autonomous()
