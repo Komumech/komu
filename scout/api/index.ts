@@ -406,7 +406,7 @@ app.post('/api/feedback', async (req, res) => {
 app.post('/api/search', async (req, res) => {
   try {
     const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
-    const pageSize = 6;
+    const pageSize = 8;
     const skip = (page - 1) * pageSize;
     
     if (imageQuery) {
