@@ -333,7 +333,8 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
-      const res = await fetch('/api/auth/url');
+      const redirectUri = `${window.location.origin}/auth/callback`;
+      const res = await fetch(`/api/auth/url?redirectUri=${encodeURIComponent(redirectUri)}`);
       if (!res.ok) throw new Error("Login failed");
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) throw new Error("Non-JSON");
@@ -510,11 +511,36 @@ export default function App() {
         const topResultIsEntity = rawResults[0]?.displayUrl.includes('wikipedia.org') || 
                                  rawResults[0]?.displayUrl.includes('britannica.com');
         
+        // Check if there is a Wikipedia details page anywhere in the top 8 results
+        const wikiResult = rawResults.slice(0, 8).find(r => 
+          r.url.toLowerCase().includes('wikipedia.org/wiki/') && 
+          !r.url.toLowerCase().includes('/wiki/special:') && 
+          !r.url.toLowerCase().includes('/wiki/category:') &&
+          !r.url.toLowerCase().includes('/wiki/help:') &&
+          !r.url.toLowerCase().includes('/wiki/talk:')
+        );
+        
         if (data.suggestKnowledgePanel && data.detectedEntity) {
           generateKnowledgePanel(data.detectedEntity.name, data.detectedEntity.type);
         } else if (topResultIsEntity && !data.isEnglishHelp && !data.dictionary) {
           // Trigger KP for top authoritative entities even if intent didn't catch it
           generateKnowledgePanel(rawResults[0].title);
+        } else if (wikiResult && !data.isEnglishHelp && !data.dictionary) {
+          try {
+            const urlParts = wikiResult.url.split('/wiki/');
+            if (urlParts.length > 1) {
+              const entityFromUrl = decodeURIComponent(urlParts[1].split('#')[0]).replace(/_/g, ' ');
+              if (entityFromUrl) {
+                generateKnowledgePanel(entityFromUrl);
+              } else {
+                generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
+              }
+            } else {
+              generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
+            }
+          } catch (e) {
+            generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
+          }
         }
       }
     } catch (error: any) {
@@ -610,11 +636,128 @@ export default function App() {
   const generateKnowledgePanel = async (entityName: string, entityType?: string) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
     try {
-      const prompt = `Entity: "${entityName}" (${entityType || 'General'})
-      Generate a high-quality "Knowledge Panel" for this entity. 
-      Return as a JSON object with: 
-      title, subtitle, description, image (a placeholder like "https://images.unsplash.com/photo..."), 
-      details (array of {label, value}), and sections (array of {title, content}).`;
+      let wikiContent = "";
+      let wikiImage: string | null = null;
+      let wikiTitle = entityName;
+      let wikiDesc = entityType || "";
+      let wikiUrl = "";
+      let matchedTitle = entityName;
+      let extraImages: string[] = [];
+
+      // Step 1: Direct Fetch from Wikipedia REST summary API
+      try {
+        const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(entityName)}`;
+        const summaryRes = await axios.get(summaryUrl);
+        const sData = summaryRes.data;
+        if (sData && sData.extract) {
+          wikiTitle = sData.title || wikiTitle;
+          wikiDesc = sData.description || wikiDesc;
+          wikiContent = sData.extract || "";
+          wikiUrl = sData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(entityName)}`;
+          matchedTitle = sData.title || entityName;
+          if (sData.originalimage?.source) {
+            wikiImage = sData.originalimage.source;
+          } else if (sData.thumbnail?.source) {
+            wikiImage = sData.thumbnail.source;
+          }
+        }
+      } catch (err: any) {
+        // Fallback to opensearch if direct title failed
+        try {
+          const searchUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(entityName)}&limit=1&namespace=0&format=json&origin=*`;
+          const searchRes = await axios.get(searchUrl);
+          const titles = searchRes.data?.[1] || [];
+          if (titles.length > 0) {
+            matchedTitle = titles[0];
+            const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(matchedTitle)}`;
+            const summaryRes = await axios.get(summaryUrl);
+            const sData = summaryRes.data;
+            if (sData) {
+              wikiTitle = sData.title || wikiTitle;
+              wikiDesc = sData.description || wikiDesc;
+              wikiContent = sData.extract || "";
+              wikiUrl = sData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(matchedTitle)}`;
+              if (sData.originalimage?.source) {
+                wikiImage = sData.originalimage.source;
+              } else if (sData.thumbnail?.source) {
+                wikiImage = sData.thumbnail.source;
+              }
+            }
+          }
+        } catch (err2: any) {
+          console.warn("Wikipedia fallback search failed:", err2.message);
+        }
+      }
+
+      // Step 2: Fetch any extra images from Wikipedia page media-list for beautiful collage
+      if (wikiContent) {
+        try {
+          const mediaUrl = `https://en.wikipedia.org/api/rest_v1/page/media-list/${encodeURIComponent(matchedTitle)}`;
+          const mediaRes = await axios.get(mediaUrl);
+          const items = mediaRes.data?.items || [];
+          const imagesFound = items
+            .filter((item: any) => item.type === 'image' && item.srcset && item.srcset.length > 0)
+            .map((item: any) => {
+              const bestSrc = item.srcset[item.srcset.length - 1]?.src || item.srcset[0]?.src;
+              if (bestSrc) {
+                return bestSrc.startsWith('http') ? bestSrc : `https:${bestSrc}`;
+              }
+              return null;
+            })
+            .filter(Boolean) as string[];
+
+          extraImages = imagesFound.slice(0, 3);
+        } catch (mediaErr: any) {
+          console.warn("Wikipedia media fetch failed:", mediaErr.message);
+        }
+
+        const defaultImage = wikiImage || `https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=600`;
+        const directData = {
+          title: wikiTitle,
+          subtitle: wikiDesc || (entityType || "Entity Information"),
+          description: wikiContent,
+          image: defaultImage,
+          images: extraImages.length > 0 ? extraImages : (wikiImage ? [wikiImage] : [defaultImage]),
+          details: [
+            ...(wikiDesc ? [{ label: "Type", value: wikiDesc }] : []),
+            { label: "Source", value: "Wikipedia" }
+          ],
+          sections: [],
+          peopleAlsoSearchFor: [],
+          wikipediaUrl: wikiUrl
+        };
+        setKnowledgePanel(directData);
+        return;
+      }
+
+      const prompt = `Entity: "${entityName}"
+      Factual Grounding Information from Wikipedia:
+      - Canonical Title: "${wikiTitle}"
+      - Category Description: "${wikiDesc}"
+      - Summary Extract: "${wikiContent}"
+      - Wikipedia Page URL: "${wikiUrl}"
+      - Wikipedia Image URL: "${wikiImage || ''}"
+
+      Generate a high-quality "Knowledge Panel" matching this query.
+      If Wikipedia data was successfully fetched (meaning Summary Extract is not empty), you MUST respect and use the Wikipedia-provided Canonical Title for the "title" field, Wikipedia-provided Category Description for "subtitle", and use or closely summarize the Summary Extract for the "description" field. If the Wikipedia data was empty, construct highly accurate display details for the entity.
+
+      In the details grid, put key factual specs (e.g. for companies, add "Founders", "CEO", "Headquarters", "Founded", "Parent organization" etc. and for products/systems add "Initial release", "Platform", "Developer" or key specs). Use key details that are correct and standard for this entity.
+      
+      Return as a JSON object with:
+      1. title: The clean entity name
+      2. subtitle: The category or type classification (e.g., "Technology company", "Computer application")
+      3. description: A clear 2-3 sentence overview of what this entity is and what its primary purpose is.
+      4. image: A main representative high-quality Unsplash image URL (or use the Wikipedia template image "${wikiImage || ''}" if it looks highly professional).
+      5. images: An array of exactly 3 relevant Unsplash image URLs that visually represent the entity (e.g. logos, tech gear, office landscapes, branding).
+      6. details: An array of key attributes such as {label: "Founded", value: "4 April 1975"}. Keep labels clean, concise, and professional.
+      7. sections: An array of {title, content} sections for additional entity sub-topics.
+      8. peopleAlsoSearchFor: An array of exactly 6-8 related services, alternatives, products, or adjacent entities. For example, for "Microsoft Azure", this would be ["Amazon Web Services", "Microsoft 365", "Google Cloud Platform", "GitHub"]. For each, specify:
+         - "name": The short name of the related entity
+         - "category": The category or classification
+         - "image": A high-quality Unsplash image URL relevant to that related item
+         - "query": The exact search query to search for this item on Scout
+      
+      Make sure to return valid JSON following the schema perfectly.`;
 
       const response = await genAI.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -628,6 +771,10 @@ export default function App() {
               subtitle: { type: Type.STRING },
               description: { type: Type.STRING },
               image: { type: Type.STRING },
+              images: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
               details: { 
                 type: Type.ARRAY, 
                 items: { 
@@ -643,6 +790,19 @@ export default function App() {
                   properties: { title: { type: Type.STRING }, content: { type: Type.STRING } },
                   required: ["title", "content"]
                 }
+              },
+              peopleAlsoSearchFor: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    category: { type: Type.STRING },
+                    image: { type: Type.STRING },
+                    query: { type: Type.STRING }
+                  },
+                  required: ["name", "query", "image"]
+                }
               }
             },
             required: ["title", "subtitle", "description", "details", "sections"]
@@ -651,7 +811,12 @@ export default function App() {
       });
       
       const data = JSON.parse(response.text || 'null');
-      if (data) setKnowledgePanel(data);
+      if (data) {
+        if (wikiUrl) {
+          data.wikipediaUrl = wikiUrl;
+        }
+        setKnowledgePanel(data);
+      }
     } catch (e) {
       console.error("Knowledge Panel failed:", e);
     }
@@ -1138,7 +1303,26 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   }
 
   const [glowVisible, setGlowVisible] = useState(true);
+  const [isPasfExpanded, setIsPasfExpanded] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const resInputRef = useRef<HTMLTextAreaElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const mainElement = mainRef.current;
+    if (!mainElement) return;
+
+    const handleScroll = () => {
+      if (mainElement.scrollTop > 30) {
+        setScrolled(true);
+      } else {
+        setScrolled(false);
+      }
+    };
+
+    mainElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => mainElement.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setGlowVisible(false), 3000);
@@ -1169,7 +1353,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col h-screen bg-white">
       <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
       <header className="bg-white border-b border-slate-50 sticky top-0 z-50">
-        <div className="flex flex-col sm:flex-row items-center gap-4 md:gap-12 py-6 sm:py-8 px-4 md:px-12 max-w-[1700px] mx-auto transition-all">
+        <div className={`flex flex-col sm:flex-row items-center justify-between transition-all duration-300 ease-in-out px-4 md:px-12 max-w-[1700px] mx-auto ${scrolled ? 'py-3 gap-2 md:gap-6' : 'py-6 sm:py-8 gap-4 md:gap-12'}`}>
           <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-4">
             <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0">
                <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
@@ -1311,8 +1495,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             </div>
           </div>
         </div>
-        <div className="px-4 md:px-8 lg:px-24 xl:px-[170px] max-w-[1700px] border-t border-slate-50 overflow-x-auto scrollbar-hide">
-          <div className="flex items-center gap-8 pt-4">
+        <div className={`transition-all duration-300 ease-in-out overflow-hidden px-4 md:px-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto border-t border-slate-50 overflow-x-auto scrollbar-hide ${scrolled ? 'max-h-0 opacity-0 pointer-events-none pt-0' : 'max-h-16 opacity-100 pt-4'}`}>
+          <div className="flex items-center gap-8">
             {['All', 'Images', 'News'].map(tab => (
               <button key={tab} className={`pb-3 text-sm font-bold border-b-2 transition-all ${activeTab === tab.toLowerCase() ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-transparent hover:text-slate-700'}`} onClick={() => setActiveTab(tab.toLowerCase())}>{tab}</button>
             ))}
@@ -1320,40 +1504,143 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto">
-        <div className={`flex flex-col lg:flex-row gap-12 p-4 md:p-8 lg:px-24 xl:px-[170px] max-w-[1700px]`}>
+      <main ref={mainRef} className="flex-1 overflow-y-auto">
+        <div className={`flex flex-col lg:flex-row gap-8 lg:gap-10 xl:gap-12 p-4 md:p-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto`}>
           {activeTab === 'all' && knowledgePanel && (
-            <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[400px]">
+            <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[368px] shrink-0">
                <motion.div 
                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                 className="bg-white border border-slate-100 rounded-3xl overflow-hidden sticky top-36"
+                 className="bg-white border border-slate-200 rounded-2xl overflow-hidden"
                >
-                 <div className="p-6 md:p-8">
-                   <h2 className="text-3xl font-display font-medium text-slate-900 mb-1">{knowledgePanel.title}</h2>
-                   <p className="text-slate-500 mb-6">{knowledgePanel.subtitle}</p>
-                   
-                   {knowledgePanel.image && (
-                     <div className="aspect-video w-full rounded-2xl overflow-hidden mb-6 -mx-2">
-                       <img src={knowledgePanel.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                     </div>
-                   )}
+                 {(() => {
+                   const panelImages = (knowledgePanel.images && knowledgePanel.images.length > 0) 
+                     ? knowledgePanel.images 
+                     : (knowledgePanel.image ? [knowledgePanel.image] : []);
 
-                   <div className="space-y-6">
-                     <div className="pb-6 border-b border-slate-50">
-                        <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">About</h4>
-                        <p className="text-slate-600 leading-relaxed text-[15px]">{knowledgePanel.description}</p>
-                     </div>
-                     
-                     <div className="space-y-4">
-                       {knowledgePanel.details && knowledgePanel.details.map && knowledgePanel.details.map((detail: any, i: number) => (
-                         <div key={i} className="flex gap-4">
-                           <span className="font-bold text-slate-400 min-w-[80px]">{detail.label}:</span>
-                           <span className="text-slate-900">{detail.value}</span>
+                   return (
+                     <div className="p-4 md:p-5">
+                       {/* Header: Title, Subtitle, and Three Dots Menu */}
+                       <div className="flex justify-between items-start mb-6">
+                         <div>
+                           <h2 className="text-2xl font-display font-medium text-slate-900 tracking-tight leading-tight">{knowledgePanel.title}</h2>
+                           <p className="text-sm text-slate-500 mt-1 font-normal">{knowledgePanel.subtitle}</p>
                          </div>
-                       ))}
+                         <div className="flex flex-col gap-1 items-center justify-center w-8 h-8 rounded-full hover:bg-slate-100 cursor-pointer text-slate-450 hover:text-slate-600 shrink-0 select-none">
+                           <div className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
+                           <div className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
+                           <div className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
+                         </div>
+                       </div>
+
+                       {/* Image Collage / Mosaic */}
+                       {panelImages.length > 0 && (
+                         <div className="-mx-2 mb-6">
+                           {panelImages.length === 1 ? (
+                             <div className="aspect-[16/10] w-full rounded-2xl overflow-hidden hover:opacity-95 transition-opacity">
+                               <img src={panelImages[0]} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                             </div>
+                           ) : panelImages.length === 2 ? (
+                             <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden h-[140px]">
+                               <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                               <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                             </div>
+                           ) : (
+                             <div className="grid grid-cols-3 gap-1.5 rounded-xl overflow-hidden h-[140px]">
+                               <div className="col-span-2 h-full">
+                                 <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                               </div>
+                               <div className="grid grid-rows-2 gap-1.5 h-full">
+                                 <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                                 <img src={panelImages[2]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                               </div>
+                             </div>
+                           )}
+                         </div>
+                       )}
+
+                       {/* About description and Wikipedia source link */}
+                       <div className="space-y-6">
+                         <div className="pb-5 border-b border-slate-100 text-left">
+                           <p className="text-slate-600 leading-relaxed text-[15px]">{knowledgePanel.description}</p>
+                           <span className="text-slate-450 text-[13px] mt-2 block font-normal">
+                             Source: <a href={knowledgePanel.wikipediaUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(knowledgePanel.title)}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Wikipedia</a>
+                           </span>
+                         </div>
+
+                         {/* Details Grid container */}
+                         {knowledgePanel.details && knowledgePanel.details.length > 0 && (
+                           <div className="space-y-3 pt-4 border-t border-slate-100 text-[13px]">
+                             {knowledgePanel.details.map((detail: any, i: number) => (
+                               <div key={i} className="text-[13.5px] leading-relaxed text-left py-1">
+                                 <span className="font-semibold text-slate-800">{detail.label}: </span>
+                                 <span className="text-slate-600 font-normal">{detail.value}</span>
+                               </div>
+                             ))}
+                           </div>
+                         )}
+
+                         {/* Sections display inside the knowledge card */}
+                         {knowledgePanel.sections && knowledgePanel.sections.length > 0 && (
+                           <div className="space-y-4 pt-1">
+                             {knowledgePanel.sections.map((sec: any, i: number) => (
+                               <div key={i} className="text-[13px] text-left">
+                                 <h4 className="font-bold text-slate-800 uppercase tracking-wide text-[11px] mb-1">{sec.title}</h4>
+                                 <p className="text-slate-600 leading-relaxed">{sec.content}</p>
+                               </div>
+                             ))}
+                           </div>
+                         )}
+
+                         {/* People Also Search For section */}
+                         {knowledgePanel.peopleAlsoSearchFor && knowledgePanel.peopleAlsoSearchFor.length > 0 && (
+                           <div className="pt-6 border-t border-slate-100">
+                             <h3 className="font-display font-bold text-slate-900 text-lg mb-4 text-left">People also search for</h3>
+                             
+                             <div className="grid grid-cols-4 gap-3">
+                               {(() => {
+                                 const visibleItems = isPasfExpanded 
+                                   ? knowledgePanel.peopleAlsoSearchFor 
+                                   : knowledgePanel.peopleAlsoSearchFor.slice(0, 4);
+
+                                 return visibleItems.map((item: any, i: number) => (
+                                   <button 
+                                     key={i} 
+                                     onClick={() => { setQuery(item.query || item.name); onSearch(item.query || item.name); }}
+                                     className="flex flex-col items-center group/pasf w-full focus:outline-none transition-transform active:scale-95 text-center"
+                                     title={`Search for ${item.name}`}
+                                   >
+                                     <div className="aspect-square w-full rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-100 p-1 flex items-center justify-center overflow-hidden transition-all duration-300">
+                                       <img 
+                                         src={item.image || "https://images.unsplash.com/photo-1544197150-b99a580bb7a8?q=80&w=150"} 
+                                         className="w-full h-full object-cover rounded-xl group-hover/pasf:scale-105 transition-transform duration-305" 
+                                         referrerPolicy="no-referrer"
+                                         alt={item.name}
+                                       />
+                                     </div>
+                                     <span className="text-[11px] font-normal leading-tight mt-2 text-slate-800 group-hover/pasf:text-blue-600 transition-colors line-clamp-2 w-full break-words">
+                                       {item.name}
+                                     </span>
+                                   </button>
+                                 ));
+                               })()}
+                             </div>
+
+                             {knowledgePanel.peopleAlsoSearchFor.length > 4 && (
+                               <button
+                                 onClick={() => { setIsPasfExpanded(!isPasfExpanded); }}
+                                 className="mt-5 w-full bg-[#f1f3f4] hover:bg-slate-200 text-slate-800 text-[13px] font-bold py-2.5 px-5 rounded-full transition-all duration-200 border-none outline-none focus:outline-none flex items-center justify-center gap-1 text-center cursor-pointer"
+                               >
+                                 <span>{isPasfExpanded ? 'See less' : 'See more'}</span>
+                                 <ChevronRight size={14} className={`text-slate-500 transition-transform duration-300 ${isPasfExpanded ? '-rotate-90' : ''}`} />
+                               </button>
+                             )}
+                           </div>
+                         )}
+
+                       </div>
                      </div>
-                   </div>
-                 </div>
+                   );
+                 })()}
                </motion.div>
             </aside>
           )}
@@ -1552,19 +1839,43 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </div>
             ) : filteredResults.length > 0 ? (
               activeTab === 'images' ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
-                  {filteredResults.map((res: any) => (
-                    <div 
-                      key={res.id} 
-                      onClick={() => setSelectedImage(res)} 
-                      className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
-                    >
-                      <img src={isImageUrl(res.url) ? res.url : res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
-                      <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                        <span className="text-white text-xs font-medium truncate">{res.title}</span>
+                <div className="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4 space-y-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                  {filteredResults.map((res: any) => {
+                    const imgUrl = isImageUrl(res.url) ? res.url : res.image;
+                    return (
+                      <div 
+                        key={res.id} 
+                        onClick={() => setSelectedImage(res)} 
+                        className="break-inside-avoid bg-white rounded-2xl overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all border border-slate-100 cursor-pointer p-2 mb-4 group inline-block w-full"
+                      >
+                        <div className="rounded-xl overflow-hidden bg-slate-50 relative flex items-center justify-center">
+                          <img 
+                            src={imgUrl} 
+                            className="w-full h-auto object-contain transition-transform group-hover:scale-[1.01]" 
+                            style={{ maxHeight: '280px' }} 
+                            referrerPolicy="no-referrer" 
+                            alt={res.title} 
+                          />
+                        </div>
+                        <div className="pt-2 px-1 pb-1">
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
+                            <span className="w-3.5 h-3.5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200/50 shrink-0">
+                              <img 
+                                src={`https://www.google.com/s2/favicons?sz=64&domain=${res.displayUrl || 'wikipedia.org'}`} 
+                                className="w-2.5 h-2.5" 
+                                referrerPolicy="no-referrer" 
+                                onError={(e) => { (e.target as any).src = 'https://wikipedia.org/favicon.ico'; }}
+                              />
+                            </span>
+                            <span className="truncate">{res.displayUrl ? res.displayUrl.replace('www.', '') : 'Wikipedia'}</span>
+                          </div>
+                          <h3 className="text-xs font-semibold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1 leading-snug">
+                            {res.title}
+                          </h3>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="space-y-8 md:space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
@@ -1731,7 +2042,7 @@ function QuickSummary({ text }: { text: string }) {
 }
 
 function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void, onImageClick?: (img: any) => void }) {
-  const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
+  const imagesWithMeta = results.filter(r => r.image).slice(0, 24);
   if (imagesWithMeta.length < 3) return null;
 
   return (
@@ -1740,16 +2051,16 @@ function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results:
         <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Images for {results[0]?.title.split(' ')[0] || 'your search'}</h2>
         <button 
           onClick={onMore} 
-          className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100"
+          className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100 cursor-pointer"
         >
           View all <ChevronRight size={14} />
         </button>
       </div>
-      <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
+      <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar -mx-4 px-4 snap-x">
         {imagesWithMeta.map((img) => (
-          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
-            <div className="aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1">
-              <img src={img.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={img.title} />
+          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="shrink-0 w-36 sm:w-48 h-full group snap-start cursor-pointer">
+            <div className="h-[120px] sm:h-[130px] rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 flex items-center justify-center p-2.5 transition-all group-hover:bg-slate-100/60 group-hover:shadow-md">
+              <img src={img.image} className="h-full w-auto max-w-full object-contain transition-transform group-hover:scale-[1.03]" referrerPolicy="no-referrer" alt={img.title} />
             </div>
             <div className="mt-2 text-[12px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{img.title}</div>
             <div className="mt-1 text-[10px] text-slate-400 line-clamp-1 flex items-center gap-1.5 font-bold uppercase tracking-wider">
@@ -1996,7 +2307,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
 
           {/* Inline miniature strip */}
           {domainImages.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide py-3 mt-2">
+            <div className="flex gap-2 overflow-x-auto custom-scrollbar py-3 mt-2">
               {domainImages.slice(0, 8).map((img: any, i: number) => (
                 <button 
                   key={img.id} 
@@ -2354,8 +2665,8 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
                           <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
                              <TrendingUp size={18} className="text-blue-500" /> Interaction Volume
                           </h4>
-                          <div className="flex-1 min-h-0">
-                            <ResponsiveContainer width="100%" height="100%">
+                          <div className="flex-1 min-h-[250px] h-[250px]">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                                <AreaChart data={trendData}>
                                   <defs>
                                     <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
@@ -2374,8 +2685,8 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
                           <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
                              <Target size={18} className="text-purple-500" /> Event Distribution
                           </h4>
-                          <div className="flex-1 min-h-0">
-                             <ResponsiveContainer width="100%" height="100%">
+                          <div className="flex-1 min-h-[250px] h-[250px]">
+                             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                                 <PieChart>
                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
                                       {pieData.map((_entry, index) => (
@@ -2403,8 +2714,8 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                      <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm h-[500px] flex flex-col">
                         <h4 className="font-bold text-slate-900 mb-8">Top 10 Resonant Queries</h4>
-                        <div className="flex-1 min-h-0">
-                           <ResponsiveContainer width="100%" height="100%">
+                        <div className="flex-1 min-h-[360px] h-[360px]">
+                           <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                               <BarChart data={queryData} layout="vertical">
                                  <XAxis type="number" hide />
                                  <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12, fontWeight: 'bold' }} />

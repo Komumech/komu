@@ -30,6 +30,14 @@ export interface KnowledgePanel {
   subtitle: string;
   description: string;
   image?: string;
+  images?: string[];
+  wikipediaUrl?: string;
   details: { label: string; value: string }[];
   sections?: { title: string; content: string }[];
+  peopleAlsoSearchFor?: {
+    name: string;
+    category?: string;
+    image: string;
+    query: string;
+  }[];
 }
