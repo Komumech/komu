@@ -15,15 +15,13 @@ import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestor
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI, Type } from "@google/genai";
 import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
-import { 
-  shouldShowColorPicker, ColorPickerWidget,
-  shouldShowCalculator, CalculatorWidget,
-  shouldShowCurrency, CurrencyConverterWidget
-} from './components/SearchWidgets';
+// Ensure these are correctly marked with 'export' in src/components/SearchWidgets.tsx
+import * as SearchWidgets from './components/SearchWidgets';
 import { PageIntelligencePanel } from './components/PageIntelligence';
 
 // Initialize Gemini on the Frontend
-const API_KEY = process.env.GEMINI_API_KEY || '';
+// Note: In Vite, use import.meta.env and prefix your variable with VITE_ for client-side access
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenAI({ apiKey: API_KEY || 'AI-NOT-SET' });
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -1353,14 +1351,14 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
           <div className="w-full max-w-3xl space-y-6 order-2 lg:order-1">
             {/* Interactive Search Tool Widgets */}
-            {activeTab === 'all' && shouldShowColorPicker(query) && (
-              <ColorPickerWidget query={query} />
+            {activeTab === 'all' && (SearchWidgets as any).shouldShowColorPicker?.(query) && (
+              <SearchWidgets.ColorPickerWidget query={query} />
             )}
-            {activeTab === 'all' && shouldShowCalculator(query) && (
-              <CalculatorWidget query={query} />
+            {activeTab === 'all' && (SearchWidgets as any).shouldShowCalculator?.(query) && (
+              <SearchWidgets.CalculatorWidget query={query} />
             )}
-            {activeTab === 'all' && shouldShowCurrency(query) && (
-              <CurrencyConverterWidget query={query} />
+            {activeTab === 'all' && (SearchWidgets as any).shouldShowCurrency?.(query) && (
+              <SearchWidgets.CurrencyConverterWidget query={query} />
             )}
 
             {/* Autocorrect / Did you mean */}
@@ -2448,4 +2446,3 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
     </motion.div>
   );
 }
-
