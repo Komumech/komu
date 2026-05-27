@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Fragment } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, PlayCircle } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -15,12 +15,33 @@ import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestor
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI, Type } from "@google/genai";
 import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
+import { 
+  shouldShowColorPicker, ColorPickerWidget,
+  shouldShowCalculator, CalculatorWidget,
+  shouldShowCurrency, CurrencyConverterWidget
+} from './components/SearchWidgets';
+import { PageIntelligencePanel } from './components/PageIntelligence';
 
 // Initialize Gemini on the Frontend
 const API_KEY = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenAI({ apiKey: API_KEY || 'AI-NOT-SET' });
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+
+const WALLPAPERS = [
+  'https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1920&auto=format&fit=crop', // cosmic space
+  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?q=80&w=1920&auto=format&fit=crop', // green forest
+  'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1920&auto=format&fit=crop', // dramatic mountains
+  'https://images.unsplash.com/photo-1509316975850-ff9c5edd0cd9?q=80&w=1920&auto=format&fit=crop', // desert dunes
+  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1920&auto=format&fit=crop', // sunny ocean beach
+  'https://images.unsplash.com/photo-1531366936337-7c912a4589a7?q=80&w=1920&auto=format&fit=crop', // majestic aurora
+  'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1920&auto=format&fit=crop', // misty valley lake
+  'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?q=80&w=1920&auto=format&fit=crop', // bright galaxy nebulae
+  'https://images.unsplash.com/photo-1486873249359-2731bd6dafc7?q=80&w=1920&auto=format&fit=crop', // frozen winter peak
+  'https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1920&auto=format&fit=crop', // lavender field hills
+  'https://images.unsplash.com/photo-1474511320723-9a56873867b5?q=80&w=1920&auto=format&fit=crop', // canyon rivers
+  'https://images.unsplash.com/photo-1511497584788-876760111969?q=80&w=1920&auto=format&fit=crop'  // deep pine trees
+];
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -30,7 +51,6 @@ export default function App() {
   const [aiOverview, setAiOverview] = useState<AIOverview | null>(null);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
   const [aiRateLimited, setAiRateLimited] = useState(false);
-  const [scoutKnowledge, setScoutKnowledge] = useState<any>(null);
   const [faq, setFaq] = useState<{ question: string; answer: string }[]>([]);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -44,8 +64,10 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [homeBg, setHomeBg] = useState<string>('');
+  const [bgRotationMode, setBgRotationMode] = useState<'hourly' | 'daily'>(() => {
+    return typeof window !== 'undefined' ? (localStorage.getItem('bg_rotation_mode') as 'hourly' | 'daily') || 'hourly' : 'hourly';
+  });
   const [dictionary, setDictionary] = useState<any>(null);
-  const [directAnswer, setDirectAnswer] = useState<any>(null);
   const [correction, setCorrection] = useState<string | null>(null);
   const [originalQuery, setOriginalQuery] = useState<string | null>(null);
   const [userHistory, setUserHistory] = useState<string[]>([]);
@@ -62,10 +84,7 @@ export default function App() {
   const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
-  const [selectedVideo, setSelectedVideo] = useState<any>(null); // New state for video modal
-  const [inlinePlayingId, setInlinePlayingId] = useState<string | null>(null); // Track which result is playing inline
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
-  const sessionId = useRef(`sess-${Math.random().toString(36).substring(2, 15)}`).current;
   const lastQueryRef = useRef<string>('');
   const lastClickRef = useRef<{ id: string; url: string; time: number; query: string } | null>(null);
   const appsRef = useRef<HTMLDivElement>(null);
@@ -74,6 +93,7 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const handleSearchRef = useRef<any>(null);
 
   // Click outside listener for suggestions and apps
   useEffect(() => {
@@ -106,17 +126,6 @@ export default function App() {
           queryText: lastClickRef.current.query,
           durationMs
         }).catch(() => {});
-
-        // AI Training Log: dwell_update for Learning to Rank
-        axios.post('/api/admin/clickstream', {
-          type: 'dwell_update',
-          query: lastClickRef.current.query,
-          url: lastClickRef.current.url,
-          duration: durationSeconds,
-          sessionId: sessionId,
-          uid: user?.sub || 'guest'
-        }).catch(() => {});
-
         lastClickRef.current = null;
       }
     };
@@ -132,22 +141,23 @@ export default function App() {
   // SWITCH TAB SEARCH
   useEffect(() => {
     if (isSearching && query.trim()) {
-      handleSearch(undefined, 1);
+      handleSearch(query, 1);
     }
   }, [activeTab]);
 
-  // Random Background for Home
+  // Deterministic hourly / daily backgrounds
   useEffect(() => {
-    const backgrounds = [
-      'https://picsum.photos/seed/scout-1/1920/1080?blur=1',
-      'https://picsum.photos/seed/scout-vibe/1920/1080?blur=1',
-      'https://picsum.photos/seed/minimal/1920/1080?blur=1',
-      'https://picsum.photos/seed/abstract/1920/1080?blur=1',
-      'https://picsum.photos/seed/nature/1920/1080?blur=1',
-      'https://picsum.photos/seed/space/1920/1080?blur=1'
-    ];
-    setHomeBg(backgrounds[Math.floor(Math.random() * backgrounds.length)]);
-  }, []);
+    const updateWallpaper = () => {
+      if (WALLPAPERS && WALLPAPERS.length > 0) {
+        const timeDivisor = bgRotationMode === 'hourly' ? 3600000 : 86400000;
+        const index = Math.floor(Date.now() / timeDivisor) % WALLPAPERS.length;
+        setHomeBg(WALLPAPERS[index]);
+      }
+    };
+    updateWallpaper();
+    const interval = setInterval(updateWallpaper, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, [bgRotationMode]);
 
   // SPEECH RECOGNITION SETUP
   useEffect(() => {
@@ -162,16 +172,30 @@ export default function App() {
       };
 
       recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0])
-          .map((result: any) => result.transcript)
-          .join('');
-        setQuery(transcript);
-        if (event.results[0].isFinal) {
+        let finalTranscript = '';
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+        
+        const currentText = finalTranscript || interimTranscript;
+        if (currentText) {
+          setQuery(currentText);
+        }
+
+        if (finalTranscript) {
+          try {
+            recognition.stop();
+          } catch (e) {}
+          setIsListening(false);
+          // Let currentText sink in visually, then trigger search
           setTimeout(() => {
-            setIsListening(false);
-            handleSearch(transcript);
-          }, 500);
+            handleSearchRef.current(finalTranscript);
+          }, 400);
         }
       };
 
@@ -342,14 +366,6 @@ export default function App() {
     let finalQuery = typeof e === 'string' ? e : query;
     const currentVisualQuery = visualQuery || imageQuery;
     
-    // If searching keyword from Results header, reset to 'All' tab so panel shows
-    const isFreshSearch = e !== undefined && requestedPage === 1 && !visualQuery;
-    if (isFreshSearch && activeTab !== 'all') {
-      if (typeof e === 'string') setQuery(e);
-      setActiveTab('all');
-      return; // setActiveTab triggers useEffect which calls handleSearch again
-    }
-
     if (!finalQuery.trim() && !currentVisualQuery) return;
 
     setLoading(true);
@@ -359,9 +375,7 @@ export default function App() {
     setVisualMathProblem(null);
     setVisualAnalysis(null);
     setAiOverview(null);
-    setScoutKnowledge(null);
     setDictionary(null);
-    setDirectAnswer(null);
     setKnowledgePanel(null);
     setIsEnglishHelp(false);
     setFaq([]);
@@ -374,15 +388,7 @@ export default function App() {
 
     let vector = null;
 
-    // PERFORM FRONTEND VISUAL ANALYSIS IF IMAGE IS PRESENT
-    if (currentVisualQuery && requestedPage === 1) {
-      setSearchStage('extracting');
-      await new Promise(r => setTimeout(r, 800)); // Show scanning start
-      setSearchStage('vectorizing');
-    }
-
     // Neural embeddings are now handled server-side using mpnet-base for consistency and precision.
-    // compatibility with the CLIP-ViT-L-14 latent space.
 
     // AUTOCORRECT ON FRONTEND (Adhering to rules)
     if (!currentVisualQuery && requestedPage === 1 && finalQuery.length > 3 && API_KEY && API_KEY !== 'AI-NOT-SET') {
@@ -394,7 +400,7 @@ export default function App() {
         
         const r = await genAI.models.generateContent({
           model: "gemini-3-flash-preview",
-          contents: autocorrectPrompt
+          contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
         });
         const text = r.text?.trim() || "";
         if (text.toLowerCase() !== finalQuery.toLowerCase() && text.length > 0 && text.length < 100) {
@@ -402,9 +408,9 @@ export default function App() {
           setOriginalQuery(finalQuery);
           finalQuery = text;
         }
-      } catch (e) {}
-    } else {
-      console.warn("Autocorrect failed: API key not configured");
+      } catch (e) {
+        console.warn("Autocorrect failed:", e);
+      }
     }
 
     try {
@@ -427,10 +433,10 @@ export default function App() {
         data = await searchRes.json();
       } else {
         const text = await searchRes.text();
+        console.error("Non-JSON Server Response:", text);
         if (text.includes("application starts") || text.includes("Starting Server")) {
           throw new Error("Neural Engines Warming Up: Scout is currently loading its local AI models. Please wait about 30 seconds and try again.");
         }
-        console.error("Non-JSON Server Response:", text);
         throw new Error(`Server Error (${searchRes.status}): ${text.slice(0, 100)}...`);
       }
       
@@ -460,30 +466,19 @@ export default function App() {
       }
 
       const pineconeResults = data.results || [];
-      setScoutKnowledge(data.scoutKnowledge || null);
-      if (data.scoutKnowledge) {
-        console.log(`🧠 Knowledge Panel: Sourced from ${data.scoutKnowledge.source}`);
-      }
-
       setTotalPages(data.totalPages || 1);
       setDictionary(data.dictionary || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
       
-      // Trigger Direct Answer if factual intent detected
-      if (data.factualType && data.detectedEntity) {
-        generateDirectAnswer(finalQuery, data.factualType, data.detectedEntity.name);
-      }
-
       const rawResults: SearchResult[] = pineconeResults.map((r: any) => ({
+        ...r,
         id: r.id,
-        title: r.title || 'Untitled Page',
+        title: r.title || r.official_headline || 'Untitled Page',
         url: r.url || '#',
         displayUrl: r.displayUrl || 'unknown',
-        snippet: r.snippet || 'No description available.',
+        snippet: r.snippet || r.text || 'No description available.',
         sourceIcon: r.sourceIcon || '🌐',
-        image: r.image || null,
-        isNavIntent: r.isNavIntent,
-        isExactMatch: r.isExactMatch
+        image: r.image || null
       }));
 
       // IMMEDIATE UPDATE FOR SPEED
@@ -497,18 +492,6 @@ export default function App() {
           updatedAt: new Date().toISOString()
         }, { merge: true }).catch(console.error);
         setUserHistory(prev => [...new Set([...prev, finalQuery.trim()])]);
-      }
-
-      // Add Clickstream Logging (Triggers collection creation)
-      if (requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
-        axios.post('/api/admin/clickstream', {
-          type: 'search',
-          query: finalQuery,
-          url: '',
-          position: null,
-          sessionId: sessionId,
-          uid: user?.sub || 'guest'
-        }).catch(() => {}); // Silent fail for analytics
       }
 
       // PARALLEL EXECUTION FOR AI FEATURES
@@ -534,30 +517,12 @@ export default function App() {
     }
   };
 
-  const generateDirectAnswer = async (queryText: string, type: string, subject: string) => {
-    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
-    try {
-      const prompt = `Provide a concise, authoritative "Knowledge Card" answer for: "${queryText}". 
-      Type: "${type}", Subject: "${subject}". 
-      Return ONLY a JSON object: 
-      { 
-        "answer": "Main factual answer (e.g. North America)", 
-        "label": "Context hierarchy (e.g. Canada > Continent)", 
-        "description": "One sentence explanation", 
-        "details": [{"label": "Factual Key", "value": "Factual Value"}],
-        "image_hint": "A single word for a relevant high-res photo"
-      }`;
-
-      const result = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
-      });
-      
-      const data = JSON.parse(result.text || 'null');
-      if (data) setDirectAnswer(data);
-    } catch (e) { console.error("Direct Answer failed", e); }
-  };
+  // Coupling handleSearch to handleSearchRef cleanly after lexical declaration
+  useEffect(() => {
+    if (handleSearchRef) {
+      handleSearchRef.current = handleSearch;
+    }
+  }, [handleSearch]);
 
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
@@ -580,7 +545,7 @@ export default function App() {
            Instructions:
            1. Start with a direct answer.
            2. Use bullet points for key facts.
-           3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown !title if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
+           3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown ![title](Image_URL) if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
            4. Be objective and professional.
            5. Use Markdown formatting.`;
 
@@ -685,22 +650,12 @@ export default function App() {
     }
   };
 
-  const handleResultClick = (id: string, url: string, position: number) => {
+  const handleResultClick = (id: string, url: string) => {
     // Record for behavioral signals (Pogo-sticking detection)
     lastClickRef.current = { id, url, time: Date.now(), query: lastQueryRef.current };
 
     // Immediate NavBoost "Interest" signal
     axios.post('/api/feedback', { id, type: 'click', queryText: lastQueryRef.current }).catch(() => {});
-
-    // AI Training Log: capture position for Learning to Rank
-    axios.post('/api/admin/clickstream', {
-      type: 'click',
-      query: lastQueryRef.current,
-      url: url,
-      position: position,
-      sessionId: sessionId,
-      uid: user?.sub || 'guest'
-    }).catch(() => {});
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
@@ -808,6 +763,8 @@ export default function App() {
             fileInputRef={fileInputRef} 
             userHistory={userHistory}
             onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
+            bgRotationMode={bgRotationMode}
+            setBgRotationMode={setBgRotationMode}
           />
         ) : (
           <ResultsView 
@@ -859,14 +816,8 @@ export default function App() {
             visualAnalysis={visualAnalysis}
             setImageQuery={setImageQuery}
             selectedImage={selectedImage}
-            selectedVideo={selectedVideo} // Pass to ResultsView
             setSelectedImage={setSelectedImage}
-            setSelectedVideo={setSelectedVideo}
-            inlinePlayingId={inlinePlayingId}
-            setInlinePlayingId={setInlinePlayingId}
             aiRateLimited={aiRateLimited}
-            scoutKnowledge={scoutKnowledge}
-            directAnswer={directAnswer}
             onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
           />
         )}
@@ -883,19 +834,9 @@ export default function App() {
         {selectedImage && (
           <ImageDetailView 
             image={selectedImage} 
-            // Pass all results to ImageDetailView to find related images
-            // This avoids re-fetching and keeps the data consistent
             allResults={results} 
             onClose={() => setSelectedImage(null)} 
             onSelect={(img: any) => setSelectedImage(img)}
-            onResultClick={handleResultClick}
-          />
-        )}
-        {selectedVideo && ( // New: Video Detail View
-          <VideoDetailView
-            video={selectedVideo}
-            onClose={() => setSelectedVideo(null)}
-            onResultClick={handleResultClick}
           />
         )}
       </AnimatePresence>
@@ -903,7 +844,34 @@ export default function App() {
   );
 }
 
-function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics }: any) {
+function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics, bgRotationMode, setBgRotationMode }: any) {
+  const [glowVisible, setGlowVisible] = useState(true);
+
+  useEffect(() => {
+    const t = setTimeout(() => setGlowVisible(false), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    const textarea = inputRef?.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+  }, [query, inputRef]);
+
+  // Find first suggestion that matches query
+  const getGhostSuggestion = () => {
+    if (!query || query.trim().length === 0) return '';
+    const match = suggestions && suggestions.find ? suggestions.find((s: string) => s.toLowerCase().startsWith(query.toLowerCase())) : '';
+    if (match && match.toLowerCase() !== query.toLowerCase()) {
+      return match;
+    }
+    return '';
+  };
+
+  const ghostSuggestion = getGhostSuggestion();
+  const ghostText = ghostSuggestion ? ghostSuggestion.slice(query.length) : '';
+
   return (
     <motion.div 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -20 }}
@@ -945,12 +913,23 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           className="relative px-4 w-full max-w-2xl mx-auto"
         >
           <form 
-            onSubmit={onSearch}
-            className={`flex items-center gap-3 px-5 h-12 md:h-14 transition-all duration-300 bg-white shadow-2xl ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem]' : 'rounded-full'}`}
+            onSubmit={(e) => { e.preventDefault(); onSearch(); }}
+            className={`relative flex items-center gap-3 px-5 py-3 transition-all duration-300 bg-white shadow-2xl ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem]' : 'rounded-full'}`}
           >
-            <Search className="text-slate-400 group-focus-within:text-blue-500 transition-colors" size={22} />
+            {/* Spinning colorful gradient border (3-sec load effect) */}
+            <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem] rounded-b-none border-b-0' : 'rounded-full'} ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
+              <div 
+                className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#a855f7,#ec4899,#22c55e,#3b82f6)] animate-spin"
+                style={{ animationDuration: '1.5s', animationTimingFunction: 'linear' }}
+              />
+            </div>
+            {/* Mask to lock border width */}
+            <div className={`absolute inset-[1.5px] bg-white pointer-events-none z-0 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem]' : 'rounded-full'}`} />
+
+            <Search className="text-slate-400 group-focus-within:text-blue-500 transition-colors shrink-0 relative z-10" size={22} />
+            
             {imageQuery && (
-              <div className="relative group/img ml-4 h-8 w-8 shrink-0 rounded overflow-hidden shadow-sm border border-slate-200">
+              <div className="relative group/img ml-2 h-8 w-8 shrink-0 rounded overflow-hidden shadow-sm border border-slate-200 z-10">
                 <img src={imageQuery} className="w-full h-full object-cover blur-[2px]" />
                 <div className="absolute inset-0 bg-[#00000022] backdrop-blur-[1px] grid grid-cols-4 grid-rows-4 opacity-70">
                   {[...Array(16)].map((_, i) => <div key={i} className="border-[0.5px] border-white/20" />)}
@@ -964,15 +943,61 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 </button>
               </div>
             )}
-            <input 
-              ref={inputRef} 
-              value={query} 
-              onFocus={() => setShowSuggestions(true)}
-              onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
-              placeholder={imageQuery ? "Visual Search Active" : "Ask Scout anything..."} 
-              className="flex-1 bg-transparent border-none outline-none text-slate-900 text-base md:text-lg placeholder:text-slate-400" 
-            />
-            <div className="flex items-center gap-3">
+
+            {/* Dynamic Growing Search Input / Caret Animate / Ghost suggestions */}
+            <div className="relative flex-1 flex items-stretch min-w-0 min-h-[1.5rem] md:min-h-[1.75rem] z-10 text-base md:text-lg font-normal leading-relaxed text-slate-900">
+              {/* Ghost Suggestion Layer */}
+              {ghostText && (
+                <div 
+                  className="absolute inset-0 pointer-events-none select-none text-slate-400/50 text-left break-words whitespace-pre-wrap overflow-hidden"
+                  style={{
+                    fontSize: 'inherit',
+                    fontFamily: 'inherit',
+                    lineHeight: 'inherit',
+                    fontWeight: 'inherit',
+                    padding: '0px 24px 0px 0px'
+                  }}
+                >
+                  <span className="text-transparent border-none p-0 m-0 break-words whitespace-pre-wrap">{query}</span>
+                  <span 
+                    className="text-slate-400 pointer-events-auto select-none cursor-pointer hover:text-slate-500 transition-colors border-b border-dotted border-slate-300" 
+                    title="Tap/Press Tab or ArrowRight to accept suggestion" 
+                    onClick={() => { setQuery(ghostSuggestion); }}
+                  >
+                    {ghostText}
+                  </span>
+                </div>
+              )}
+
+              <textarea 
+                ref={inputRef} 
+                value={query} 
+                rows={1}
+                onFocus={() => setShowSuggestions(true)}
+                onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    onSearch();
+                    setShowSuggestions(false);
+                  } else if (e.key === 'Tab' || e.key === 'ArrowRight') {
+                    if (ghostSuggestion) {
+                      e.preventDefault();
+                      setQuery(ghostSuggestion);
+                    }
+                  }
+                }}
+                placeholder={imageQuery ? "Visual Search Active" : "Ask Scout anything..."} 
+                style={{
+                  resize: 'none',
+                  height: 'auto',
+                  maxHeight: '160px'
+                }}
+                className="flex-1 bg-transparent border-none outline-none text-inherit placeholder:text-slate-400 overflow-y-auto animate-caret py-0 pr-6 pl-0 font-normal leading-relaxed" 
+              />
+            </div>
+
+            <div className="flex items-center gap-2 relative z-10 shrink-0">
               {(query || imageQuery) && (
                 <X 
                   size={18} 
@@ -1042,82 +1067,27 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           </motion.div>
         )}
       </div>
+
+      {/* Dynamic Wallpaper Rotation Controller (hourly/daily) */}
+      {setBgRotationMode && (
+        <div className="absolute bottom-6 right-6 z-20 flex items-center gap-2">
+          <button
+            onClick={() => setBgRotationMode(bgRotationMode === 'hourly' ? 'daily' : 'hourly')}
+            className="p-2 md:p-2.5 rounded-full backdrop-blur-md bg-black/30 border border-white/10 hover:bg-black/50 text-white/80 hover:text-white transition-all flex items-center justify-center cursor-pointer shadow-lg"
+            title={bgRotationMode === 'hourly' ? "Set Wallpaper rotation to Daily ☼" : "Set Wallpaper rotation to Hourly ↺"}
+          >
+            <Clock size={14} className="animate-spin" style={{ animationDuration: '6s' }} />
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 }
 
-function VisualMathDisplay({ problem, stage, image, analysis }: any) {
-  const stages = [
-    { id: 'extracting', label: 'Extracting Text', icon: Camera },
-    { id: 'vectorizing', label: 'Neural Mapping', icon: Zap },
-    { id: 'ranking', label: 'Solving Problem', icon: Target },
-  ];
-
-  const currentStageIndex = stages.findIndex(s => s.id === stage);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-slate-900 rounded-[32px] overflow-hidden mb-8 border border-slate-800 shadow-2xl"
-    >
-      <div className="flex flex-col md:flex-row">
-        <div className="w-full md:w-1/3 aspect-square bg-black relative">
-          <img src={image} className="w-full h-full object-contain opacity-60" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
-            <div className="flex gap-2 mb-4">
-              {stages.map((s, i) => (
-                <div 
-                  key={s.id} 
-                  className={`h-1 w-8 rounded-full transition-colors duration-500 ${i <= currentStageIndex ? 'bg-blue-500' : 'bg-slate-700'}`} 
-                />
-              ))}
-            </div>
-            <p className="text-blue-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">{stages[currentStageIndex]?.label || 'Processing'}</p>
-            {stage !== 'idle' && <Loader2 className="animate-spin text-white/20" size={24} />}
-          </div>
-        </div>
-        
-        <div className="flex-1 p-8 md:p-10">
-          {problem ? (
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-blue-400 text-[10px] font-black uppercase tracking-[0.2em] mb-3">Detected Problem</h3>
-                <div className="text-2xl font-display font-bold text-white mb-2">{problem.expression}</div>
-                <p className="text-slate-400 text-sm">{problem.description}</p>
-              </div>
-              
-              <div className="p-6 bg-white/5 rounded-2xl border border-white/10">
-                <h4 className="text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4">Step-by-Step Solution</h4>
-                <div className="space-y-4">
-                  {problem.steps?.map((step: string, i: number) => (
-                    <div key={i} className="flex gap-4 text-slate-300 text-sm leading-relaxed">
-                      <span className="text-slate-500 font-bold">{i + 1}.</span>
-                      <p>{step}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-6 pt-6 border-t border-white/10 flex items-center justify-between">
-                  <span className="text-white font-bold">Final Result:</span>
-                  <span className="text-2xl font-black text-emerald-400">{problem.answer}</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-500 italic py-12">
-              <Sparkles className="mb-4 opacity-20" size={40} />
-              <p>Scout Vision is analyzing your image...</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, selectedVideo, setSelectedVideo, inlinePlayingId, setInlinePlayingId, aiRateLimited, onOpenAnalytics, directAnswer, scoutKnowledge }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics }: any) {
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
-  const isVideoUrl = (url: string) => url.includes('youtube.com/watch?v=') || url.includes('youtu.be/');
+
   // Group images by domain for the carousel
   const carouselImages = results.filter((res: any) => isImageUrl(res.url));
 
@@ -1125,13 +1095,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
     ? results.filter((res: any) => isImageUrl(res.url) || res.image)
     : results.filter((res: any) => !isImageUrl(res.url)); // Keep 'all' list focused on webpages, but results still contains images
 
-  const videoResults = results.filter((res: any) => res.is_video);
-
-
   // Group results by domain (simple grouping)
   const groupedResults: any[] = [];
   const processedDomains = new Set();
-  const maxNested = 2; // Nesting limit
+  const maxNested = 3; // Nesting limit
   
   if (activeTab === 'all') {
     results.filter((res: any) => !isImageUrl(res.url)).forEach((res: any) => {
@@ -1141,7 +1108,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       if (processedDomains.has(groupKey)) return;
 
       // Find all results for this domain in the full results set
-      const domainMatches = results.filter((r: SearchResult) => 
+      const domainMatches = results.filter(r => 
         !isImageUrl(r.url) &&
         r.displayUrl.toLowerCase().replace(/^www\./, '') === groupKey
       );
@@ -1158,13 +1125,38 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       }
       processedDomains.add(groupKey);
     });
-  } else if (activeTab === 'videos') {
-    videoResults.forEach((res: SearchResult) => groupedResults.push({ type: 'single', result: res }));
   } else {
-    // For images and news tabs, don't group or use simple list
-    // Note: news tab results are already filtered by the backend
-    filteredResults.forEach((res: SearchResult) => groupedResults.push({ type: 'single', result: res }));
+    // For other tabs, don't group or use simple list
+    filteredResults.forEach(res => groupedResults.push({ type: 'single', result: res }));
   }
+
+  const [glowVisible, setGlowVisible] = useState(true);
+  const resInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setGlowVisible(false), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    const textarea = resInputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+  }, [query]);
+
+  // Find first suggestion that matches query
+  const getGhostSuggestion = () => {
+    if (!query || query.trim().length === 0) return '';
+    const match = suggestions && suggestions.find ? suggestions.find((s: string) => s.toLowerCase().startsWith(query.toLowerCase())) : '';
+    if (match && match.toLowerCase() !== query.toLowerCase()) {
+      return match;
+    }
+    return '';
+  };
+
+  const ghostSuggestion = getGhostSuggestion();
+  const ghostText = ghostSuggestion ? ghostSuggestion.slice(query.length) : '';
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col h-screen bg-white">
@@ -1187,23 +1179,82 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
           </div>
           
           <div className="flex-1 w-full max-w-2xl relative" ref={searchContainerRef}>
-            <form onSubmit={onSearch} className={`flex items-center gap-2 px-6 h-12 soft-ui transition-all ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`}>
+            <form 
+              onSubmit={(e) => { e.preventDefault(); onSearch(); }}
+              className={`relative flex items-center gap-2 px-6 py-2.5 transition-all duration-300 soft-ui ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`}
+            >
+              {/* Spinning colorful gradient border (3-sec load effect) */}
+              <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl rounded-b-none border-b-0' : 'rounded-full'} ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
+                <div 
+                  className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#a855f7,#ec4899,#22c55e,#3b82f6)] animate-spin"
+                  style={{ animationDuration: '1.5s', animationTimingFunction: 'linear' }}
+                />
+              </div>
+              {/* Inner blocking mask */}
+              <div className={`absolute inset-[1.5px] bg-slate-50 pointer-events-none z-0 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`} />
+
               {imageQuery && (
-                <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100">
+                <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100 relative z-10">
                   <img src={imageQuery} className="w-full h-full object-cover blur-[1.5px]" />
                   <div className="absolute inset-0 bg-[#00000011] backdrop-blur-[0.5px] grid grid-cols-4 grid-rows-4 opacity-60">
                     {[...Array(16)].map((_, i) => <div key={i} className="border-[0.25px] border-white/20" />)}
                   </div>
                 </div>
               )}
-              <input 
-                value={query} 
-                onFocus={() => setShowSuggestions(true)} 
-                onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
-                placeholder={imageQuery ? "Image search active" : "Search Scout..."}
-                className="flex-1 bg-transparent border-none outline-none text-slate-800 font-medium text-sm md:text-base min-w-0" 
-              />
-              <div className="flex items-center gap-3">
+
+              {/* Dynamic Resizable Input with suggestions */}
+              <div className="relative flex-1 flex items-stretch min-w-0 min-h-[1.25rem] md:min-h-[1.5rem] relative z-10 text-sm md:text-base font-medium leading-relaxed text-slate-800">
+                {ghostText && (
+                  <div 
+                    className="absolute inset-x-0 inset-y-0 pointer-events-none select-none text-slate-400/40 text-left break-words whitespace-pre-wrap overflow-hidden"
+                    style={{
+                      fontSize: 'inherit',
+                      fontFamily: 'inherit',
+                      lineHeight: 'inherit',
+                      fontWeight: 'inherit',
+                      padding: '0px 24px 0px 0px'
+                    }}
+                  >
+                    <span className="text-transparent border-none p-0 m-0 break-words whitespace-pre-wrap">{query}</span>
+                    <span 
+                      className="text-slate-400 pointer-events-auto select-none cursor-pointer hover:text-slate-500 transition-colors border-b border-dotted border-slate-300" 
+                      title="Tap/Press Tab or ArrowRight to accept suggestion" 
+                      onClick={() => { setQuery(ghostSuggestion); }}
+                    >
+                      {ghostText}
+                    </span>
+                  </div>
+                )}
+
+                <textarea 
+                  ref={resInputRef}
+                  value={query} 
+                  rows={1}
+                  onFocus={() => setShowSuggestions(true)} 
+                  onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      onSearch();
+                      setShowSuggestions(false);
+                    } else if (e.key === 'Tab' || e.key === 'ArrowRight') {
+                      if (ghostSuggestion) {
+                        e.preventDefault();
+                        setQuery(ghostSuggestion);
+                      }
+                    }
+                  }}
+                  placeholder={imageQuery ? "Image search active" : "Search Scout..."}
+                  style={{
+                    resize: 'none',
+                    height: 'auto',
+                    maxHeight: '120px'
+                  }}
+                  className="flex-1 bg-transparent border-none outline-none text-inherit font-medium overflow-y-auto animate-caret py-0 pr-6 pl-0" 
+                />
+              </div>
+
+              <div className="flex items-center gap-3 relative z-10 shrink-0">
                 <button 
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -1219,7 +1270,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   <Mic size={18} />
                 </button>
                 <div className="w-px h-4 bg-slate-200 mx-1" />
-                <Search size={18} className="text-purple-600 cursor-pointer hover:scale-110 transition-transform" onClick={(ev) => onSearch(ev)} />
+                <Search size={18} className="text-purple-600 cursor-pointer hover:scale-110 transition-transform" onClick={() => onSearch()} />
               </div>
             </form>
             <AnimatePresence>
@@ -1249,13 +1300,13 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
             </div>
             <div className="flex-shrink-0">
-              <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} />
+              <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} onOpenAnalytics={onOpenAnalytics} />
             </div>
           </div>
         </div>
         <div className="px-4 md:px-8 lg:px-24 xl:px-[170px] max-w-[1700px] border-t border-slate-50 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-8 pt-4">
-            {['All', 'Images', 'Videos', 'News'].map(tab => (
+            {['All', 'Images', 'News'].map(tab => (
               <button key={tab} className={`pb-3 text-sm font-bold border-b-2 transition-all ${activeTab === tab.toLowerCase() ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-transparent hover:text-slate-700'}`} onClick={() => setActiveTab(tab.toLowerCase())}>{tab}</button>
             ))}
           </div>
@@ -1263,12 +1314,12 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       </header>
 
       <main className="flex-1 overflow-y-auto">
-        <div className={`flex flex-col lg:flex-row lg:items-start gap-12 p-4 md:p-8 lg:pl-10 lg:pr-4 xl:pl-[120px] xl:pr-[60px] max-w-[1700px]`}>
+        <div className={`flex flex-col lg:flex-row gap-12 p-4 md:p-8 lg:px-24 xl:px-[170px] max-w-[1700px]`}>
           {activeTab === 'all' && knowledgePanel && (
-            <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[480px] lg:shrink-0">
+            <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[400px]">
                <motion.div 
                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                 className="bg-white border border-slate-100 rounded-3xl overflow-hidden sticky top-28 z-10 shadow-sm"
+                 className="bg-white border border-slate-100 rounded-3xl overflow-hidden sticky top-36"
                >
                  <div className="p-6 md:p-8">
                    <h2 className="text-3xl font-display font-medium text-slate-900 mb-1">{knowledgePanel.title}</h2>
@@ -1300,7 +1351,18 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             </aside>
           )}
 
-          <div className="flex-1 max-w-3xl space-y-6 order-2 lg:order-1">
+          <div className="w-full max-w-3xl space-y-6 order-2 lg:order-1">
+            {/* Interactive Search Tool Widgets */}
+            {activeTab === 'all' && shouldShowColorPicker(query) && (
+              <ColorPickerWidget query={query} />
+            )}
+            {activeTab === 'all' && shouldShowCalculator(query) && (
+              <CalculatorWidget query={query} />
+            )}
+            {activeTab === 'all' && shouldShowCurrency(query) && (
+              <CurrencyConverterWidget query={query} />
+            )}
+
             {/* Autocorrect / Did you mean */}
             {correction && (
               <div className="mb-10 animate-in fade-in slide-in-from-top-4 duration-500">
@@ -1328,72 +1390,6 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <VisualMathDisplay problem={visualMathProblem} stage={searchStage} image={imageQuery} analysis={visualAnalysis} />
             )}
 
-            {/* Featured Site Hero Card (Navigational Intent) */}
-            {page === 1 && activeTab === 'all' && results[0] && (results[0].isNavIntent || results[0].isExactMatch) && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                className="w-full bg-slate-50/50 border border-slate-100 rounded-[32px] p-6 mb-10 flex flex-col sm:flex-row items-center justify-between gap-6 hover:bg-slate-50 transition-colors shadow-sm group"
-              >
-                <div className="flex items-center gap-5 flex-1 min-w-0">
-                  <div className="w-16 h-16 rounded-2xl bg-white shadow-xs flex items-center justify-center p-3 shrink-0 border border-slate-50 transition-transform group-hover:scale-110">
-                    <img 
-                      src={results[0].sourceIcon} 
-                      className="w-full h-full object-contain" 
-                      onError={(e:any) => { e.target.src=`https://www.google.com/s2/favicons?domain=${results[0].displayUrl}&sz=128`; }} 
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h2 className="text-2xl font-display font-black text-slate-900 truncate tracking-tight">{results[0].displayUrl.split('.')[0].replace(/-/g, ' ').replace(/\b\w/g, (l: any) => l.toUpperCase())}</h2>
-                      <div className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-black uppercase rounded-md tracking-widest">Official</div>
-                    </div>
-                    <p className="text-slate-600 text-[15px] line-clamp-1 italic font-medium leading-tight">
-                      {results[0].snippet}
-                    </p>
-                  </div>
-                </div>
-                <a 
-                  href={results[0].url} target="_blank" rel="noreferrer" 
-                  onClick={() => onResultClick(results[0].id, results[0].url, 1)}
-                  className="px-8 py-3 bg-[#1a73e8] hover:bg-blue-700 text-white rounded-full font-bold text-sm transition-all shadow-lg shadow-blue-100 flex items-center gap-2 whitespace-nowrap active:scale-95"
-                >
-                  Visit Site <ExternalLink size={16} />
-                </a>
-              </motion.div>
-            )}
-
-            {/* Scout Knowledge Graph Card (Redis) */}
-            {activeTab === 'all' && scoutKnowledge && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                className="backdrop-blur-xl bg-blue-600/5 rounded-[32px] p-8 mb-6 relative overflow-hidden group"
-              >
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Category: {scoutKnowledge.category}</span>
-                    </div>
-                    {scoutKnowledge.image && (
-                      <img src={scoutKnowledge.image} className="w-16 h-16 rounded-2xl object-cover border border-white/40 shadow-xl" referrerPolicy="no-referrer" />
-                    )}
-                  </div>
-                  <h2 className="text-3xl font-display font-bold text-slate-900 mb-4">{scoutKnowledge.title}</h2>
-                  <p className="text-slate-600 text-lg leading-relaxed mb-6 line-clamp-4">{scoutKnowledge.description}</p>
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-widest pt-6 border-t border-slate-100">
-                    <div className="flex gap-4">
-                      <span>Source: {scoutKnowledge.source}</span>
-                      {scoutKnowledge.url && (
-                        <a href={scoutKnowledge.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline flex items-center gap-1">
-                          Wikipedia <ExternalLink size={10} />
-                        </a>
-                      )}
-                    </div>
-                    <span>Learned: {new Date(scoutKnowledge.learnedAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
             {/* AI Overview */}
             {activeTab === 'all' && (aiLoading || aiOverview) && (
               <div className={`glass rounded-[32px] p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
@@ -1411,6 +1407,16 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     <div className="h-4 bg-slate-200/50 rounded w-full"/>
                     <div className="h-4 bg-slate-200/50 rounded w-5/6"/>
                     <div className="h-4 bg-slate-200/50 rounded w-4/6"/>
+                  </div>
+                ) : aiRateLimited ? (
+                  <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
+                    <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
+                      <Zap size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Overview hitting limits</h4>
+                      <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
+                    </div>
                   </div>
                 ) : aiOverview && (
                   <div className="relative">
@@ -1533,40 +1539,6 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </motion.div>
             )}
 
-            {aiRateLimited && (
-              <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
-                <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
-                  <Zap size={20} />
-                </div>
-                <div>
-                  <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Overview hitting limits</h4>
-                  <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
-                </div>
-              </div>
-            )}
-            
-            {/* Video Results Display */}
-            {activeTab === 'videos' && videoResults.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
-                {videoResults.map((res: any, idx: number) => (
-                  <div 
-                    key={res.id} 
-                    onClick={() => {
-                      setSelectedVideo(res);
-                      onResultClick(res.id, res.url, idx + 1);
-                    }} 
-                    className="group relative aspect-video bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
-                  >
-                    <img src={res.thumbnail_url || res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
-                    <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                      <span className="text-white text-sm font-medium truncate">{res.title}</span>
-                    </div>
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><PlayCircle size={48} className="text-white/80" /></div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
             {loading ? (
               <div className="space-y-6">
                 {[1,2,3].map(i => <div key={i} className="animate-pulse space-y-3 p-6 bg-white rounded-3xl border border-slate-100"><div className="h-4 bg-slate-100 rounded w-1/4" /><div className="h-6 bg-slate-100 rounded w-3/4" /><div className="h-20 bg-slate-100 rounded w-full" /></div>)}
@@ -1574,13 +1546,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             ) : filteredResults.length > 0 ? (
               activeTab === 'images' ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
-                  {filteredResults.map((res: any, idx: number) => (
+                  {filteredResults.map((res: any) => (
                     <div 
                       key={res.id} 
-                      onClick={() => {
-                        setSelectedImage(res);
-                        onResultClick(res.id, res.url, idx + 1);
-                      }} 
+                      onClick={() => setSelectedImage(res)} 
                       className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden hover:shadow-xl transition-all border border-slate-200 cursor-pointer"
                     >
                       <img src={isImageUrl(res.url) ? res.url : res.image} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
@@ -1596,11 +1565,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
-                        <ImageStrip 
-                          results={results.filter((res: any) => res.image && !res.is_video)} 
-                          onMore={() => setActiveTab('images')} 
-                          onImageClick={(img: any, pos?: number) => { setSelectedImage(img); onResultClick?.(img.id, img.url, pos || 0); }} 
-                        />
+                        <ImageStrip results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
                       )}
 
                       {/* First FAQ after 3 results */}
@@ -1613,17 +1578,17 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       )}
                       
                       {item.type === 'single' ? (
-                        <ResultCard res={item.result} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} onVideoClick={(vid: any) => setSelectedVideo(vid)} isPlayingInline={inlinePlayingId === item.result.id} setPlayingInline={(id: string | null) => setInlinePlayingId(id)} />
+                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
                       ) : (
                         <div className="space-y-4 py-4 mb-8">
-                          <ResultCard res={item.primary} position={idx + 1} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} onVideoClick={(vid: any) => setSelectedVideo(vid)} isPlayingInline={inlinePlayingId === item.primary.id} setPlayingInline={(id: string | null) => setInlinePlayingId(id)} />
+                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
                           <div className="ml-4 sm:ml-12 flex flex-col -mt-4">
                             <div className="border-t border-slate-100 mt-2 mb-4" />
                             <div className="space-y-0">
                               {item.secondaries.map((s: any, sIdx: number) => (
                                 <div key={s.id} className="group/sub">
                                   <a 
-                                    onClick={() => onResultClick?.(s.id, s.url, idx + 1)} 
+                                    onClick={() => onResultClick?.(s.id, s.url)} 
                                     href={s.url} 
                                     target="_blank" 
                                     rel="noreferrer" 
@@ -1731,7 +1696,7 @@ function QuickSummary({ text }: { text: string }) {
           contents: [{ role: 'user', parts: [{ text: prompt }] }]
         });
         if (isMounted) setSummary(res.text || text);
-      } catch {
+      } catch (err) {
         if (isMounted) setSummary(text); // Fallback to snippet
       } finally {
         if (isMounted) setLoading(false);
@@ -1762,7 +1727,7 @@ function QuickSummary({ text }: { text: string }) {
   );
 }
 
-function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[], onMore: () => void, onImageClick?: (img: any, pos?: number) => void }) {
+function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void, onImageClick?: (img: any) => void }) {
   const imagesWithMeta = results.filter(r => r.image).slice(0, 8);
   if (imagesWithMeta.length < 3) return null;
 
@@ -1778,8 +1743,8 @@ function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[]
         </button>
       </div>
       <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
-        {imagesWithMeta.map((img, idx) => (
-          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img, idx + 1); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
+        {imagesWithMeta.map((img) => (
+          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="shrink-0 w-40 sm:w-52 h-full group snap-start cursor-pointer">
             <div className="aspect-[4/3] rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1">
               <img src={img.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={img.title} />
             </div>
@@ -1793,52 +1758,6 @@ function ImageStrip({ results, onMore, onImageClick }: { results: SearchResult[]
     </div>
   );
 }
-
-// New VideoStrip component
-function VideoStrip({ results, onMore, onVideoClick }: { results: SearchResult[], onMore: () => void, onVideoClick?: (vid: any, pos?: number) => void }) {
-  const videosWithMeta = results.filter((r: any) => r.is_video).slice(0, 8);
-  if (videosWithMeta.length < 1) return null;
-
-  return (
-    <div className="py-8 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex items-center justify-between mb-5 px-1">
-        <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Videos</h2>
-        <button 
-          onClick={onMore} 
-          className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100"
-        >
-          View all <ChevronRight size={14} />
-        </button>
-      </div>
-      <div className="flex gap-3 md:gap-4 overflow-x-auto pb-6 scrollbar-hide -mx-4 px-4 snap-x">
-        {videosWithMeta.map((vid: any, idx: number) => (
-          <div key={vid.id} onClick={() => onVideoClick?.(vid, idx + 1)} className="shrink-0 w-64 group snap-start cursor-pointer">
-            <div className="aspect-video rounded-2xl overflow-hidden bg-slate-100 border border-slate-100 transition-all group-hover:shadow-xl group-hover:-translate-y-1 relative">
-              <img src={vid.thumbnail_url || vid.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={vid.title} />
-              {vid.duration && (
-                <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md backdrop-blur-md">
-                  {vid.duration}
-                </div>
-              )}
-              <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors">
-                <div className="w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-red-600 shadow-xl scale-90 group-hover:scale-100 transition-transform">
-                  <PlayCircle fill="currentColor" size={24} className="text-red-600" />
-                </div>
-              </div>
-            </div>
-            <div className="mt-2 text-[14px] font-display font-medium text-[#1a0dab] line-clamp-2 group-hover:underline">{vid.title}</div>
-            <div className="mt-1 text-[12px] text-slate-500 line-clamp-1 flex items-center gap-1.5 font-medium">
-               {vid.source || vid.displayUrl?.replace('www.', '')}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
-
 
 function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOpen: (v: boolean) => void, isWhite?: boolean }) {
   const apps = [
@@ -1980,7 +1899,7 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   );
 }
 
-function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, onVideoClick, isPlayingInline, setPlayingInline }: any) {
+function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, allResults }: any) {
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -2005,8 +1924,7 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
   const siteName = parts[0] === 'www' ? parts[1] || parts[0] : parts[0];
   const displaySiteName = siteName.replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
 
-  // Priority: Domain Carousel > Video Thumbnail > Static Image
-  const activeImage = domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : (res.thumbnail_url || res.image);
+  const activeImage = domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : res.image;
 
   return (
     <article className="group py-5 transition-all border-b border-slate-100 last:border-0 pl-0 overflow-hidden">
@@ -2032,7 +1950,7 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
                 <span className="text-[13px] text-slate-800 font-medium leading-tight truncate">{displaySiteName}</span>
                 <div className="flex items-center gap-1 text-[12px] text-slate-500 leading-tight max-w-full overflow-hidden">
                   <span className="truncate">
-                    {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')} {/* Display full URL without protocol */}
+                    {res.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
                   </span>
                   <ChevronRight size={12} className="shrink-0" />
                 </div>
@@ -2041,7 +1959,7 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
           </div>
 
           <div className="relative group/title inline-block">
-            <a onClick={() => onResultClick?.(res.id, res.url, position)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
+            <a onClick={() => onResultClick?.(res.id, res.url)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
               <h3 className="text-xl md:text-2xl font-display font-medium text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
                 {res.title}
               </h3>
@@ -2073,28 +1991,13 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
             )}
           </div>
 
-          {/* Play Video Button if it's a video result */}
-          {res.is_video && res.embed_url && (
-            <button 
-              onClick={() => setPlayingInline(isPlayingInline ? null : res.id)}
-              className="flex items-center gap-1.5 text-[11px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-full transition-all active:scale-95 border border-purple-100 mt-4"
-            >
-              {isPlayingInline ? <X size={12} /> : <PlayCircle size={12} />}
-              {isPlayingInline ? 'Close Player' : 'Watch Video'}
-            </button>
-          )}
-
           {/* Inline miniature strip */}
           {domainImages.length > 0 && (
             <div className="flex gap-2 overflow-x-auto scrollbar-hide py-3 mt-2">
               {domainImages.slice(0, 8).map((img: any, i: number) => (
                 <button 
                   key={img.id} 
-                  onClick={() => {
-                    setCurrentImgIndex(i);
-                    // Optionally, if you want to open the image detail view on click of a thumbnail:
-                    // onImageClick?.(img);
-                  }}
+                  onClick={() => setCurrentImgIndex(i)}
                   className={`shrink-0 w-16 h-12 rounded-lg overflow-hidden border-2 transition-all ${currentImgIndex === i ? 'border-blue-500 scale-105 shadow-md z-10' : 'border-transparent opacity-60 hover:opacity-100'}`}
                 >
                   <img src={img.url || img.image} title={img.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -2102,18 +2005,23 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
               ))}
             </div>
           )}
+
+          {/* Page Intelligence: FAQs, How-To guides, and Database Content Chunks */}
+          <PageIntelligencePanel 
+            url={res.url} 
+            title={res.title} 
+            snippet={res.snippet} 
+            apiKey={API_KEY} 
+            allResults={allResults}
+          />
         </div>
         
         {/* Main Side Image / Carousel */}
         {activeImage && (
           <div 
             onClick={() => {
-              if (res.is_video) {
-                onVideoClick?.(res);
-              } else {
-                const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
-                onImageClick?.(imgData);
-              }
+              const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
+              onImageClick?.(imgData);
             }}
             className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer"
           >
@@ -2124,19 +2032,12 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.5 }} // Smooth transition for image change
+                transition={{ duration: 0.5 }}
                 className="w-full h-full object-cover transition-transform hover:scale-105" 
                 referrerPolicy="no-referrer" 
               />
             </AnimatePresence>
             
-            {/* Play button overlay if it's a video result */}
-            {res.is_video && (
-               <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover/carousel:bg-black/40 transition-colors">
-                  <PlayCircle size={44} className="text-white drop-shadow-2xl" />
-               </div>
-            )}
-
             <button 
               onClick={() => onVisualSearch?.(activeImage)}
               className="absolute top-2 right-2 p-2 bg-black/40 backdrop-blur-md text-white rounded-full opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 shadow-lg"
@@ -2147,7 +2048,7 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
 
             {domainImages.length > 1 && (
               <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full">
-                {domainImages.slice(0, 5).map((_: any, i: number) => (
+                {domainImages.slice(0, 5).map((_, i) => (
                   <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${currentImgIndex === i ? 'bg-white scale-125' : 'bg-white/40'}`} />
                 ))}
               </div>
@@ -2159,7 +2060,7 @@ function ResultCard({ res, position, carouselImages, isImageUrl, onResultClick, 
   );
 }
 
-function ImageDetailView({ image, allResults, onClose, onSelect, onResultClick }: any) {
+function ImageDetailView({ image, allResults, onClose, onSelect }: any) {
   const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
   
   const relatedImages = allResults.filter((res: any) => {
@@ -2219,7 +2120,6 @@ function ImageDetailView({ image, allResults, onClose, onSelect, onResultClick }
             <h2 className="text-2xl md:text-3xl font-display font-medium text-slate-900 mb-4">{image.title}</h2>
             <p className="text-slate-600 text-lg leading-relaxed mb-6">{image.snippet}</p>
             <a 
-              onClick={() => onResultClick?.(image.id, image.url, 0)}
               href={image.url}
               target="_blank"
               rel="noreferrer"
@@ -2253,95 +2153,96 @@ function ImageDetailView({ image, allResults, onClose, onSelect, onResultClick }
       </motion.div>
     </motion.div>
   );
- }
+}
 
-// New VideoDetailView component
-function VideoDetailView({ video, onClose, onResultClick }: any) {
+function VisualMathDisplay({ stage, image }: { problem?: any, stage: string, image: string, analysis?: any }) {
+  const [complete, setComplete] = useState(false);
   const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [isSummarizing, setIsSummarizing] = useState(false);
 
-  const generateVideoSummary = async () => {
-    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
-    setIsSummarizing(true);
-    try {
-      const prompt = `Act as an AI video analyst for Scout. 
-      Video Title: "${video.title}"
-      Video Context: "${video.snippet || video.description}"
-      
-      Provide a 3-bullet point summary of what the user can expect to learn from this video. 
-      Keep it punchy and professional. Respond in Markdown.`;
-
-      const result = await genAI.models.generateContent({
-        model: "gemini-1.5-flash", // Using flash for speed
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-      });
-      
-      setAiSummary(result.text || "Summary unavailable.");
-    } catch (e) {
-      console.error("Video summary failed", e);
-      setAiSummary("Could not generate AI insights at this time.");
-    } finally {
-      setIsSummarizing(false);
+  useEffect(() => {
+    if (stage === 'ranking') {
+      const t = setTimeout(() => setComplete(true), 1200);
+      return () => clearTimeout(t);
     }
-  };
+  }, [stage]);
 
   return (
     <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[2200] flex items-center justify-center bg-black/90 backdrop-blur-md"
-      onClick={onClose}
+      initial={{ opacity: 0, y: 10 }} 
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-[24px] overflow-hidden mb-8 shadow-sm border border-slate-100 flex items-center justify-center p-2"
     >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="relative w-full max-w-6xl bg-slate-950 shadow-2xl flex flex-col md:flex-row overflow-hidden rounded-[32px] mx-4 border border-white/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="absolute top-0 left-0 right-0 z-20 bg-linear-to-b from-black/80 to-transparent flex items-center justify-between p-4 md:p-6 opacity-0 hover:opacity-100 transition-opacity duration-300">
-          <div className="flex items-center gap-3">
-            <img 
-               src={`https://www.google.com/s2/favicons?domain=${new URL(video.url).hostname}&sz=64`} 
-               className="w-6 h-6 rounded-full bg-white p-0.5" 
-            />
-            <span className="text-sm font-bold text-white truncate drop-shadow-md">{video.title}</span>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full text-white/70 hover:text-white transition-all"><X size={24} /></button>
-        </div>
+      <div className="relative w-full max-w-lg aspect-video rounded-2xl overflow-hidden bg-slate-50">
+        <motion.img 
+          src={image} 
+          animate={complete ? { filter: 'grayscale(0) brightness(1)', scale: 1 } : { filter: 'grayscale(0) brightness(1.05)', scale: 1.05 }}
+          transition={{ duration: 0.8 }}
+          className="w-full h-full object-contain" 
+        />
+        
+        {/* Sleek Lens Animation */}
+        <AnimatePresence>
+          {!complete && (
+            <>
+              {/* Subtle Scanning Points */}
+              <motion.div className="absolute inset-0 z-20 pointer-events-none">
+                 {[...Array(8)].map((_, i) => (
+                   <motion.div
+                     key={i}
+                     initial={{ opacity: 0, scale: 0 }}
+                     animate={{ 
+                       opacity: [0, 1, 0], 
+                       scale: [0.2, 1, 0.2],
+                       left: `${15 + Math.random() * 70}%`,
+                       top: `${15 + Math.random() * 70}%`
+                     }}
+                     transition={{ 
+                       repeat: Infinity, 
+                       duration: 1.5 + Math.random(), 
+                       delay: i * 0.2 
+                     }}
+                     className="absolute w-1.5 h-1.5 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.8)]"
+                   />
+                 ))}
+              </motion.div>
 
-        {/* Embedded Video Player */}
-        {video.embed_url && (
-          <iframe
-            width="100%"
-            height="100%"
-            src={`${video.embed_url}?autoplay=1&modestbranding=1&rel=0`} 
-            frameBorder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            title={video.title}
-            className="flex-1"
-          ></iframe>
-        )}
+              {/* Minimal Line */}
+              <motion.div 
+                initial={{ top: '0%' }}
+                animate={{ top: '100%' }}
+                transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
+                className="absolute inset-x-0 h-0.5 bg-blue-500/20 backdrop-blur-[1px] z-30"
+              >
+                 <div className="h-full w-full bg-linear-to-r from-transparent via-blue-500 to-transparent opacity-40" />
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
-        {/* Integrated Footer Link */}
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-linear-to-t from-black/80 to-transparent p-6 opacity-0 hover:opacity-100 transition-opacity duration-300 flex items-center justify-between">
-           <div className="text-white">
-              <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest mb-1">{video.source}</p>
-              <h3 className="font-bold text-lg line-clamp-1">{video.title}</h3>
-           </div>
-           <a href={video.url} target="_blank" rel="noreferrer" onClick={() => onResultClick?.(video.id, video.url, 0)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-red-700 transition-all shadow-xl shadow-red-900/20">YouTube <ExternalLink size={14} /></a>
-        </div>
-      </motion.div>
+        {/* Completion Visual */}
+        <AnimatePresence>
+          {complete && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-40 bg-white/10 backdrop-blur-[2px]"
+            >
+               <motion.div 
+                 initial={{ scale: 0, rotate: -20 }} 
+                 animate={{ scale: 1, rotate: 0 }} 
+                 className="bg-white/90 backdrop-blur-md p-3 rounded-full shadow-lg border border-white"
+               >
+                 <Check className="text-blue-600" size={24} strokeWidth={3} />
+               </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </motion.div>
   );
 }
 
- function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any[], onClose: () => void, loading: boolean, refresh: () => void }) {
+function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any[], onClose: () => void, loading: boolean, refresh: () => void }) {
   const [activeTab, setActiveTab] = useState<'overview' | 'queries' | 'performance'>('overview');
 
   // Process data for charts
@@ -2385,7 +2286,7 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between shrink-0" >
+        <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
               < BarChart3 size={24} />
@@ -2450,7 +2351,7 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
                           <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
                              <TrendingUp size={18} className="text-blue-500" /> Interaction Volume
                           </h4>
-                          <div className="flex-1 h-[350px]">
+                          <div className="flex-1 min-h-0">
                             <ResponsiveContainer width="100%" height="100%">
                                <AreaChart data={trendData}>
                                   <defs>
@@ -2470,11 +2371,11 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
                           <h4 className="font-bold text-slate-900 mb-6 flex items-center gap-2">
                              <Target size={18} className="text-purple-500" /> Event Distribution
                           </h4>
-                          <div className="flex-1 h-[350px]">
+                          <div className="flex-1 min-h-0">
                              <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                      {pieData.map((_entry: any, index: number) => (
+                                      {pieData.map((_entry, index) => (
                                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                       ))}
                                    </Pie>
@@ -2483,7 +2384,7 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
                              </ResponsiveContainer>
                           </div>
                           <div className="flex justify-center gap-4 pt-4 flex-wrap">
-                            {pieData.map((d: any, i: number) => (
+                             {pieData.map((d, i) => (
                                <div key={i} className="flex items-center gap-2">
                                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                                   <span className="text-xs font-bold text-slate-500 lowercase">{d.name}</span>
@@ -2499,7 +2400,7 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                      <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm h-[500px] flex flex-col">
                         <h4 className="font-bold text-slate-900 mb-8">Top 10 Resonant Queries</h4>
-                        <div className="flex-1 h-[350px]">
+                        <div className="flex-1 min-h-0">
                            <ResponsiveContainer width="100%" height="100%">
                               <BarChart data={queryData} layout="vertical">
                                  <XAxis type="number" hide />
@@ -2514,11 +2415,11 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
                      <div className="bg-white border border-slate-100 rounded-[32px] p-8 shadow-sm flex flex-col">
                         <h4 className="font-bold text-slate-900 mb-6">Live Feed</h4>
                         <div className="space-y-4 overflow-y-auto max-h-[440px] pr-2 custom-scrollbar">
-                           {events.slice(0, 50).map((e: any, i: number) => (
+                           {events.slice(0, 50).map((e, i) => (
                              <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-start justify-between gap-4">
                                 <div>
                                    <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{new Date(e.timestamp).toLocaleTimeString()}</div>
-                                   <div className="text-sm font-bold text-slate-800 line-clamp-1 italic">{`"${e.query}"`}</div>
+                                   <div className="text-sm font-bold text-slate-800 line-clamp-1 italic">"{e.query}"</div>
                                    <div className="text-[11px] text-slate-500 mt-1 line-clamp-1">{e.url}</div>
                                 </div>
                                 <div className={`shrink-0 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter ${e.type === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -2547,3 +2448,4 @@ function VideoDetailView({ video, onClose, onResultClick }: any) {
     </motion.div>
   );
 }
+

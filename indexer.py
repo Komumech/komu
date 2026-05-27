@@ -2,6 +2,7 @@ import trafilatura
 import re
 import requests
 import io
+import json
 from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
@@ -24,6 +25,55 @@ except ImportError:
 # --- INITIALIZE SCOUT V3.5 VISUAL BRAIN ---
 # Switching to MPNet (768-dim) for all text and image-alt metadata search
 visual_engine = SentenceTransformer('all-mpnet-base-v2')
+
+def extract_structured_data(soup):
+    """Parses JSON-LD to find high-value SEO signals like FAQs and How-Tos."""
+    structured_info = {"faqs": [], "how_to": [], "product": None, "article_headline": None}
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            if not script.string: continue
+            data = json.loads(script.string)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                stype = item.get('@type')
+                if stype == 'FAQPage':
+                    for entry in item.get('mainEntity', []):
+                        q = entry.get('name'); a = entry.get('acceptedAnswer', {}).get('text')
+                        if q and a: structured_info["faqs"].append({"q": q, "a": a})
+                elif stype == 'HowTo':
+                    steps = [s.get('text') or s.get('itemListElement', {}).get('text') for s in item.get('step', [])]
+                    structured_info["how_to"] = [s for s in steps if s]
+                elif stype in ['Product', 'Review']:
+                    structured_info["product"] = {"name": item.get('name'), "rating": item.get('aggregateRating', {}).get('ratingValue')}
+                elif stype in ['Article', 'NewsArticle', 'BlogPosting']:
+                    structured_info["article_headline"] = item.get('headline')
+        except: continue
+    return structured_info
+
+def get_semantic_segments(soup):
+    """Splits content based on HTML hierarchy (Main content first, segmented by headings)."""
+    main_container = soup.find(['main', 'article']) or soup.find('div', class_=re.compile(r'content|body|article|post', re.I))
+    root = main_container if main_container else soup.find('body')
+    if not root: return []
+
+    segments = []
+    current_chunk = []
+    for element in root.find_all(['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'dt', 'dd']):
+        text = element.get_text(separator=' ', strip=True)
+        if not text: continue
+        if element.name in ['h1', 'h2', 'h3']:
+            if current_chunk:
+                segments.append(" ".join(current_chunk))
+                current_chunk = []
+            current_chunk.append(f"[{text}]") 
+        else:
+            current_chunk.append(text)
+        if len(" ".join(current_chunk)) > 800:
+            segments.append(" ".join(current_chunk))
+            current_chunk = []
+    if current_chunk: segments.append(" ".join(current_chunk))
+    return [s for s in segments if len(s) > 100]
 
 def get_metadata(html, url):
     """Rigorous extraction of Title and Preview Image."""
@@ -127,18 +177,28 @@ def index_website(url):
         if img_vectors:
             index.upsert(vectors=img_vectors, namespace="default")
 
-        # Upsert with MORE metadata so the UI doesn't have to guess
-        index.upsert(vectors=[{
-            "id": url, 
-            "values": text_vector, 
-            "metadata": {
-                "url": url, 
+        # Index chunks with structured metadata
+        for i, chunk in enumerate(chunks):
+            if len(chunk) < 200: continue
+            text_vector = visual_engine.encode(chunk).tolist()
+            
+            meta = {
+                "url": url,
                 "title": meta_data['title'] or "Untitled Result",
-                "image": meta_data['image'], # Changed to 'image' to match server expectations
-                "text": main_text[:600].replace("\n", " "),
-                "indexed_at": "2026-03-14"
+                "image": meta_data['image'],
+                "text": chunk[:800],
+                "indexed_at": "2026-05-26"
             }
-        }], namespace="default")
+            
+            if structured_data.get("faqs"): meta["is_faq"] = "true"
+            if structured_data.get("article_headline"): 
+                meta["official_headline"] = structured_data["article_headline"][:200]
+
+            index.upsert(vectors=[{
+                "id": f"{url}_{i}", 
+                "values": text_vector, 
+                "metadata": meta
+            }], namespace="default")
         
         return True
 

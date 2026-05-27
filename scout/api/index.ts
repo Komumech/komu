@@ -4,97 +4,58 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import cookieSession from 'cookie-session';
-import { EventEmitter } from 'events';
 import { Pinecone } from '@pinecone-database/pinecone';
 import axios from 'axios';
 import { pipeline, env } from '@xenova/transformers';
-import nlp from 'compromise';
-import wiki from 'wikijs';
-import { Redis } from '@upstash/redis';
 import admin from 'firebase-admin';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
-import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 
 dotenv.config();
 
-// Increase the default limit for EventEmitters. Scout's architecture involves 
-// many concurrent network connections (Redis, Pinecone, Firebase, Wikipedia), 
-// which can collectively exceed the default Node.js limit of 10 listeners.
-EventEmitter.defaultMaxListeners = 25;
-
 // --- SERVERLESS OPTIMIZATION ---
+// Ensure Transformers.js uses a writable directory for models in production
 env.allowLocalModels = false;
 if (process.env.NODE_ENV === 'production') {
   env.cacheDir = '/tmp';
 }
 
-// --- REDIS (KNOWLEDGE GRAPH) INITIALIZATION ---
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL || '',
-  token: process.env.KV_REST_API_TOKEN || '',
-});
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// --- FIREBASE ADMIN INITIALIZATION ---
-let firebaseApp: admin.app.App | null | undefined = undefined;
-
+// Read Firebase config robustly
+const configPath = path.join(__dirname, '../firebase-applet-config.json');
+let firebaseConfig: any = {};
 try {
-  const apps = admin.apps || [];
-
-  if (apps.length === 0) {
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-    const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
-
-    if (privateKey && clientEmail) {
-      // This version handles double-escaped backslashes AND literal newlines
-      const formattedKey = privateKey
-        .replace(/\\n/g, '\n')     // Fixes escaped newlines
-        .replace(/"/g, '')         // Removes accidental extra quotes
-        .trim();                   // Removes accidental spaces at the start/end
-
-      firebaseApp = admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: projectId,
-          clientEmail: clientEmail,
-          privateKey: formattedKey,
-        }),
-        databaseURL: `https://${projectId}.firebaseio.com`
-      });
-      console.log("✅ Firebase Admin: Service Account Mode Success");
-    } else {
-      // Safe fallback for local development or limited access
-      firebaseApp = admin.initializeApp({
-        projectId: projectId,
-        databaseURL: `https://${projectId}.firebaseio.com`
-      });
-      console.log("⚠️ Firebase Admin: Project ID Mode (Limited)");
-    }
-  } else {
-    firebaseApp = apps[0];
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   }
-} catch (err: any) {
-  console.error("❌ Firebase Admin Critical Init Error:", err.message);
-  firebaseApp = null;
+} catch (e) {
+  console.error("❌ Failed to read firebase-applet-config.json synchronously:", e);
 }
 
-// --- FIRESTORE INITIALIZATION ---
-// We wrap this in a getter or a safe check to prevent the 503 crash
-let db: any = null;
-if (firebaseApp) {
+// Initialize Firebase Admin (Server-side)
+let firebaseApp: admin.app.App | undefined;
+if (!admin.apps.length && firebaseConfig.projectId) {
   try {
-    db = getFirestore(firebaseApp, "(default)");
-  } catch (firestoreErr) {
-    console.error("❌ Firestore Setup Error:", firestoreErr);
+    firebaseApp = admin.initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  } catch (err) {
+    console.error("❌ Firebase Init Error:", err);
   }
+} else if (admin.apps.length) {
+  firebaseApp = admin.apps[0];
 }
 
+const db = (firebaseApp && firebaseConfig.firestoreDatabaseId)
+  ? getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId) 
+  : (firebaseApp ? getFirestore(firebaseApp) : null);
 
+// --- CLEANUP: Removed Gemini initialization from backend ---
+// All AI calls moved to Frontend per security guidelines.
 
-// --- NEURAL ENGINE ---
+// Scout Semantic Brain (mpnet-base)
 let text_pipe: any = null;
 let isModelLoading = false;
 
@@ -106,9 +67,8 @@ async function getPipes() {
     isModelLoading = true;
     console.log("🚀 Warming Scout Semantic Brain (all-mpnet-base-v2)...");
     
-    if (!text_pipe) {
-      text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
-    }
+    // Semantic Encoder (768-dim) 
+    if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2');
 
     console.log("✅ Scout Semantic Brain ready!");
     return { text_pipe };
@@ -119,8 +79,6 @@ async function getPipes() {
     isModelLoading = false;
   }
 }
-
-
 
 async function getEmbedding(text: string): Promise<number[] | null> {
   if (!text) return null;
@@ -167,23 +125,6 @@ async function detectLocalIntent(query: string) {
     return { is_dictionary: false, is_english_help: true, is_entity: false };
   }
 
-  // Geographic and Factual patterns for Knowledge Cards
-  const factualPatterns = [
-    { regex: /(.+)\s+in what continent|what continent is (.+) in/i, type: 'continent' },
-    { regex: /capital of (.+)|what is the capital of (.+)/i, type: 'capital' },
-    { regex: /population of (.+)|what is the population of (.+)/i, type: 'population' },
-    { regex: /how old is (.+)|age of (.+)/i, type: 'age' },
-    { regex: /who is the (?:president|leader) of (.+)/i, type: 'leader' }
-  ];
-
-  for (const pattern of factualPatterns) {
-    const match = q.match(pattern.regex);
-    if (match) {
-      const subject = (match[1] || match[2]).trim();
-      return { is_dictionary: false, is_english_help: false, is_entity: true, entity_name: subject, factual_type: pattern.type };
-    }
-  }
-
   const entityWords = ['who is', 'what is', 'where is', 'tell me about', 'biography of', 'history of'];
   const entityMatch = entityWords.find(w => q.startsWith(w));
   if (entityMatch) {
@@ -196,75 +137,6 @@ async function detectLocalIntent(query: string) {
   return { is_dictionary: false, is_english_help: false, is_entity: false };
 }
 
-// Helper to prevent "Ghost Characters" in Redis keys
-function sanitizeRedisKeyPart(input: string): string {
-  if (!input) return '';
-  return input
-    .replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000\uFEFF]/g, ' ') // Kill all Unicode hidden spaces
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '') // Strip all special characters except letters and spaces
-    .trim()
-    .replace(/\s+/g, '_');      // Convert spaces to underscores
-}
-
-// Scout Knowledge: Subject & Category Extraction
-function extractKnowledgeIntent(query: string) {
-  const doc = nlp(query);
-  const topic = doc.topics().first().text() || doc.nouns().first().text();
-  
-  if (!topic) return { topic: null, category: 'general' };
-  
-  // Automatic Categorization Logic
-  const categories = [
-    { name: 'geography', match: '#Place' },
-    { name: 'biography', match: '#Person' },
-    { name: 'science', match: '(science|physics|biology|chemistry|math|astronomy|medicine)' },
-    { name: 'finance', match: '(finance|money|stock|economy|crypto|bitcoin|trading)' },
-    { name: 'anime', match: '(anime|manga|studio ghibli|naruto|one piece|animation|otaku)' },
-    { name: 'coding', match: '(coding|programming|software|developer|javascript|python|rust|github|api|linux)' },
-    { name: 'robotics', match: '(robotics|robot|automation|android|ai|artificial intelligence)' }
-  ];
-
-  let category = 'general';
-  for (const cat of categories) {
-    if (doc.match(cat.match).json().length > 0) {
-      category = cat.name;
-      break;
-    }
-  }
-  
-  return { topic, category };
-}
-
-async function learnFromWiki(topic: string, category: string) {
-  try {
-    const page = await (wiki() as any).page(topic);
-    const [summary, mainImage] = await Promise.all([
-      page.summary(),
-      page.mainImage().catch(() => null)
-    ]); 
-    
-
-    const wikiData = {
-      title: topic,
-      description: summary.slice(0, 500) + "...",
-      url: (page as any).fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(topic)}`,
-      image: mainImage,
-      source: "Wikipedia",
-      category,
-      learnedAt: new Date().toISOString()
-    };
-
-    const cleanCategory = sanitizeRedisKeyPart(category || 'general');
-    const cleanTopic = sanitizeRedisKeyPart(topic);
-    const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
-
-    console.log("🧠 Scout Learning: Saving to Redis with key:", redisKey);
-    await redis.set(redisKey, wikiData);
-    return wikiData;
-  } catch (e) { return null; }
-}
-
 function cleanSnippet(text: string) {
   if (!text) return '';
   return text
@@ -272,6 +144,29 @@ function cleanSnippet(text: string) {
     .replace(/(\||\-|─|═){2,}(\s?(\||\-|─|═){2,})*/g, ' ') 
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function isMostlyEnglish(text: string): boolean {
+  if (!text) return true;
+  
+  // Cyrillic, Arabic, Chinese/Japanese/Korean/EastAsian, Hindi/Devanagari, Hebrew, Tamil, Thai, Kannada, Telugu, Bengali
+  const nonLatinRegex = /[\u0400-\u04FF\u0600-\u06FF\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af\u0900-\u097f\u0590-\u05ff\u0b80-\u0bff\u0e00-\u0e7f\u0c80-\u0cff\u0c00-\u0c7f\u0980-\u09ff]/;
+  if (nonLatinRegex.test(text)) {
+    return false;
+  }
+  
+  // Match common English basic operational words or stopwords with boundary constraints
+  const englishStopwords = /\b(the|and|of|to|is|in|it|you|that|this|for|are|on|with|as|at|by|an|be|from|or|was|but|not|your|we|can|have|has|are|with)\b/i;
+  if (englishStopwords.test(text)) {
+    return true;
+  }
+  
+  const parsedLength = text.replace(/[^a-zA-Z0-9\s.,\/#!$%\^&\*;:{}=\-_`~()?'"+\\|[\]]/g, '').length;
+  if (text.length > 0 && parsedLength / text.length < 0.6) {
+    return false;
+  }
+  
+  return true;
 }
 
 function prettifyTitle(title: string, url: string) {
@@ -460,90 +355,83 @@ app.post('/api/feedback', async (req, res) => {
     res.status(500).json({ error: 'Feedback loop failed' });
   }
 });
+
 app.post('/api/search', async (req, res) => {
   try {
     const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery } = req.body;
-    const pageSize = 15;
+    const pageSize = 40;
     const skip = (page - 1) * pageSize;
     
-    const pc = getPinecone();
-    if (!pc) return res.status(503).json({ error: 'Pinecone not configured' });
-    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
-    const namespace = process.env.PINECONE_NAMESPACE || 'default';
-
-    let finalQuery = query;
-
     if (imageQuery) {
-      console.warn("Visual search disabled in serverless mode to prevent memory crashes.");
       return res.status(400).json({ 
         error: "Feature Unavailable", 
         message: "Visual search requires a high-memory environment not available in this tier." 
       });
     }
 
-    const intentData = await detectLocalIntent(finalQuery);
-    let dictionaryResult = null;
-    let suggestKnowledgePanel = intentData?.is_entity || false;
-    
-    // --- KNOWLEDGE GRAPH LOOKUP (Redis) ---
-    const nlpIntent = extractKnowledgeIntent(finalQuery);
-    const topic = intentData?.is_entity ? intentData.entity_name : nlpIntent.topic;
-    const category = nlpIntent.category;
-    
-    let scoutKnowledge = null;
-    if (topic) {
-      const cleanCategory = sanitizeRedisKeyPart(category || 'general');
-      const cleanTopic = sanitizeRedisKeyPart(topic);
-      const redisKey = `scout:knowledge:${cleanCategory}:${cleanTopic}`;
+    const pc = getPinecone();
+    if (!pc) return res.status(503).json({ error: 'Pinecone not configured' });
+    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
+    const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
-      console.log(`🔍 [SCOUT MEMORY] Checking cache for: "${cleanTopic}"`);
-      const cached: any = await redis.get(redisKey);
-      
-      if (cached) {
-        console.log(`✅ [MEMORY HIT] Found "${topic}" in Redis.`);
-        scoutKnowledge = { ...cached, source: "Redis Cache" };
-      } else {
-        console.log(`❌ [MEMORY MISS] Querying Wikipedia for "${topic}"...`);
-        const wikiData = await learnFromWiki(topic, category);
-        if (wikiData) {
-          console.log(`🌐 [LEARNING SUCCESS] Knowledge cached for "${topic}".`);
-          scoutKnowledge = { ...wikiData, source: "Wikipedia (Live)" };
-        }
+    const finalQuery = query;
+
+    // --- PARALLEL BLOCK 1: Start tasks that don't need the vector ---
+    const intentDataPromise = detectLocalIntent(finalQuery);
+    const embeddingPromise = providedVector 
+      ? Promise.resolve(providedVector.length > 768 ? providedVector.slice(0, 768) : providedVector) 
+      : getEmbedding(finalQuery);
+
+    // Dictionary lookup can be parallelized with embeddings
+    const dictionaryPromise = intentDataPromise.then(async (intentData) => {
+      if (intentData?.is_dictionary && intentData.dictionary_word) {
+        try {
+          const word = intentData.dictionary_word.trim();
+          const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
+          const dictRes = await axios.get(dictUrl, { timeout: 1500 });
+          const data = dictRes.data[0];
+          if (data) {
+            return {
+              word: data.word,
+              phonetic: data.phonetic || data.phonetics?.[0]?.text || '',
+              audio: data.phonetics.find((p: any) => p.audio)?.audio || '',
+              class: data.meanings[0]?.partOfSpeech || '',
+              definition: data.meanings[0]?.definitions[0]?.definition || '',
+              example: data.meanings[0]?.definitions[0]?.example || '',
+              synonyms: data.meanings[0]?.synonyms?.slice(0, 5) || [],
+              antonyms: data.meanings[0]?.antonyms?.slice(0, 5) || []
+            };
+          }
+        } catch (err) {}
       }
-    }
+      return null;
+    });
 
-    let factualType = (intentData as any)?.factual_type || null;
+    const [intentData, vector, dictionaryResult] = await Promise.all([
+      intentDataPromise,
+      embeddingPromise,
+      dictionaryPromise
+    ]);
+
+    let suggestKnowledgePanel = intentData?.is_entity || false;
     let detectedEntity = intentData?.is_entity ? { name: intentData.entity_name, type: null } : null;
     let isEnglishHelp = intentData?.is_english_help || false;
 
-    if (intentData?.is_dictionary && intentData.dictionary_word) {
-      try {
-        const word = intentData.dictionary_word.trim();
-        const dictUrl = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
-        const dictRes = await axios.get(dictUrl);
-        const data = dictRes.data[0];
-        if (data) {
-          dictionaryResult = {
-            word: data.word,
-            phonetic: data.phonetic || data.phonetics?.[0]?.text || '',
-            audio: data.phonetics.find((p: any) => p.audio)?.audio || '',
-            class: data.meanings[0]?.partOfSpeech || '',
-            definition: data.meanings[0]?.definitions[0]?.definition || '',
-            example: data.meanings[0]?.definitions[0]?.example || '',
-            synonyms: data.meanings[0]?.synonyms?.slice(0, 5) || [],
-            antonyms: data.meanings[0]?.antonyms?.slice(0, 5) || []
-          };
-        }
-      } catch (err) {}
+    if (!vector) {
+      if (finalQuery) {
+        return res.status(503).json({ 
+          error: "Neural Engines Warming Up", 
+          message: "Wait while Scout warms up its brain." 
+        });
+      }
     }
+    
+    const activeVector = vector || Array(768).fill(0);
 
     const siteMatch = query?.match(/site:\s*([a-zA-Z0-9.-]+)/i);
     const filterDomain = siteMatch ? siteMatch[1].toLowerCase() : null;
     const cleanQuery = filterDomain ? query.replace(/site:\s*[a-zA-Z0-9.-]+/i, '').trim() : query;
     const domainVariations = filterDomain ? [filterDomain, `www.${filterDomain}`] : null;
-
-    let vectorResults: any = { matches: [] };
-    let keywordResults: any = { matches: [] };
 
     const newsFilter = type === 'news' ? {
       "$or": [
@@ -552,89 +440,33 @@ app.post('/api/search', async (req, res) => {
       ]
     } : null;
 
-    let vector = providedVector;
-    
-    // Safety check: Truncate to 768 if it's from a higher-dim model
-    if (vector && vector.length > 768) {
-      vector = vector.slice(0, 768);
-    }
-
-    if (!vector && finalQuery) {
-      const pipes = await getPipes();
-      if (!pipes) {
-        return res.status(503).json({ 
-          error: "Neural Engines Warming Up", 
-          message: "Scout's semantic embedding engine is loading. Please try again in a few seconds." 
-        });
-      }
-      vector = await getEmbedding(finalQuery);
-    }
-    
-    if (!vector) vector = Array(768).fill(0);
-
     let filter: any = {};
-    if (type === 'images') filter = { is_image: { "$eq": true } }; // Filter for images tab
-    if (type === 'videos') filter = { is_video: { "$eq": true } }; // Filter for videos tab
-    // 'all' type now includes images by not having an explicit negative filter
-
+    if (type === 'images') filter = { is_image: { "$eq": true } };
     if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
     if (newsFilter) filter = { "$and": [filter, newsFilter] };
 
     const qLower = cleanQuery.toLowerCase();
-    const brands = ['google', 'apple', 'facebook', 'microsoft', 'amazon', 'github', 'openai', 'anthropic'];
-    const activeBrand = brands.find(b => qLower.includes(b));
-
     const variations = [...new Set([
-      cleanQuery, 
-      qLower, 
-      qLower.toUpperCase(),
-      `${qLower}.com`,
-      `${qLower}.org`,
-      `${qLower}.net`,
-      `www.${qLower}.com`,
-      `www.${qLower}`,
-      `${qLower} search`,
-      `${qLower} official`
+      cleanQuery, qLower, qLower.toUpperCase(), `${qLower}.com`, `${qLower}.org`,
+      `${qLower}.net`, `www.${qLower}.com`, `www.${qLower}`, `${qLower} search`, `${qLower} official`
     ])];
 
-    // Step 2: Intent Retrieval (What did others choose?)
-    // Phase 4: The "Act" Phase
-    let intentBoosts: Record<string, number> = {};
-    try {
-      const intentRes = await index.namespace('intent').query({
-        vector,
+    // --- PARALLEL BLOCK 2: Query Pinecone for everything ---
+    const [intentRes, vRes, kRes] = await Promise.all([
+      index.namespace('intent').query({
+        vector: activeVector,
         topK: 3,
         includeMetadata: true
-      });
-      
-      intentRes.matches.forEach(match => {
-        if (match.metadata?.doc_weights) {
-          const weights = JSON.parse(match.metadata.doc_weights as string);
-          // Intent Relevance decreases as the query match gets further away
-          const intentStrength = match.score || 0; 
-          Object.entries(weights).forEach(([docId, weight]) => {
-            const current = intentBoosts[docId] || 0;
-            intentBoosts[docId] = current + ((weight as number) * intentStrength * 5.0);
-          });
-        }
-      });
-    } catch (e) {
-      console.warn("Intent lookup failed, falling back to pure semantic search");
-    }
-
-    const [vRes, kRes] = await Promise.all([
+      }).catch(() => ({ matches: [] })),
       index.query({
-        vector,
+        vector: activeVector,
         topK: 1000,
         filter: Object.keys(filter).length > 0 ? filter : undefined,
         includeMetadata: true,
         namespace
-      }).catch(err => {
-        console.error("Vector query failed:", err);
-        return { matches: [] };
-      }),
+      }).catch(() => ({ matches: [] })),
       index.query({
-        vector: Array(vector.length).fill(0),
+        vector: Array(activeVector.length).fill(0),
         filter: {
           ...filter,
           "$or": [
@@ -647,16 +479,24 @@ app.post('/api/search', async (req, res) => {
         topK: 250,
         includeMetadata: true,
         namespace
-      }).catch(err => {
-        console.error("Keyword query failed:", err);
-        return { matches: [] };
-      })
+      }).catch(() => ({ matches: [] }))
     ]);
 
-    vectorResults = vRes;
-    keywordResults = kRes;
+    let intentBoosts: Record<string, number> = {};
+    intentRes.matches.forEach(match => {
+      if (match.metadata?.doc_weights) {
+        const weights = JSON.parse(match.metadata.doc_weights as string);
+        const intentStrength = match.score || 0; 
+        Object.entries(weights).forEach(([docId, weight]) => {
+          intentBoosts[docId] = (intentBoosts[docId] || 0) + ((weight as number) * intentStrength * 5.0);
+        });
+      }
+    });
 
-    const allMatches = [...vectorResults.matches, ...keywordResults.matches];
+    const brands = ['google', 'apple', 'facebook', 'microsoft', 'amazon', 'github', 'openai', 'anthropic'];
+    const activeBrand = brands.find(b => qLower.includes(b));
+
+    const allMatches = [...vRes.matches, ...kRes.matches];
     const seenIds = new Set();
     const uniqueMatches = allMatches.filter(match => {
       if (seenIds.has(match.id)) return false;
@@ -681,7 +521,11 @@ app.post('/api/search', async (req, res) => {
       const isRootDomain = dom.split('.').length <= 3 && !dom.includes('github') && !dom.includes('theverge'); 
       const boost = parseFloat(meta.popularity_boost) || 1.0;
 
-      const res: any = {
+      const titleStr = meta.title || meta.name || '';
+      const snippetStr = meta.snippet || meta.text || meta.description || '';
+      const isEnglish = isMostlyEnglish(`${titleStr} ${snippetStr}`);
+
+      return {
         ...meta,
         id: match.id,
         score: match.score || 0,
@@ -690,32 +534,14 @@ app.post('/api/search', async (req, res) => {
         isExactMatch,
         isRootDomain,
         isOfficialProperty,
-        title: prettifyTitle(meta.title || meta.name || '', url),
+        isEnglish,
+        title: prettifyTitle(titleStr, url),
         url: url,
         displayUrl: dom,
-        snippet: cleanSnippet(meta.snippet || meta.text || meta.description || ''),
+        snippet: cleanSnippet(snippetStr),
         image: meta.image || meta.thumbnail || meta.ogImage || meta.imageUrl || null,
         sourceIcon: `https://icons.duckduckgo.com/ip3/${dom}.ico`,
       };
-
-      // --- AUTO-DETECT YOUTUBE VIDEOS ---
-      // Improved Regex for all YouTube formats (Shorts, Embeds, Standard)
-      const ytMatch = url.match(/(?:v=|v\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})/i);
-      if (ytMatch) {
-        const videoId = ytMatch[1];
-        // High-Res Thumbnail Pattern
-        const thumb = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-        const fallback = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-        
-        res.is_video = true;
-        res.thumbnail_url = res.thumbnail_url || thumb;
-        res.embed_url = `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0`;
-        res.image = res.image || thumb;
-        res.videoId = videoId;
-        res.source = res.source || "YouTube";
-      }
-
-      return res;
     });
 
     const reranked = allResults.sort((a, b) => {
@@ -723,6 +549,10 @@ app.post('/api/search', async (req, res) => {
       // mpnet scores are usually between 0.3 and 0.9.
       let sA = (a.score * 0.8) + (Math.log10(a.boost + 1) * 0.2);
       let sB = (b.score * 0.8) + (Math.log10(b.boost + 1) * 0.2);
+
+      // Prioritize English results
+      if (a.isEnglish && !b.isEnglish) sA += 25.0;
+      if (!a.isEnglish && b.isEnglish) sB += 25.0;
 
       // 2. Exact Title/Domain Matches (Super High Boost)
       const tA = a.title.toLowerCase().trim();
@@ -767,7 +597,6 @@ app.post('/api/search', async (req, res) => {
     // --- SEGREGATION FOR TAB-SPECIFIC PAGINATION ---
     const webResults = reranked.filter(r => !r.is_image);
     const imageResults = reranked.filter(r => r.is_image);
-    const videoResults = reranked.filter(r => r.is_video);
 
     // Decide which pool to paginate based on the tab
     let poolToPaginate = webResults;
@@ -776,8 +605,6 @@ app.post('/api/search', async (req, res) => {
     } else if (type === 'news') {
       poolToPaginate = webResults;
     }
-    // If 'videos' tab is active, use videoResults
-    if (type === 'videos') poolToPaginate = videoResults;
 
     // Step 5: Diversity & Nesting Limit for Web Results (only if in 'all' or 'news' tab)
     let finalOrdered: any[] = [];
@@ -812,24 +639,20 @@ app.post('/api/search', async (req, res) => {
     const paginatedResults = finalOrdered.slice(skip, skip + pageSize);
     const totalPagesCount = Math.ceil(finalOrdered.length / pageSize);
 
-    // If 'all' tab, we mix in top images and videos for the UI strips (avoiding duplicates)
-    let resultsWithOptionalMedia = [...paginatedResults];
-    if (type === 'all') {
-       const seenIds = new Set(paginatedResults.map(r => r.id));
-       
-       const extraImages = imageResults.filter(r => !seenIds.has(r.id)).slice(0, 10);
-       const extraVideos = videoResults.filter(r => !seenIds.has(r.id)).slice(0, 10);
-       
-       resultsWithOptionalMedia = [...resultsWithOptionalMedia, ...extraImages, ...extraVideos];
+    // If 'all' tab, we mix in some top images so the ImageStrip always works on page 1
+    // We add them at the end of the results array for the frontend to handle
+    let resultsWithOptionalImages = paginatedResults;
+    if (type === 'all' && imageResults.length > 0) {
+       // Only add images to the payload if they aren't already represented 
+       // This ensures ResultsView has image data for the strip without breaking pagination
+       resultsWithOptionalImages = [...paginatedResults, ...imageResults.slice(0, 10)];
     }
 
     res.json({ 
-      results: resultsWithOptionalMedia,
-      scoutKnowledge,
+      results: resultsWithOptionalImages,
       dictionary: dictionaryResult,
       suggestKnowledgePanel,
       detectedEntity,
-      factualType,
       isEnglishHelp,
       correction: null, 
       originalQuery: null,
@@ -844,22 +667,11 @@ app.post('/api/search', async (req, res) => {
   }
 });
 
-// Helper to get the consistent Redirect URI
-const getRedirectUri = (req: any) => {
-  // Use APP_URL if set, otherwise fallback to the current request host
-  const host = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-  // Ensure this matches EXACTLY what you put in Google Cloud Console
-  return `${host}/api/auth/callback`;
-};
-
 // OAUTH: GET AUTH URL
 app.get('/api/auth/url', (req, res) => {
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
-  const redirectUri = getRedirectUri(req);
-
-  if (!googleClientId) {
-    return res.status(503).json({ error: 'Google Client ID missing' });
-  }
+  const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/auth/callback`;
+  if (!googleClientId) return res.status(503).json({ error: 'Google Client ID missing' });
 
   const params = new URLSearchParams({
     client_id: googleClientId,
@@ -874,52 +686,25 @@ app.get('/api/auth/url', (req, res) => {
 });
 
 // OAUTH: CALLBACK
-// Added /api/ prefix to match Vercel's default routing for /api/index.ts
-app.get('/api/auth/callback', async (req, res) => {
+app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
   const { code } = req.query;
-  const googleClientId = process.env.GOOGLE_CLIENT_ID;
-  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri = getRedirectUri(req);
-
   if (!code) return res.status(400).send('No code provided');
 
   try {
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
       code,
-      client_id: googleClientId,
-      client_secret: googleClientSecret,
-      redirect_uri: redirectUri,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: `${process.env.APP_URL || 'http://localhost:3000'}/auth/callback`,
       grant_type: 'authorization_code'
     });
-
     const { access_token } = tokenResponse.data;
     const userResponse = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
       headers: { Authorization: `Bearer ${access_token}` }
     });
-
-    // Save user to session
-    if (req.session) {
-      req.session.user = userResponse.data;
-    }
-
-    // Success script: close popup and notify parent
-    res.send(`
-      <html>
-        <body>
-          <script>
-            if (window.opener) {
-              window.opener.postMessage({ type: "OAUTH_AUTH_SUCCESS" }, "*");
-              window.close();
-            } else {
-              window.location.href = "/";
-            }
-          </script>
-          <p>Authentication successful! You can close this window.</p>
-        </body>
-      </html>
-    `);
-  } catch (error: any) {
-    console.error("❌ OAuth Callback Error:", error.response?.data || error.message);
+    req.session!.user = userResponse.data;
+    res.send('<html><body><script>if(window.opener){window.opener.postMessage({type:"OAUTH_AUTH_SUCCESS"}, "*");window.close();}else{window.location.href="/";}</script></body></html>');
+  } catch (error) {
     res.status(500).send('Authentication failed');
   }
 });
@@ -930,37 +715,9 @@ app.post('/api/logout', (req, res) => { req.session = null; res.json({ success: 
 // --- AI TRAINING EXPORT (Phase 3) ---
 const ADMIN_EMAILS = ['komumech@gmail.com']; // Your authorized email
 
-app.post('/api/admin/clickstream', async (req, res) => {
-  try {
-    if (!db) {
-      console.error("❌ Database not initialized");
-      return res.status(503).json({ error: "Database unavailable" });
-    }
-
-    const { type, query, url, uid, position, duration, sessionId } = req.body;
-
-    // This is what forces the creation of the collection
-    await db.collection('clickstream').add({
-      type: type || 'search',
-      query: query || '',
-      url: url || '',
-      position: position || null,
-      duration: duration || null,
-      sessionId: sessionId || null,
-      uid: uid || 'anonymous',
-      timestamp: new Date()
-    });
-
-    res.status(200).json({ success: true });
-  } catch (error: any) {
-    console.error("❌ Firestore Write Error:", error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.get('/api/admin/clickstream', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database not initialized' });
-
+  
   // Admin Guard
   const user = req.session?.user;
   if (!user || !ADMIN_EMAILS.includes(user.email)) {
@@ -969,15 +726,14 @@ app.get('/api/admin/clickstream', async (req, res) => {
 
   try {
     const snapshot = await db.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
-    const data = snapshot.docs.map((doc: admin.firestore.QueryDocumentSnapshot) => ({
+    const events = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
       timestamp: doc.data().timestamp?.toDate()
     }));
-    res.json(data);
+    res.json(events);
   } catch (err: any) {
-    // Return empty array instead of 500 if collection hasn't been created yet
-    res.json([]);
+    res.status(500).json({ error: 'Failed to export clickstream', message: err.message });
   }
 });
 
