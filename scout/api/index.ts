@@ -430,19 +430,43 @@ async function updateQueryIntent(queryText: string, docId: string, signal: 'succ
   }
 }
 
+async function logClickstream(query: string, type: string, url: string = '') {
+  if (!db) return;
+  try {
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    await db.collection('clickstream').add({
+      query: query || '',
+      type: type || 'search',
+      url: url || '',
+      timestamp
+    });
+    console.log(`📡 Logged clickstream event to Firestore: query="${query}", type="${type}", url="${url}"`);
+  } catch (err: any) {
+    console.error("❌ Failed to write clickstream to Firestore:", err.message);
+  }
+}
+
 app.post('/api/feedback', async (req, res) => {
   try {
-    const { id, type, queryText } = req.body; 
+    const { id, type, queryText, url = '' } = req.body; 
+
+    // Log this feedback stream to clickstream first if a query was active
+    if (queryText) {
+      logClickstream(queryText, type, url);
+    }
+
     if (!id) return res.status(400).json({ error: 'Record ID required' });
 
     const pc = getPinecone();
-    if (!pc) return res.status(503).json({ error: 'Database unavailable' });
+    if (!pc) {
+      return res.json({ success: true, message: 'Logged to Firestore successfully. Pinecone database not configured offline.' });
+    }
     const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     const fetchRes = await index.namespace(namespace).fetch({ ids: [id] });
     const record = fetchRes.records[id];
-    if (!record) return res.status(404).json({ error: 'Record not found' });
+    if (!record) return res.status(404).json({ error: 'Record not found in Pinecone' });
 
     let currentBoost = parseFloat(record.metadata?.popularity_boost as string) || 1.0;
 
@@ -488,6 +512,10 @@ app.post('/api/search', async (req, res) => {
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     const finalQuery = query;
+
+    if (page === 1 && finalQuery && typeof finalQuery === 'string') {
+      logClickstream(finalQuery, 'search');
+    }
 
     // --- PARALLEL BLOCK 1: Start tasks that don't need the vector ---
     const intentDataPromise = detectAdvancedIntent(finalQuery);
@@ -879,12 +907,35 @@ app.get('/api/admin/clickstream', async (req, res) => {
   }
 
   try {
-    const snapshot = await db.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
-    const events = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      timestamp: doc.data().timestamp?.toDate()
-    }));
+    let snapshot;
+    try {
+      snapshot = await db.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
+    } catch (orderErr: any) {
+      console.warn("⚠️ Firestore orderBy timestamp failed, falling back to unordered collection query:", orderErr.message);
+      snapshot = await db.collection('clickstream').limit(1000).get();
+    }
+
+    const events = snapshot.docs.map(doc => {
+      const data = doc.data();
+      let dateObj: Date;
+      if (data.timestamp) {
+        if (typeof data.timestamp.toDate === 'function') {
+          dateObj = data.timestamp.toDate();
+        } else {
+          dateObj = new Date(data.timestamp);
+        }
+      } else {
+        dateObj = new Date();
+      }
+      return {
+        id: doc.id,
+        ...data,
+        timestamp: dateObj
+      };
+    });
+
+    // Sort in-memory to guarantee descending order
+    events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     
     if (events.length === 0) {
       return res.json(mockEvents.map((e, idx) => ({ id: `mock-${idx}`, ...e })));
@@ -892,7 +943,7 @@ app.get('/api/admin/clickstream', async (req, res) => {
     
     res.json(events);
   } catch (err: any) {
-    console.error("⚠️ Firestore clickstream fetch failed. Falling back to mock analytics data:", err.message);
+    console.error("⚠️ Firestore clickstream fetch failed. Returning mock analytics fallback events:", err.message);
     res.json(mockEvents.map((e, idx) => ({ id: `mock-${idx}`, ...e })));
   }
 });

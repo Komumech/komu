@@ -124,6 +124,7 @@ export default function App() {
           id: lastClickRef.current.id, 
           type, 
           queryText: lastClickRef.current.query,
+          url: lastClickRef.current.url,
           durationMs
         }).catch(() => {});
         lastClickRef.current = null;
@@ -827,7 +828,7 @@ export default function App() {
     lastClickRef.current = { id, url, time: Date.now(), query: lastQueryRef.current };
 
     // Immediate NavBoost "Interest" signal
-    axios.post('/api/feedback', { id, type: 'click', queryText: lastQueryRef.current }).catch(() => {});
+    axios.post('/api/feedback', { id, type: 'click', queryText: lastQueryRef.current, url }).catch(() => {});
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
