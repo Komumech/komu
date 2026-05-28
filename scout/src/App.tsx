@@ -373,7 +373,6 @@ export default function App() {
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
-      const res = await fetch('/api/admin/clickstream');
       const res = await fetch('/api/admin/clickstream', { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
@@ -419,6 +418,10 @@ export default function App() {
             timestamp: dateObj
           });
         });
+        
+        // Sort in-memory to guarantee descending/ascending order correctly
+        events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
         console.log("📊 Analytics loaded from client SDK:", events.length, "events");
         setAnalyticsEvents(events);
       } catch (clientErr) {
@@ -2229,7 +2232,6 @@ function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOp
 }
 
 function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen, isHome, onOpenAnalytics }: any) {
-  const isAdmin = user && ['komumech@gmail.com'].includes(user.email);
   const isAdmin = user && ['komumech@gmail.com'].includes(user.email?.toLowerCase());
 
   return (
