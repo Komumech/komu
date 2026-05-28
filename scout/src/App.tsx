@@ -43,6 +43,19 @@ const WALLPAPERS = [
   'https://images.unsplash.com/photo-1511497584788-876760111969?q=80&w=1920&auto=format&fit=crop'  // deep pine trees
 ];
 
+const getSessionId = () => {
+  if (typeof window === 'undefined') return 'sess-unknown';
+  let sid = sessionStorage.getItem('scout_session_id') || localStorage.getItem('scout_session_id');
+  if (!sid) {
+    sid = 'sess-' + Math.random().toString(36).substring(2, 12);
+    try {
+      sessionStorage.setItem('scout_session_id', sid);
+      localStorage.setItem('scout_session_id', sid);
+    } catch (e) {}
+  }
+  return sid;
+};
+
 export default function App() {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -95,6 +108,11 @@ export default function App() {
   const recognitionRef = useRef<any>(null);
   const handleSearchRef = useRef<any>(null);
 
+  const userRef = useRef<any>(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   // Click outside listener for suggestions and apps
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -125,7 +143,9 @@ export default function App() {
           type, 
           queryText: lastClickRef.current.query,
           url: lastClickRef.current.url,
-          durationMs
+          durationMs,
+          sessionId: getSessionId(),
+          uid: userRef.current?.sub || userRef.current?.email || 'guest'
         }).catch(() => {});
         lastClickRef.current = null;
       }
@@ -432,7 +452,9 @@ export default function App() {
           type: activeTab,
           clickedUrls,
           imageQuery: currentVisualQuery,
-          vector 
+          vector,
+          sessionId: getSessionId(),
+          uid: user?.sub || user?.email || 'guest'
         })
       });
       
@@ -823,12 +845,20 @@ export default function App() {
     }
   };
 
-  const handleResultClick = (id: string, url: string) => {
+  const handleResultClick = (id: string, url: string, position: number | null = null) => {
     // Record for behavioral signals (Pogo-sticking detection)
     lastClickRef.current = { id, url, time: Date.now(), query: lastQueryRef.current };
 
     // Immediate NavBoost "Interest" signal
-    axios.post('/api/feedback', { id, type: 'click', queryText: lastQueryRef.current, url }).catch(() => {});
+    axios.post('/api/feedback', { 
+      id, 
+      type: 'click', 
+      queryText: lastQueryRef.current, 
+      url,
+      position,
+      sessionId: getSessionId(),
+      uid: user?.sub || user?.email || 'guest'
+    }).catch(() => {});
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
@@ -1903,7 +1933,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                               {item.secondaries.map((s: any, sIdx: number) => (
                                 <div key={s.id} className="group/sub">
                                   <a 
-                                    onClick={() => onResultClick?.(s.id, s.url)} 
+                                    onClick={() => {
+                                      const positionIndex = results ? results.findIndex((r: any) => r.id === s.id) : -1;
+                                      const position = positionIndex !== -1 ? positionIndex + 1 : null;
+                                      onResultClick?.(s.id, s.url, position);
+                                    }} 
                                     href={s.url} 
                                     target="_blank" 
                                     rel="noreferrer" 
@@ -2218,6 +2252,10 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
+  // Compute 1-based index position of this result in the result set
+  const positionIndex = allResults ? allResults.findIndex((item: any) => item.id === res.id) : -1;
+  const position = positionIndex !== -1 ? positionIndex + 1 : null;
+
   // Normalize domain for comparison
   const normalizeDomain = (d: string) => d.toLowerCase().replace(/^www\./, '');
   const resDomain = normalizeDomain(res.displayUrl);
@@ -2274,7 +2312,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           </div>
 
           <div className="relative group/title inline-block">
-            <a onClick={() => onResultClick?.(res.id, res.url)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
+            <a onClick={() => onResultClick?.(res.id, res.url, position)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
               <h3 className="text-xl md:text-2xl font-display font-medium text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
                 {res.title}
               </h3>

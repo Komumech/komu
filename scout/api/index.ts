@@ -56,22 +56,101 @@ try {
 }
 
 // Initialize Firebase Admin (Server-side)
-let firebaseApp: admin.app.App | undefined;
-if (!admin.apps.length && firebaseConfig.projectId) {
-  try {
-    firebaseApp = admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
-  } catch (err) {
-    console.error("❌ Firebase Init Error:", err);
+// We use a dual setup:
+// 1. Ambient Default App (no options): automatically utilizes default credentials/project in the Cloud Run space
+// 2. Named Config App (with custom project options): utilizes configurations loaded from firebase-applet-config.json
+let ambientApp: admin.app.App | undefined;
+try {
+  if (admin.apps.length === 0) {
+    ambientApp = admin.initializeApp();
+    console.log("📡 Initialized ambient default Firebase App.");
+  } else {
+    ambientApp = admin.apps[0];
   }
-} else if (admin.apps.length) {
-  firebaseApp = admin.apps[0];
+} catch (e: any) {
+  console.log("ℹ️ Ambient default Firebase App initialization skipped or already handled:", e.message);
 }
 
-const db = (firebaseApp && firebaseConfig.firestoreDatabaseId)
-  ? getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId) 
-  : (firebaseApp ? getFirestore(firebaseApp) : null);
+let configApp: admin.app.App | undefined;
+if (firebaseConfig.projectId) {
+  try {
+    const existing = admin.apps.find(app => app.name === 'configApp');
+    if (existing) {
+      configApp = existing;
+    } else {
+      configApp = admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+      }, 'configApp');
+      console.log(`📡 Initialized config-specific Firebase App named "configApp" on project: ${firebaseConfig.projectId}`);
+    }
+  } catch (err: any) {
+    console.log("ℹ️ Config Firebase App initialization skipped or failed:", err.message);
+  }
+}
+
+const db = (ambientApp && firebaseConfig.firestoreDatabaseId)
+  ? getFirestore(ambientApp, firebaseConfig.firestoreDatabaseId)
+  : (ambientApp ? getFirestore(ambientApp) : null);
+
+const getDbs = () => {
+  const instances: Array<{ name: string; db: any }> = [];
+  
+  // Try to find the default/ambient app
+  let defaultAppInstance: admin.app.App | null = null;
+  try {
+    defaultAppInstance = admin.apps.find(app => app.name === '[DEFAULT]') || null;
+    if (!defaultAppInstance && admin.apps.length > 0) {
+      defaultAppInstance = admin.apps[0];
+    }
+  } catch (e) {}
+
+  // 1. Default App instances
+  if (defaultAppInstance) {
+    try {
+      const dbDefault = getFirestore(defaultAppInstance);
+      if (dbDefault) {
+        instances.push({ name: 'Ambient App (default database)', db: dbDefault });
+      }
+    } catch (e) {}
+
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    if (dbId && dbId !== '(default)' && dbId !== 'default') {
+      try {
+        const dbCustom = getFirestore(defaultAppInstance, dbId);
+        if (dbCustom) {
+          instances.push({ name: `Ambient App (custom database: ${dbId})`, db: dbCustom });
+        }
+      } catch (e) {}
+    }
+  }
+
+  // 2. Config App instances
+  let cfgAppInstance: admin.app.App | null = null;
+  try {
+    cfgAppInstance = admin.apps.find(app => app.name === 'configApp') || null;
+  } catch (e) {}
+
+  if (cfgAppInstance) {
+    try {
+      const dbConfigDefault = getFirestore(cfgAppInstance);
+      if (dbConfigDefault) {
+        instances.push({ name: 'Config App (default database)', db: dbConfigDefault });
+      }
+    } catch (e) {}
+
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    if (dbId && dbId !== '(default)' && dbId !== 'default') {
+      try {
+        const dbConfigCustom = getFirestore(cfgAppInstance, dbId);
+        if (dbConfigCustom) {
+          instances.push({ name: `Config App (custom database: ${dbId})`, db: dbConfigCustom });
+        }
+      } catch (e) {}
+    }
+  }
+
+  return instances;
+};
 
 // --- CLEANUP: Removed Gemini initialization from backend ---
 // All AI calls moved to Frontend per security guidelines.
@@ -430,29 +509,74 @@ async function updateQueryIntent(queryText: string, docId: string, signal: 'succ
   }
 }
 
-async function logClickstream(query: string, type: string, url: string = '') {
-  if (!db) return;
-  try {
-    const timestamp = admin.firestore.FieldValue.serverTimestamp();
-    await db.collection('clickstream').add({
-      query: query || '',
-      type: type || 'search',
-      url: url || '',
-      timestamp
-    });
-    console.log(`📡 Logged clickstream event to Firestore: query="${query}", type="${type}", url="${url}"`);
-  } catch (err: any) {
-    console.error("❌ Failed to write clickstream to Firestore:", err.message);
+async function logClickstream(req: any, query: string, type: string, url: string = '', durationMs: number | null = null, position: number | null = null) {
+  const dbs = getDbs();
+  if (dbs.length === 0) {
+    console.log("ℹ️ No Firestore databases initialized to write clickstream.");
+    return;
+  }
+
+  const reqSessionId = req?.body?.sessionId;
+  const reqUid = req?.body?.uid;
+
+  let sessionId = reqSessionId;
+  if (!sessionId) {
+    if (req && req.session) {
+      if (!req.session.session_id) {
+        req.session.session_id = 'sess-' + Math.random().toString(36).substring(2, 12);
+      }
+      sessionId = req.session.session_id;
+    } else {
+      sessionId = 'sess-unknown';
+    }
+  }
+
+  let uid = reqUid;
+  if (!uid) {
+    if (req && req.session && req.session.user) {
+      uid = req.session.user.sub || req.session.user.email || 'user';
+    } else {
+      uid = 'guest';
+    }
+  }
+
+  const finalDuration = durationMs !== null ? durationMs : (req?.body?.durationMs !== undefined ? req.body.durationMs : null);
+  const finalPosition = position !== null ? position : (req?.body?.position !== undefined ? req.body.position : null);
+
+  let writtenSuccessfully = false;
+
+  for (const { name, db: dbInstance } of dbs) {
+    try {
+      const timestamp = admin.firestore.FieldValue.serverTimestamp();
+      await dbInstance.collection('clickstream').add({
+        query: query || '',
+        type: type || 'search',
+        url: url || '',
+        timestamp,
+        sessionId,
+        uid,
+        duration: finalDuration,
+        position: finalPosition
+      });
+      console.log(`📡 Successfully logged clickstream to [${name}]: query="${query}", type="${type}", url="${url}", sesh="${sessionId}"`);
+      writtenSuccessfully = true;
+    } catch (err: any) {
+      console.log(`ℹ️ Clickstream log skipped for database [${name}] (permissions or not found): ${err.message}`);
+    }
+  }
+
+  if (!writtenSuccessfully) {
+    console.log("⚠️ Clickstream record was not saved to any available database partition; fallback check recommended.");
   }
 }
 
 app.post('/api/feedback', async (req, res) => {
   try {
-    const { id, type, queryText, url = '' } = req.body; 
+    const { id, type, queryText, url = '', durationMs = null, position = null } = req.body; 
 
     // Log this feedback stream to clickstream first if a query was active
     if (queryText) {
-      logClickstream(queryText, type, url);
+      logClickstream(req, queryText, type, url, durationMs, position);
     }
 
     if (!id) return res.status(400).json({ error: 'Record ID required' });
@@ -514,7 +638,7 @@ app.post('/api/search', async (req, res) => {
     const finalQuery = query;
 
     if (page === 1 && finalQuery && typeof finalQuery === 'string') {
-      logClickstream(finalQuery, 'search');
+      logClickstream(req, finalQuery, 'search');
     }
 
     // --- PARALLEL BLOCK 1: Start tasks that don't need the vector ---
@@ -870,81 +994,61 @@ app.get('/api/admin/clickstream', async (req, res) => {
     return res.status(403).json({ error: 'Unauthorized: Admin access only' });
   }
 
-  const now = new Date();
-  const getPastDate = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
-  
-  const mockEvents = [
-    { query: "spacex starship launch", type: "success", timestamp: getPastDate(1), url: "https://en.wikipedia.org/wiki/SpaceX_Starship" },
-    { query: "spacex starship launch", type: "pogo", timestamp: getPastDate(1.2), url: "https://www.spacex.com/vehicles/starship/" },
-    { query: "llm agentic workflows", type: "success", timestamp: getPastDate(2), url: "https://en.wikipedia.org/wiki/Software_agent" },
-    { query: "best mechanical keyboards 2026", type: "click", timestamp: getPastDate(3), url: "https://wikipedia.org/wiki/Mechanical_keyboard" },
-    { query: "react 19 features", type: "success", timestamp: getPastDate(4), url: "https://react.dev/blog/2024/12/05/react-19" },
-    { query: "carbon capture technology", type: "success", timestamp: getPastDate(6), url: "https://en.wikipedia.org/wiki/Carbon_capture_and_storage" },
-    { query: "tokyo travel itinerary 5 days", type: "click", timestamp: getPastDate(8), url: "https://en.wikipedia.org/wiki/Tokyo" },
-    { query: "tokyo travel itinerary 5 days", type: "pogo", timestamp: getPastDate(8.5), url: "https://en.wikipedia.org/wiki/Shinjuku" },
-    { query: "quantum computing qubits explanation", type: "success", timestamp: getPastDate(12), url: "https://en.wikipedia.org/wiki/Qubit" },
-    { query: "james webb telescope new images", type: "success", timestamp: getPastDate(15), url: "https://en.wikipedia.org/wiki/James_Webb_Space_Telescope" },
-    { query: "deep learning semantic search", type: "success", timestamp: getPastDate(18), url: "https://en.wikipedia.org/wiki/Semantic_search" },
-    { query: "golden retriever training guide", type: "click", timestamp: getPastDate(22), url: "https://en.wikipedia.org/wiki/Golden_Retriever" },
-    { query: "how does photosythesis work", type: "success", timestamp: getPastDate(26), url: "https://en.wikipedia.org/wiki/Photosynthesis" },
-    { query: "marathon running shoe reviews", type: "pogo", timestamp: getPastDate(30), url: "https://en.wikipedia.org/wiki/Marathon" },
-    { query: "avocado toast recipes easy", type: "success", timestamp: getPastDate(36), url: "https://en.wikipedia.org/wiki/Avocado" },
-    { query: "artificial intelligence trends", type: "click", timestamp: getPastDate(42), url: "https://en.wikipedia.org/wiki/Artificial_intelligence" },
-    { query: "rust lang web server tutorial", type: "success", timestamp: getPastDate(48), url: "https://en.wikipedia.org/wiki/Rust_(programming_language)" },
-    { query: "mount everest height 2026", type: "success", timestamp: getPastDate(54), url: "https://en.wikipedia.org/wiki/Mount_Everest" },
-    { query: "electric vehicle batteries solid state", type: "click", timestamp: getPastDate(60), url: "https://en.wikipedia.org/wiki/Solid-state_battery" },
-    { query: "ancient roman aqueducts engineering", type: "success", timestamp: getPastDate(72), url: "https://en.wikipedia.org/wiki/Roman_aqueduct" },
-    { query: "diy organic garden layout", type: "pogo", timestamp: getPastDate(84), url: "https://en.wikipedia.org/wiki/Organic_gardening" },
-    { query: "how to read financial statements", type: "success", timestamp: getPastDate(96), url: "https://en.wikipedia.org/wiki/Financial_statement" },
-    { query: "soundproofing a home studio", type: "success", timestamp: getPastDate(110), url: "https://en.wikipedia.org/wiki/Soundproofing" },
-    { query: "web3 vs web2 differences", type: "click", timestamp: getPastDate(125), url: "https://en.wikipedia.org/wiki/Web3" },
-    { query: "best espresso machines", type: "pogo", timestamp: getPastDate(140), url: "https://en.wikipedia.org/wiki/Espresso_machine" }
-  ];
-
-  if (!db) {
-    console.log("⚠️ DB not available. Returning beautiful mock analytics fallback events.");
-    return res.json(mockEvents.map((e, idx) => ({ id: `mock-${idx}`, ...e })));
+  const dbs = getDbs();
+  if (dbs.length === 0) {
+    console.log("⚠️ No active Firestore databases available. Returning empty response.");
+    return res.json([]);
   }
 
   try {
-    let snapshot;
-    try {
-      snapshot = await db.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
-    } catch (orderErr: any) {
-      console.warn("⚠️ Firestore orderBy timestamp failed, falling back to unordered collection query:", orderErr.message);
-      snapshot = await db.collection('clickstream').limit(1000).get();
+    const allEventsMap = new Map<string, any>();
+
+    for (const { name, db: dbInstance } of dbs) {
+      try {
+        let snapshot;
+        try {
+          snapshot = await dbInstance.collection('clickstream').orderBy('timestamp', 'desc').limit(1000).get();
+        } catch (orderErr: any) {
+          console.warn("⚠️ Firestore orderBy timestamp failed, trying unordered fetch:", orderErr.message);
+          snapshot = await dbInstance.collection('clickstream').limit(1000).get();
+        }
+
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          let dateObj: Date;
+          if (data.timestamp) {
+            if (typeof data.timestamp.toDate === 'function') {
+              dateObj = data.timestamp.toDate();
+            } else if (data.timestamp._seconds !== undefined) {
+              dateObj = new Date(data.timestamp._seconds * 1000);
+            } else {
+              dateObj = new Date(data.timestamp);
+            }
+          } else {
+            dateObj = new Date();
+          }
+          
+          allEventsMap.set(doc.id, {
+            id: doc.id,
+            ...data,
+            timestamp: dateObj
+          });
+        });
+      } catch (dbErr: any) {
+        console.error("⚠️ Failed to query clickstream from a Firestore database:", dbErr.message);
+      }
     }
 
-    const events = snapshot.docs.map(doc => {
-      const data = doc.data();
-      let dateObj: Date;
-      if (data.timestamp) {
-        if (typeof data.timestamp.toDate === 'function') {
-          dateObj = data.timestamp.toDate();
-        } else {
-          dateObj = new Date(data.timestamp);
-        }
-      } else {
-        dateObj = new Date();
-      }
-      return {
-        id: doc.id,
-        ...data,
-        timestamp: dateObj
-      };
-    });
+    const events = Array.from(allEventsMap.values());
 
-    // Sort in-memory to guarantee descending order
+    // Sort in-memory to guarantee descending/ascending order correctly
     events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     
-    if (events.length === 0) {
-      return res.json(mockEvents.map((e, idx) => ({ id: `mock-${idx}`, ...e })));
-    }
-    
+    // Process analytics and respond purely with the real events
     res.json(events);
   } catch (err: any) {
-    console.error("⚠️ Firestore clickstream fetch failed. Returning mock analytics fallback events:", err.message);
-    res.json(mockEvents.map((e, idx) => ({ id: `mock-${idx}`, ...e })));
+    console.error("❌ Clickstream retrieval failed:", err.message);
+    res.status(500).json({ error: "Failed to load real clickstream database", message: err.message });
   }
 });
 
