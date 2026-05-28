@@ -561,12 +561,12 @@ async function logClickstream(req: any, query: string, type: string, url: string
       console.log(`📡 Successfully logged clickstream to [${name}]: query="${query}", type="${type}", url="${url}", sesh="${sessionId}"`);
       writtenSuccessfully = true;
     } catch (err: any) {
-      console.log(`ℹ️ Clickstream log skipped for database [${name}] (permissions or not found): ${err.message}`);
+      console.error(`❌ Clickstream log failed for database [${name}] with error:`, err);
     }
   }
 
   if (!writtenSuccessfully) {
-    console.log("⚠️ Clickstream record was not saved to any available database partition; fallback check recommended.");
+    console.warn("⚠️ Clickstream record was not saved to any available server-side database partition; fallback check recommended.");
   }
 }
 
@@ -1035,7 +1035,7 @@ app.get('/api/admin/clickstream', async (req, res) => {
           });
         });
       } catch (dbErr: any) {
-        console.error("⚠️ Failed to query clickstream from a Firestore database:", dbErr.message);
+        console.error(`❌ Failed to query clickstream from a Firestore database named [${name}]:`, dbErr);
       }
     }
 

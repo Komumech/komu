@@ -11,7 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, getDoc, arrayUnion } from "firebase/firestore";
+import { getFirestore, doc, setDoc, getDoc, arrayUnion, collection, addDoc, serverTimestamp, query as fsQuery, orderBy, limit, getDocs } from "firebase/firestore";
 import firebaseConfig from '../firebase-applet-config.json';
 import { GoogleGenAI, Type } from "@google/genai";
 import { SearchResult, AIOverview, KnowledgePanel, VisualAnalysis } from './types';
@@ -377,9 +377,40 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setAnalyticsEvents(data);
+      } else {
+        throw new Error("Backend analytics response was not OK");
       }
     } catch (e) {
-      console.error("Failed to fetch analytics", e);
+      console.warn("Express backend clickstream query failed, using direct client-side fallback query:", e);
+      try {
+        const clickstreamCol = collection(db, "clickstream");
+        const q = fsQuery(clickstreamCol, orderBy("timestamp", "desc"), limit(1000));
+        const querySnapshot = await getDocs(q);
+        const events: any[] = [];
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          let dateObj: Date;
+          if (data.timestamp) {
+            if (typeof data.timestamp.toDate === 'function') {
+              dateObj = data.timestamp.toDate();
+            } else if (data.timestamp._seconds !== undefined) {
+              dateObj = new Date(data.timestamp._seconds * 1000);
+            } else {
+              dateObj = new Date(data.timestamp);
+            }
+          } else {
+            dateObj = new Date();
+          }
+          events.push({
+            id: docSnap.id,
+            ...data,
+            timestamp: dateObj
+          });
+        });
+        setAnalyticsEvents(events);
+      } catch (clientErr) {
+        console.error("Failed to load real clickstream database from client SDK too:", clientErr);
+      }
     } finally {
       setAnalyticsLoading(false);
     }
@@ -516,13 +547,29 @@ export default function App() {
       setResults(rawResults);
       setLoading(false);
 
-      // Persist to Firebase history
-      if (user?.sub && requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
-        setDoc(doc(db, "users", user.sub), {
-          queries: arrayUnion(finalQuery.trim()),
-          updatedAt: new Date().toISOString()
-        }, { merge: true }).catch(console.error);
-        setUserHistory(prev => [...new Set([...prev, finalQuery.trim()])]);
+      // Persist to Firebase history & search clickstream directly
+      if (requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
+        if (user?.sub) {
+          setDoc(doc(db, "users", user.sub), {
+            queries: arrayUnion(finalQuery.trim()),
+            updatedAt: new Date().toISOString()
+          }, { merge: true }).catch(console.error);
+          setUserHistory(prev => [...new Set([...prev, finalQuery.trim()])]);
+        }
+        try {
+          addDoc(collection(db, "clickstream"), {
+            query: finalQuery.trim(),
+            type: 'search',
+            url: '',
+            timestamp: serverTimestamp(),
+            sessionId: getSessionId(),
+            uid: user?.sub || user?.email || 'guest',
+            duration: null,
+            position: null
+          }).catch(e => console.error("Client clickstream search logging error:", e));
+        } catch (e) {
+          console.error("Client clickstream search logging initialization error:", e);
+        }
       }
 
       // PARALLEL EXECUTION FOR AI FEATURES
@@ -859,6 +906,22 @@ export default function App() {
       sessionId: getSessionId(),
       uid: user?.sub || user?.email || 'guest'
     }).catch(() => {});
+
+    // Direct client-side clickstream logging to Firebase clickstream
+    try {
+      addDoc(collection(db, "clickstream"), {
+        query: lastQueryRef.current || '',
+        type: 'click',
+        url: url,
+        timestamp: serverTimestamp(),
+        sessionId: getSessionId(),
+        uid: user?.sub || user?.email || 'guest',
+        duration: null,
+        position: position
+      }).catch(e => console.error("Client clickstream click logging error:", e));
+    } catch (e) {
+      console.error("Client clickstream click init error:", e);
+    }
 
     if (!user?.sub) return;
     setClickedUrls(prev => [...new Set([...prev, url])]);
