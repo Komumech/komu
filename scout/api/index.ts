@@ -426,7 +426,7 @@ app.use(cors());
   name: 'session',
   keys: [process.env.COOKIE_SECRET || 'scout-secret'],
   maxAge: 30 * 24 * 60 * 60 * 1000, 
-  secure: true,
+  secure: process.env.NODE_ENV === 'production',
   sameSite: 'none',
   httpOnly: true,
 }));
@@ -576,7 +576,7 @@ app.post('/api/feedback', async (req, res) => {
 
     // Log this feedback stream to clickstream first if a query was active
     if (queryText) {
-      logClickstream(req, queryText, type, url, durationMs, position);
+      await logClickstream(req, queryText, type, url, durationMs, position);
     }
 
     if (!id) return res.status(400).json({ error: 'Record ID required' });
@@ -638,7 +638,7 @@ app.post('/api/search', async (req, res) => {
     const finalQuery = query;
 
     if (page === 1 && finalQuery && typeof finalQuery === 'string') {
-      logClickstream(req, finalQuery, 'search');
+      await logClickstream(req, finalQuery, 'search');
     }
 
     // --- PARALLEL BLOCK 1: Start tasks that don't need the vector ---
@@ -990,7 +990,7 @@ const ADMIN_EMAILS = ['komumech@gmail.com']; // Your authorized email
 app.get('/api/admin/clickstream', async (req, res) => {
   // Admin Guard
   const user = req.session?.user;
-  if (!user || !ADMIN_EMAILS.includes(user.email)) {
+  if (!user || !ADMIN_EMAILS.includes(user.email?.toLowerCase())) {
     return res.status(403).json({ error: 'Unauthorized: Admin access only' });
   }
 

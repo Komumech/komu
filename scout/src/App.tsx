@@ -374,18 +374,30 @@ export default function App() {
     setAnalyticsLoading(true);
     try {
       const res = await fetch('/api/admin/clickstream');
+      const res = await fetch('/api/admin/clickstream', { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
+        console.log("📊 Analytics loaded from backend:", data.length, "events");
         setAnalyticsEvents(data);
       } else {
-        throw new Error("Backend analytics response was not OK");
+        throw new Error(`Backend Error ${res.status}: Admin session might be expired or blocked.`);
       }
     } catch (e) {
-      console.warn("Express backend clickstream query failed, using direct client-side fallback query:", e);
+      console.warn("Express backend analytics failed, attempting client SDK fallback:", e);
       try {
         const clickstreamCol = collection(db, "clickstream");
-        const q = fsQuery(clickstreamCol, orderBy("timestamp", "desc"), limit(1000));
-        const querySnapshot = await getDocs(q);
+        let querySnapshot;
+        try {
+          // Try to get ordered data (requires index)
+          const q = fsQuery(clickstreamCol, orderBy("timestamp", "desc"), limit(1000));
+          querySnapshot = await getDocs(q);
+        } catch (indexErr) {
+          console.warn("⚠️ Ordered query failed (likely missing index). Falling back to unordered fetch.");
+          // Fallback to unordered fetch (does NOT require index)
+          const fallbackQ = fsQuery(clickstreamCol, limit(1000));
+          querySnapshot = await getDocs(fallbackQ);
+        }
+        
         const events: any[] = [];
         querySnapshot.forEach((docSnap) => {
           const data = docSnap.data();
@@ -407,9 +419,10 @@ export default function App() {
             timestamp: dateObj
           });
         });
+        console.log("📊 Analytics loaded from client SDK:", events.length, "events");
         setAnalyticsEvents(events);
       } catch (clientErr) {
-        console.error("Failed to load real clickstream database from client SDK too:", clientErr);
+        console.error("❌ Analytics Dashboard failed completely:", clientErr);
       }
     } finally {
       setAnalyticsLoading(false);
@@ -463,13 +476,16 @@ export default function App() {
           contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
         });
         const text = r.text?.trim() || "";
-        if (text.toLowerCase() !== finalQuery.toLowerCase() && text.length > 0 && text.length < 100) {
+        if (text && text.toLowerCase() !== finalQuery.toLowerCase() && text.length < 100) {
           setCorrection(text);
           setOriginalQuery(finalQuery);
           finalQuery = text;
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn("Autocorrect failed:", e);
+        if (e.message?.includes('429') || e.status === 429) {
+          setAiRateLimited(true);
+        }
       }
     }
 
@@ -573,7 +589,7 @@ export default function App() {
       }
 
       // PARALLEL EXECUTION FOR AI FEATURES
-      if (requestedPage === 1) {
+      if (requestedPage === 1 && !aiRateLimited) {
         generateAIOverview(finalQuery, rawResults, data.isEnglishHelp || false);
         generateFAQ(finalQuery, rawResults);
         
@@ -628,10 +644,10 @@ export default function App() {
   }, [handleSearch]);
 
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
-    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
+    if (!API_KEY || API_KEY === 'AI-NOT-SET' || aiRateLimited) return;
+    
     setAiLoading(true);
     setIsOverviewExpanded(false);
-    setAiRateLimited(false);
     try {
       // Include image URLs in the context for the LLM to use
       const context = contextResults.slice(0, 5).map(r => 
@@ -672,7 +688,7 @@ export default function App() {
   };
 
   const generateFAQ = async (queryText: string, contextResults: SearchResult[]) => {
-    if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
+    if (!API_KEY || API_KEY === 'AI-NOT-SET' || aiRateLimited) return;
     try {
       const context = contextResults.slice(0, 8).map(r => r.snippet).join("\n");
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
@@ -698,8 +714,11 @@ export default function App() {
       
       const data = JSON.parse(response.text || '[]');
       setFaq(data.slice(0, 3));
-    } catch (e) {
+    } catch (e: any) {
       console.error("FAQ generation failed:", e);
+      if (e.message?.includes('429') || e.status === 429) {
+        setAiRateLimited(true);
+      }
     }
   };
 
@@ -2211,6 +2230,7 @@ function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOp
 
 function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen, isHome, onOpenAnalytics }: any) {
   const isAdmin = user && ['komumech@gmail.com'].includes(user.email);
+  const isAdmin = user && ['komumech@gmail.com'].includes(user.email?.toLowerCase());
 
   return (
     <div className="relative">
@@ -2864,4 +2884,3 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
     </motion.div>
   );
 }
-
