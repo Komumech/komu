@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -21,6 +21,7 @@ import {
   shouldShowCurrency, CurrencyConverterWidget
 } from './components/SearchWidgets';
 import { PageIntelligencePanel } from './components/PageIntelligence';
+import IntentDecoder from './components/IntentDecoder';
 
 // Initialize Gemini on the Frontend
 const API_KEY = process.env.GEMINI_API_KEY || '';
@@ -81,6 +82,9 @@ export default function App() {
     return typeof window !== 'undefined' ? (localStorage.getItem('bg_rotation_mode') as 'hourly' | 'daily') || 'hourly' : 'hourly';
   });
   const [dictionary, setDictionary] = useState<any>(null);
+  const [lyrics, setLyrics] = useState<any>(null);
+  const [appsData, setAppsData] = useState<any[] | null>(null);
+  const [businessProfileState, setBusinessProfileState] = useState<any | null>(null);
   const [correction, setCorrection] = useState<string | null>(null);
   const [originalQuery, setOriginalQuery] = useState<string | null>(null);
   const [userHistory, setUserHistory] = useState<string[]>([]);
@@ -98,6 +102,10 @@ export default function App() {
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
+  const [safeSearch, setSafeSearch] = useState<'strict' | 'moderate' | 'off'>(() => {
+    return typeof window !== 'undefined' ? (localStorage.getItem('safe_search') as 'strict' | 'moderate' | 'off') || 'strict' : 'strict';
+  });
+  const [isSafeSearchIntercepted, setIsSafeSearchIntercepted] = useState(false);
   const lastQueryRef = useRef<string>('');
   const lastClickRef = useRef<{ id: string; url: string; time: number; query: string } | null>(null);
   const appsRef = useRef<HTMLDivElement>(null);
@@ -446,12 +454,15 @@ export default function App() {
 
     setLoading(true);
     setIsSearching(true);
+    setIsSafeSearchIntercepted(false);
     setResults([]); 
     setSearchStage(currentVisualQuery ? 'extracting' : 'ranking');
     setVisualMathProblem(null);
     setVisualAnalysis(null);
     setAiOverview(null);
     setDictionary(null);
+    setAppsData(null);
+    setBusinessProfileState(null);
     setKnowledgePanel(null);
     setIsEnglishHelp(false);
     setFaq([]);
@@ -504,7 +515,8 @@ export default function App() {
           imageQuery: currentVisualQuery,
           vector,
           sessionId: getSessionId(),
-          uid: user?.sub || user?.email || 'guest'
+          uid: user?.sub || user?.email || 'guest',
+          safeSearch
         })
       });
       
@@ -547,10 +559,31 @@ export default function App() {
       }
 
       const pineconeResults = data.results || [];
+      setIsSafeSearchIntercepted(!!data.isSafeSearchIntercepted);
       setTotalPages(data.totalPages || 1);
       setDictionary(data.dictionary || null);
+      setLyrics(data.lyrics || null);
+      setAppsData(data.apps || null);
+      setBusinessProfileState(data.businessProfile || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
-      
+
+      // --- LOG INTENT ENGINE RESULTS TO EXECUTOR / BROWSER TERMINAL ---
+      console.log(`
+======================================================
+  🧠 SCOUT INTENT DISCOVERY ENGINE (DIAGNOSTICS)
+======================================================
+  Query:            "${finalQuery}"
+  Total Web:        ${pineconeResults.length} records
+  Lyrics:           ${data.lyrics ? `Found: ${data.lyrics.songTitle} - ${data.lyrics.artist}` : 'None'}
+  Entity Found:     ${data.detectedEntity ? JSON.stringify(data.detectedEntity) : 'None'}
+  Apps Triggered:   ${data.apps ? `${data.apps.length} apps` : 'None'}
+  Business Profile: ${data.businessProfile ? 'Yes' : 'No'}
+  Dictionary Card:  ${data.dictionary ? `Yes (${data.dictionary.word})` : 'No'}
+  English Tutor:    ${data.isEnglishHelp ? 'Yes' : 'No'}
+  SafeSearch status: ${safeSearch} (Intercepted: ${!!data.isSafeSearchIntercepted})
+======================================================
+`);
+
       const rawResults: SearchResult[] = pineconeResults.map((r: any) => ({
         ...r,
         id: r.id,
@@ -955,10 +988,14 @@ export default function App() {
 
   const goHome = () => {
     setIsSearching(false);
+    setIsSafeSearchIntercepted(false);
     setQuery('');
     setResults([]);
     setAiOverview(null);
     setDictionary(null);
+    setLyrics(null);
+    setAppsData(null);
+    setBusinessProfileState(null);
     setIsOverviewExpanded(false);
     setFaq([]);
     setKnowledgePanel(null);
@@ -1086,6 +1123,9 @@ export default function App() {
             showSuggestions={showSuggestions}
             setShowSuggestions={setShowSuggestions}
             searchContainerRef={searchContainerRef}
+            safeSearch={safeSearch}
+            setSafeSearch={setSafeSearch}
+            isSafeSearchIntercepted={isSafeSearchIntercepted}
             onResultClick={handleResultClick}
             clickedUrls={clickedUrls}
             isSignoutOpen={isSignoutOpen}
@@ -1107,6 +1147,9 @@ export default function App() {
             setSelectedImage={setSelectedImage}
             aiRateLimited={aiRateLimited}
             onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
+            appsData={appsData}
+            businessProfile={businessProfileState}
+            lyrics={lyrics}
           />
         )}
         {isAnalyticsOpen && (
@@ -1134,6 +1177,7 @@ export default function App() {
 
 function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics, bgRotationMode, setBgRotationMode }: any) {
   const [glowVisible, setGlowVisible] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setGlowVisible(false), 3000);
@@ -1144,7 +1188,10 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
     const textarea = inputRef?.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    const sH = textarea.scrollHeight;
+    textarea.style.height = `${Math.min(sH, 160)}px`;
+    // If scroll height is greater than 36px, it means the text wraps and has expanded
+    setIsExpanded(sH > 36);
   }, [query, inputRef]);
 
   // Find first suggestion that matches query
@@ -1202,17 +1249,29 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
         >
           <form 
             onSubmit={(e) => { e.preventDefault(); onSearch(); }}
-            className={`relative flex items-center gap-3 px-5 py-3 transition-all duration-300 bg-white shadow-2xl ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem]' : 'rounded-full'}`}
+            className={`relative flex items-center gap-3 px-5 py-3 transition-all duration-300 bg-white shadow-2xl ${
+              showSuggestions && suggestions.length > 0 
+                ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-[1.75rem]') 
+                : (isExpanded ? 'rounded-2xl' : 'rounded-full')
+            }`}
           >
             {/* Spinning colorful gradient border (3-sec load effect) */}
-            <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem] rounded-b-none border-b-0' : 'rounded-full'} ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
+            <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${
+              showSuggestions && suggestions.length > 0 
+                ? (isExpanded ? 'rounded-t-2xl rounded-b-none border-b-0' : 'rounded-t-[1.75rem] rounded-b-none border-b-0') 
+                : (isExpanded ? 'rounded-2xl' : 'rounded-full')
+            } ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
               <div 
                 className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#a855f7,#ec4899,#22c55e,#3b82f6)] animate-spin"
                 style={{ animationDuration: '1.5s', animationTimingFunction: 'linear' }}
               />
             </div>
             {/* Mask to lock border width */}
-            <div className={`absolute inset-[1.5px] bg-white pointer-events-none z-0 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-[1.75rem]' : 'rounded-full'}`} />
+            <div className={`absolute inset-[1.5px] bg-white pointer-events-none z-0 ${
+              showSuggestions && suggestions.length > 0 
+                ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-[1.75rem]') 
+                : (isExpanded ? 'rounded-2xl' : 'rounded-full')
+            }`} />
 
             <Search className="text-slate-400 group-focus-within:text-blue-500 transition-colors shrink-0 relative z-10" size={22} />
             
@@ -1372,7 +1431,384 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics }: any) {
+function GoogleBusinessProfileCard({ profile }: { profile: any }) {
+  const [isHoursExpanded, setIsHoursExpanded] = React.useState(false);
+  const [isSaved, setIsSaved] = React.useState(false);
+
+  if (!profile) return null;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }} 
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xs text-left mb-6 font-sans w-full"
+    >
+      {/* Map preview */}
+      <div className="relative h-32 w-full overflow-hidden bg-slate-100">
+        <img 
+          src={profile.mapPreviewImage && profile.mapPreviewImage.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(profile.mapPreviewImage)}` : profile.mapPreviewImage} 
+          className="w-full h-full object-cover grayscale brightness-90 animate-fade-in" 
+          alt="Map location preview"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/15 to-transparent pointer-events-none" />
+        {/* Map Pin marker badge */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-rose-600 text-white rounded-full p-2 shadow-md border-2 border-white animate-bounce" style={{ animationDuration: '3s' }}>
+          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+          </svg>
+        </div>
+      </div>
+
+      <div className="p-5">
+        {/* Claimed Badge & Business Info */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold border border-emerald-100 uppercase tracking-wider">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3 shrink-0">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+              </svg>
+              Profile Claimed
+            </span>
+            <span className="text-[11px] text-slate-400 font-medium">Verified listing</span>
+          </div>
+        </div>
+
+        <h2 className="text-xl font-display font-medium text-slate-900 tracking-tight leading-snug mb-0.5">{profile.name}</h2>
+        <p className="text-[12.5px] text-slate-500 font-normal mb-3">{profile.category}</p>
+
+        {/* Rating and Reviews */}
+        <div className="flex items-center gap-1.5 mb-4 border-b border-slate-100 pb-4">
+          <span className="text-sm font-bold text-slate-800">{profile.rating}</span>
+          <div className="flex text-amber-400 text-xs gap-0.5">
+            {"★".repeat(Math.floor(profile.rating))}
+            {profile.rating % 1 !== 0 ? "★" : ""}
+          </div>
+          <span className="text-xs text-blue-600 hover:underline cursor-pointer font-medium">
+            {profile.reviewsCount} Google reviews
+          </span>
+        </div>
+
+        {/* Action Buttons: Google-style grey pill bg and black icon/text */}
+        <div className="grid grid-cols-4 gap-2 mb-4">
+          <a 
+            href={profile.website} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-1.5 py-2.5 px-0.5 rounded-2xl bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-900 font-medium text-xs transition-colors group/btn cursor-pointer text-center"
+          >
+            <div className="w-5 h-5 flex items-center justify-center text-slate-900 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+            </div>
+            <span className="text-[10.5px] tracking-tight font-semibold text-slate-800 group-hover/btn:text-black">Website</span>
+          </a>
+
+          <a 
+            href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(profile.name + ' ' + profile.address)}`}
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-1.5 py-2.5 px-0.5 rounded-2xl bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-900 font-medium text-xs transition-colors group/btn cursor-pointer text-center"
+          >
+            <div className="w-5 h-5 flex items-center justify-center text-slate-900 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
+                <line x1="9" y1="3" x2="9" y2="18" />
+                <line x1="15" y1="6" x2="15" y2="21" />
+              </svg>
+            </div>
+            <span className="text-[10.5px] tracking-tight font-semibold text-slate-800 group-hover/btn:text-black">Directions</span>
+          </a>
+
+          <button 
+            type="button"
+            onClick={() => setIsSaved(!isSaved)}
+            className="flex flex-col items-center gap-1.5 py-2.5 px-0.5 rounded-2xl bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-900 font-medium text-xs transition-colors group/btn cursor-pointer text-center border-none"
+          >
+            <div className="w-5 h-5 flex items-center justify-center text-slate-900 shrink-0">
+              <svg 
+                viewBox="0 0 24 24" 
+                fill={isSaved ? "currentColor" : "none"} 
+                stroke="currentColor" 
+                strokeWidth="2.5" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={`w-4 h-4 ${isSaved ? "text-amber-500" : "text-slate-950"}`}
+              >
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <span className="text-[10.5px] tracking-tight font-semibold text-slate-800 group-hover/btn:text-black">
+              {isSaved ? "Saved" : "Save"}
+            </span>
+          </button>
+
+          <a 
+            href={`tel:${profile.phone}`}
+            className="flex flex-col items-center gap-1.5 py-2.5 px-0.5 rounded-2xl bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-900 font-medium text-xs transition-colors group/btn cursor-pointer text-center"
+          >
+            <div className="w-5 h-5 flex items-center justify-center text-slate-900 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </div>
+            <span className="text-[10.5px] tracking-tight font-semibold text-slate-800 group-hover/btn:text-black">Call</span>
+          </a>
+        </div>
+
+        {/* Detailed Contacts Lists */}
+        <div className="space-y-3.5 pt-4 border-t border-slate-100 text-[13px] text-slate-700 leading-relaxed">
+          <div className="flex items-start gap-2.5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-slate-400 shrink-0 mt-0.5">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+              <circle cx="12" cy="10" r="3" />
+            </svg>
+            <span className="font-normal text-slate-600">{profile.address}</span>
+          </div>
+
+          <div className="flex items-start gap-2.5 relative">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-slate-400 shrink-0 mt-0.5">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <div className="flex-1">
+              <button 
+                type="button"
+                onClick={() => setIsHoursExpanded(!isHoursExpanded)} 
+                className="flex items-center gap-1.5 font-semibold text-emerald-600 hover:underline text-[13px] focus:outline-none border-none bg-transparent p-0 cursor-pointer"
+              >
+                <span>{profile.hours}</span>
+                <span className={`text-[9px] text-slate-400 transition-transform duration-200 ${isHoursExpanded ? 'rotate-180' : ''}`}>▼</span>
+              </button>
+              {isHoursExpanded && (
+                <div className="mt-2 p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs space-y-1.5 text-slate-600">
+                  <div className="flex justify-between"><span>Monday</span><span>9:00 AM – 5:00 PM</span></div>
+                  <div className="flex justify-between font-semibold text-slate-800"><span>Tuesday</span><span>9:00 AM – 5:00 PM</span></div>
+                  <div className="flex justify-between"><span>Wednesday</span><span>9:00 AM – 5:00 PM</span></div>
+                  <div className="flex justify-between"><span>Thursday</span><span>9:00 AM – 5:00 PM</span></div>
+                  <div className="flex justify-between"><span>Friday</span><span>9:00 AM – 5:00 PM</span></div>
+                  <div className="flex justify-between text-slate-400"><span>Saturday</span><span>Closed</span></div>
+                  <div className="flex justify-between text-slate-400"><span>Sunday</span><span>Closed</span></div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2.5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-slate-400 shrink-0 mt-0.5">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
+            <span className="font-normal text-slate-650">{profile.phone}</span>
+          </div>
+
+          <div className="flex items-start gap-2.5 pt-3.5 border-t border-slate-50 text-[11px] text-slate-400 font-medium">
+             <span>Is this your business? </span>
+             <a href={`https://business.google.com`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Claim it now</a>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function AppStoreIcon({ src, title }: { src: string; title: string }) {
+  const [hasError, setHasError] = React.useState(false);
+
+  React.useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
+  const getGradient = (text: string) => {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = text.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const colors = [
+      "from-indigo-500 to-indigo-600 text-indigo-50",
+      "from-blue-500 to-blue-600 text-blue-50",
+      "from-emerald-500 to-emerald-600 text-emerald-50",
+      "from-rose-500 to-rose-600 text-rose-50",
+      "from-amber-500 to-amber-600 text-amber-50",
+      "from-violet-500 to-violet-600 text-violet-50",
+      "from-sky-500 to-sky-600 text-sky-50",
+      "from-fuchsia-500 to-fuchsia-600 text-fuchsia-50",
+      "from-teal-500 to-teal-600 text-teal-105",
+      "from-pink-500 to-pink-600 text-pink-50"
+    ];
+    const index = Math.abs(hash) % colors.length;
+    return colors[index];
+  };
+
+  const initial = title ? title.trim().charAt(0).toUpperCase() : "?";
+
+  if (!src || hasError) {
+    return (
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-display font-semibold text-[19px] shadow-xs bg-gradient-to-tr ${getGradient(title)} shrink-0 select-none`}>
+        {initial}
+      </div>
+    );
+  }
+
+  const proxiedSrc = src && src.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(src)}` : src;
+
+  // Use natural favicon representation as an elegant backup
+  return (
+    <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden shrink-0 shadow-xs relative hover:scale-[1.03] transition-transform">
+      <img
+        src={proxiedSrc}
+        className="w-full h-full object-cover rounded-xl"
+        referrerPolicy="no-referrer"
+        alt={title}
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+}
+
+function AppsBlock({ appsData }: { appsData: any[] | null }) {
+  if (!appsData || appsData.length === 0) return null;
+
+  return (
+    <div className="bg-white border border-slate-200 shadow-xs rounded-3xl p-5 mb-6 text-left">
+      <div className="flex items-center gap-2 mb-4">
+        {/* Apple Store Blue Round Badge Icon */}
+        <div className="w-6.5 h-6.5 rounded-lg bg-[#007aff] flex items-center justify-center text-white shrink-0 shadow-sm">
+          {/* Apple App Store Custom Vector A Logo */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+            <line x1="6" y1="18" x2="18" y2="6" stroke="white" />
+            <path d="M18 18H6l6-12 6 12z" stroke="white" fill="none" />
+          </svg>
+        </div>
+        <h3 className="text-[19px] font-display font-medium text-slate-900 tracking-tight">Apps</h3>
+      </div>
+      
+      <div className="space-y-3.5 divide-y divide-slate-100">
+        {appsData.map((app: any, i: number) => (
+          <a
+            key={i}
+            href={app.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center gap-4 group/app w-full text-left transition-all rounded-2xl ${i > 0 ? "pt-3.5" : ""}`}
+          >
+            {/* App Icon using robust and gorgeous state fallback */}
+            <AppStoreIcon src={app.icon} title={app.title} />
+            
+            {/* App Details */}
+            <div className="flex-1 min-w-0">
+              <h4 className="text-[15px] font-medium text-[#1a0dab] line-clamp-1 group-hover/app:underline leading-snug">
+                {app.title}
+              </h4>
+              
+              <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-600 font-normal">
+                <span className="font-semibold text-slate-800">{app.rating}</span>
+                <span className="text-amber-500 text-[11px]">★</span>
+                <span className="text-slate-400">({app.reviews})</span>
+              </div>
+              
+              <p className="text-[12px] text-slate-400 font-normal mt-0.5 truncate uppercase tracking-tight">
+                {app.category}
+              </p>
+            </div>
+          </a>
+        ))}
+      </div>
+
+      {/* Google-style bottom direct more button centered in and grey bg with black text */}
+      <div className="flex justify-center mt-4 pt-3.5 border-t border-slate-100">
+        <a
+          href="https://apps.apple.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-900 px-6 py-2 rounded-full font-medium text-[13px] transition-all duration-150 active:scale-95 cursor-pointer decoration-none"
+        >
+          <span>More apps</span>
+          <ChevronRight size={14} className="stroke-[2.5]" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function LyricsSection({ lyrics }: { lyrics: any }) {
+  const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  if (!lyrics || !lyrics.lyrics) return null;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(lyrics.lyrics);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const lines = lyrics.lyrics.split('\n');
+  const showMoreButton = lines.length > 12;
+  const displayedLines = expanded || !showMoreButton ? lines : lines.slice(0, 12);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }} 
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white border-2 border-slate-100 rounded-3xl p-6 transition-all mb-6 shadow-xs overflow-hidden"
+    >
+      <div className="flex items-start justify-between mb-4 pb-4 border-b border-slate-100 gap-4">
+        <div>
+          <div className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-1 flex items-center gap-1.5 font-mono">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+            </svg>
+            Song Lyrics
+          </div>
+          <h2 className="text-2xl font-display font-black text-slate-900 tracking-tight leading-tight">{lyrics.songTitle}</h2>
+          <p className="text-slate-600 font-medium text-sm mt-1">
+            by <span className="font-bold text-slate-800">{lyrics.artist}</span>
+            {lyrics.album && <> • <span className="italic text-slate-500">{lyrics.album}</span></>}
+            {lyrics.releaseYear && ` (${lyrics.releaseYear})`}
+          </p>
+        </div>
+
+        <button 
+          onClick={handleCopy}
+          className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full font-bold text-xs transition-all active:scale-95 cursor-pointer whitespace-nowrap flex items-center gap-1.5"
+        >
+          {copied ? (
+            <>
+              <Check size={13} className="text-emerald-700 stroke-[3]" />
+              <span className="text-emerald-700 font-bold">Copied</span>
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+              </svg>
+              <span>Copy</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="text-slate-700 text-[15px] font-sans leading-relaxed whitespace-pre-line pl-3 border-l-2 border-blue-500 font-medium">
+        {displayedLines.join('\n')}
+      </div>
+
+      {showMoreButton && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-4 w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs tracking-wider uppercase transition-all duration-150 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1"
+        >
+          {expanded ? 'Show less' : `Show all lyrics (${lines.length} lines)`}
+        </button>
+      )}
+    </motion.div>
+  );
+}
+
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics }: any) {
+  const [isResInputFocused, setIsResInputFocused] = useState(false);
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
@@ -1420,7 +1856,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
   const [glowVisible, setGlowVisible] = useState(true);
   const [isPasfExpanded, setIsPasfExpanded] = useState(false);
+  const [isIntentDecoderOpen, setIsIntentDecoderOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const resInputRef = useRef<HTMLTextAreaElement>(null);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -1449,7 +1887,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
     const textarea = resInputRef.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+    const sH = textarea.scrollHeight;
+    textarea.style.height = `${Math.min(sH, 120)}px`;
+    setIsExpanded(sH > 32);
   }, [query]);
 
   // Find first suggestion that matches query
@@ -1488,17 +1928,29 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
           <div className="flex-1 w-full max-w-2xl relative" ref={searchContainerRef}>
             <form 
               onSubmit={(e) => { e.preventDefault(); onSearch(); }}
-              className={`relative flex items-center gap-2 px-6 py-2.5 transition-all duration-300 soft-ui ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`}
+              className={`relative flex items-center gap-2 px-6 py-2.5 transition-all duration-300 soft-ui ${
+                showSuggestions && suggestions.length > 0 
+                  ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-2xl') 
+                  : (isExpanded ? 'rounded-2xl' : 'rounded-full')
+              }`}
             >
               {/* Spinning colorful gradient border (3-sec load effect) */}
-              <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl rounded-b-none border-b-0' : 'rounded-full'} ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
+              <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${
+                showSuggestions && suggestions.length > 0 
+                  ? (isExpanded ? 'rounded-t-2xl rounded-b-none border-b-0' : 'rounded-t-2xl rounded-b-none border-b-0') 
+                  : (isExpanded ? 'rounded-2xl' : 'rounded-full')
+              } ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
                 <div 
                   className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#a855f7,#ec4899,#22c55e,#3b82f6)] animate-spin"
                   style={{ animationDuration: '1.5s', animationTimingFunction: 'linear' }}
                 />
               </div>
               {/* Inner blocking mask */}
-              <div className={`absolute inset-[1.5px] bg-slate-50 pointer-events-none z-0 ${showSuggestions && suggestions.length > 0 ? 'rounded-t-2xl' : 'rounded-full'}`} />
+              <div className={`absolute inset-[1.5px] bg-slate-50 pointer-events-none z-0 ${
+                showSuggestions && suggestions.length > 0 
+                  ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-2xl') 
+                  : (isExpanded ? 'rounded-2xl' : 'rounded-full')
+              }`} />
 
               {imageQuery && (
                 <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100 relative z-10">
@@ -1535,9 +1987,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
                 <textarea 
                   ref={resInputRef}
-                  value={query} 
+                  value={isResInputFocused ? query : (query && query.length > 45 ? query.slice(0, 45) + '...' : query)} 
                   rows={1}
-                  onFocus={() => setShowSuggestions(true)} 
+                  onFocus={() => { setIsResInputFocused(true); setShowSuggestions(true); }}
+                  onBlur={() => { setTimeout(() => setIsResInputFocused(false), 200); }}
                   onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1621,13 +2074,117 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       </header>
 
       <main ref={mainRef} className="flex-1 overflow-y-auto">
-        <div className={`flex flex-col lg:flex-row gap-8 lg:gap-10 xl:gap-12 p-4 md:p-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto`}>
-          {activeTab === 'all' && knowledgePanel && (
+        {activeTab === 'images' ? (
+          <div className="w-full px-8 py-8 md:px-8">
+            {loading ? (
+              <div className="animate-pulse grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {[1,2,3,4,5,6,7,8,9,10,11,12].map(i => (
+                  <div key={i} className="aspect-square bg-slate-100 rounded-3xl" />
+                ))}
+              </div>
+            ) : filteredResults.length > 0 ? (
+              <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 gap-6 space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                {filteredResults.map((res: any) => {
+                  const imgUrl = isImageUrl(res.url) ? res.url : res.image;
+                  return (
+                    <div 
+                      key={res.id} 
+                      onClick={() => setSelectedImage(res)} 
+                      className="break-inside-avoid bg-white rounded-2xl overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all border border-slate-100 cursor-pointer p-2 mb-6 group inline-block w-full"
+                    >
+                      <div className="rounded-xl overflow-hidden bg-slate-50 relative flex items-center justify-center">
+                        <img 
+                          src={imgUrl} 
+                          className="w-full h-auto object-contain transition-transform group-hover:scale-[1.01]" 
+                          style={{ maxHeight: '280px' }} 
+                          referrerPolicy="no-referrer" 
+                          alt={res.title} 
+                        />
+                      </div>
+                      <div className="pt-2 px-1 pb-1">
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
+                          <span className="w-3.5 h-3.5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200/50 shrink-0">
+                            <img 
+                              src={`https://www.google.com/s2/favicons?sz=64&domain=${res.displayUrl || 'wikipedia.org'}`} 
+                              className="w-2.5 h-2.5" 
+                              referrerPolicy="no-referrer" 
+                              onError={(e) => { (e.target as any).src = 'https://wikipedia.org/favicon.ico'; }}
+                            />
+                          </span>
+                          <span className="truncate">{res.displayUrl ? res.displayUrl.replace('www.', '') : 'Wikipedia'}</span>
+                        </div>
+                        <h3 className="text-xs font-semibold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1 leading-snug">
+                          {res.title}
+                        </h3>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-20 text-center text-slate-400 font-medium italic">No images found for your query.</div>
+            )}
+
+            {totalPages > 1 && !loading && (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-12 border-t border-slate-100 mt-8 mb-10 overflow-hidden">
+                <div className="flex items-center gap-1.5 order-2 sm:order-1">
+                  <button 
+                    onClick={() => onSearch(undefined, Math.max(1, page - 1))} 
+                    disabled={page === 1} 
+                    className="h-10 px-4 rounded-xl hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all font-bold text-xs uppercase tracking-widest text-slate-500 border border-transparent hover:border-slate-200"
+                  >
+                    Prev
+                  </button>
+                  
+                  <div className="flex gap-1">
+                    {(() => {
+                      const pages = [];
+                      const startPage = Math.max(1, page - 2);
+                      const endPage = Math.min(totalPages, startPage + 4);
+                      const actualStart = Math.max(1, endPage - 4);
+                      
+                      for (let i = actualStart; i <= endPage; i++) {
+                        pages.push(
+                          <button 
+                            key={i} 
+                            onClick={() => onSearch(undefined, i)} 
+                            className={`w-10 h-10 rounded-xl font-black text-sm transition-all ${page === i ? 'bg-[#1a73e8] text-white shadow-lg shadow-blue-200' : 'hover:bg-slate-50 text-slate-600'}`}
+                          >
+                            {i}
+                          </button>
+                        );
+                      }
+                      return pages;
+                    })()}
+                  </div>
+
+                  <button 
+                    onClick={() => onSearch(undefined, Math.min(totalPages, page + 1))} 
+                    disabled={page === totalPages} 
+                    className="h-10 px-4 rounded-xl hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all font-bold text-xs uppercase tracking-widest text-slate-500 border border-transparent hover:border-slate-200"
+                  >
+                    Next
+                  </button>
+                </div>
+                
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest order-1 sm:order-2">
+                  Page <span className="text-slate-900">{page}</span> of {totalPages}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className={`flex flex-col lg:flex-row gap-8 lg:gap-10 xl:gap-12 p-4 md:p-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto`}>
+          {activeTab === 'all' && (knowledgePanel || businessProfile) && (
             <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[368px] shrink-0">
-               <motion.div 
-                 initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                 className="bg-white border border-slate-200 rounded-2xl overflow-hidden"
-               >
+               {businessProfile && (
+                 <GoogleBusinessProfileCard profile={businessProfile} />
+               )}
+               {knowledgePanel && (
+                 <motion.div 
+                   initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+                   className="bg-white border border-slate-200 rounded-2xl overflow-hidden"
+                 >
                  {(() => {
                    const panelImages = (knowledgePanel.images && knowledgePanel.images.length > 0) 
                      ? knowledgePanel.images 
@@ -1757,11 +2314,12 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                      </div>
                    );
                  })()}
-               </motion.div>
+                 </motion.div>
+               )}
             </aside>
           )}
 
-          <div className="w-full max-w-3xl space-y-6 order-2 lg:order-1">
+          <div className="w-full max-w-[650px] space-y-6 order-2 lg:order-1 lg:pl-10">
             {/* Interactive Search Tool Widgets */}
             {activeTab === 'all' && shouldShowColorPicker(query) && (
               <ColorPickerWidget query={query} />
@@ -1949,57 +2507,58 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </motion.div>
             )}
 
-            {loading ? (
+            {/* Song Lyrics Widget Integration */}
+            {activeTab === 'all' && lyrics && (
+              <LyricsSection lyrics={lyrics} />
+            )}
+
+            {isSafeSearchIntercepted ? (
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                className="my-10 p-8 md:p-12 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center text-center max-w-2xl mx-auto"
+              >
+                <div className="p-4 bg-amber-50 rounded-full text-amber-500 mb-5 border border-amber-100 flex items-center justify-center">
+                  <Shield size={36} className="stroke-[2.5]" />
+                </div>
+                <h3 className="text-xl md:text-2xl font-display font-black text-slate-800 tracking-tight mb-3">SafeSearch Filters Active</h3>
+                <p className="text-slate-600 text-sm md:text-base leading-relaxed mb-8 max-w-md font-medium">
+                  We've filtered this search query because it contains terms flagged as unsafe or potentially explicit. Scout blocks adult, violent, and explicit links and images to ensure a safe environment.
+                </p>
+                <div className="flex flex-wrap gap-3 justify-center">
+                  <button 
+                    onClick={goHome}
+                    className="px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-full font-bold text-xs transition-all tracking-wider uppercase active:scale-95 cursor-pointer"
+                  >
+                    Go back home
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setQuery("Cute kittens playing");
+                      setTimeout(() => onSearch("Cute kittens playing"), 100);
+                    }}
+                    className="px-5 py-2.5 bg-[#1a73e8] hover:bg-blue-700 text-white rounded-full font-bold text-xs transition-all tracking-wider shadow-sm uppercase active:scale-95 cursor-pointer hover:shadow-md border-none"
+                  >
+                    Try "Cute kittens playing"
+                  </button>
+                </div>
+              </motion.div>
+            ) : loading ? (
               <div className="space-y-6">
                 {[1,2,3].map(i => <div key={i} className="animate-pulse space-y-3 p-6 bg-white rounded-3xl border border-slate-100"><div className="h-4 bg-slate-100 rounded w-1/4" /><div className="h-6 bg-slate-100 rounded w-3/4" /><div className="h-20 bg-slate-100 rounded w-full" /></div>)}
               </div>
             ) : filteredResults.length > 0 ? (
-              activeTab === 'images' ? (
-                <div className="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4 space-y-4 animate-in fade-in slide-in-from-bottom-6 duration-700">
-                  {filteredResults.map((res: any) => {
-                    const imgUrl = isImageUrl(res.url) ? res.url : res.image;
-                    return (
-                      <div 
-                        key={res.id} 
-                        onClick={() => setSelectedImage(res)} 
-                        className="break-inside-avoid bg-white rounded-2xl overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all border border-slate-100 cursor-pointer p-2 mb-4 group inline-block w-full"
-                      >
-                        <div className="rounded-xl overflow-hidden bg-slate-50 relative flex items-center justify-center">
-                          <img 
-                            src={imgUrl} 
-                            className="w-full h-auto object-contain transition-transform group-hover:scale-[1.01]" 
-                            style={{ maxHeight: '280px' }} 
-                            referrerPolicy="no-referrer" 
-                            alt={res.title} 
-                          />
-                        </div>
-                        <div className="pt-2 px-1 pb-1">
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
-                            <span className="w-3.5 h-3.5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200/50 shrink-0">
-                              <img 
-                                src={`https://www.google.com/s2/favicons?sz=64&domain=${res.displayUrl || 'wikipedia.org'}`} 
-                                className="w-2.5 h-2.5" 
-                                referrerPolicy="no-referrer" 
-                                onError={(e) => { (e.target as any).src = 'https://wikipedia.org/favicon.ico'; }}
-                              />
-                            </span>
-                            <span className="truncate">{res.displayUrl ? res.displayUrl.replace('www.', '') : 'Wikipedia'}</span>
-                          </div>
-                          <h3 className="text-xs font-semibold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1 leading-snug">
-                            {res.title}
-                          </h3>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="space-y-8 md:space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
-                  {groupedResults.map((item: any, idx: number) => (
+              <div className="space-y-8 md:space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                {groupedResults.map((item: any, idx: number) => (
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
+                      {/* Apps Block for tech companies after first organic result */}
+                      {idx === 1 && appsData && appsData.length > 0 && (
+                        <AppsBlock appsData={appsData} />
+                      )}
+
                       {/* Image Strip after 1st result */}
                       {idx === 1 && (
-                        <ImageStrip results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
+                        <ImageStrip query={query} results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
                       )}
 
                       {/* First FAQ after 3 results */}
@@ -2030,7 +2589,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                                   >
                                     <div className="flex-1 min-w-0 pr-8">
                                       <h4 className="text-[17px] font-display font-medium text-[#1a0dab] group-hover/sub:underline line-clamp-1">{s.title}</h4>
-                                      <p className="text-slate-600 text-[14px] line-clamp-2 mt-1 leading-relaxed">{s.snippet}</p>
+                                      <p className="text-slate-600 text-[14px] line-clamp-2 mt-1 leading-relaxed">
+                                        {s.snippet && s.snippet.length > 191 ? (s.snippet.substring(0, 188) + '...') : s.snippet}
+                                      </p>
                                     </div>
                                     <ChevronRight size={18} className="text-slate-400 shrink-0 opacity-0 group-hover/sub:opacity-100 group-hover/sub:translate-x-1 transition-all" />
                                   </a>
@@ -2052,8 +2613,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       )}
                     </React.Fragment>
                   ))}
-                </div>
-              )
+              </div>
             ) : <div className="py-20 text-center text-slate-400 font-medium italic">No results found for your query.</div>}
 
             {totalPages > 1 && !loading && (
@@ -2104,9 +2664,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </div>
             )}
           </div>
-
-
         </div>
+      )}
       </main>
     </motion.div>
   );
@@ -2161,25 +2720,72 @@ function QuickSummary({ text }: { text: string }) {
   );
 }
 
-function ImageStrip({ results, onMore, onResultClick, onImageClick }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void, onImageClick?: (img: any) => void }) {
-  const imagesWithMeta = results.filter(r => r.image).slice(0, 24);
-  if (imagesWithMeta.length < 3) return null;
+function ImageStrip({ results, onMore, onResultClick, onImageClick, query = '' }: { results: SearchResult[], onMore: () => void, onResultClick?: (id: string, url: string) => void, onImageClick?: (img: any) => void, query?: string }) {
+  const imagesWithMeta = React.useMemo(() => {
+    // 1. Tokenize query words (longer than 1 character)
+    const terms = query.toLowerCase().trim().split(/\s+/).filter(t => t.length > 1);
+    
+    // 2. Filter list of raw results that have an image
+    const rawImages = results.filter(r => r.image);
+    
+    if (terms.length === 0) {
+      return rawImages.slice(0, 4);
+    }
+    
+    // 3. For each image, compute keyword relevance score
+    const scored = rawImages.map(img => {
+      let matchScore = 0;
+      const titleL = (img.title || '').toLowerCase();
+      const snippetL = (img.snippet || '').toLowerCase();
+      const urlL = (img.url || '').toLowerCase();
+      const altL = (img.alt || img.title || '').toLowerCase();
+
+      terms.forEach(term => {
+        if (titleL.includes(term)) matchScore += 15;
+        if (altL.includes(term)) matchScore += 15;
+        if (snippetL.includes(term)) matchScore += 8;
+        if (urlL.includes(term)) matchScore += 5;
+      });
+
+      // Weigh in original ranking search score representation (typically between 0.3-0.9)
+      const baseScore = img.score || 0;
+      const totalScore = matchScore + (baseScore * 10);
+
+      return { img, matchScore, totalScore };
+    });
+
+    // 4. Try to show only matching elements first if matchScore > 0, otherwise fallback
+    let filtered = scored.filter(item => item.matchScore > 0);
+    if (filtered.length === 0) {
+      filtered = scored; // fallback to general relevance if no deep keyword matches found
+    }
+
+    // 5. Rank descending by final total score
+    filtered.sort((a, b) => b.totalScore - a.totalScore);
+
+    return filtered.map(item => item.img).slice(0, 4);
+  }, [results, query]);
+
+  if (imagesWithMeta.length === 0) return null;
+
+  // Derive human search keyword representation for header
+  const keywords = query.trim() || results[0]?.title.split(' ')[0] || 'your search';
 
   return (
-    <div className="py-8 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="py-6 border-b border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex items-center justify-between mb-5 px-1">
-        <h2 className="text-xl md:text-2xl font-display font-medium text-slate-900">Images for {results[0]?.title.split(' ')[0] || 'your search'}</h2>
+        <h2 className="text-lg md:text-xl font-display font-medium text-slate-900 truncate pr-4">Images for <span className="font-bold text-slate-800 italic">"{keywords}"</span></h2>
         <button 
           onClick={onMore} 
-          className="text-white bg-[#1a73e8] hover:bg-blue-700 px-5 py-2 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100 cursor-pointer"
+          className="shrink-0 text-white bg-[#1a73e8] hover:bg-blue-700 px-4 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100 cursor-pointer"
         >
-          View all <ChevronRight size={14} />
+          View all <ChevronRight size={12} />
         </button>
       </div>
-      <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar -mx-4 px-4 snap-x">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full">
         {imagesWithMeta.map((img) => (
-          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="shrink-0 w-36 sm:w-48 h-full group snap-start cursor-pointer">
-            <div className="h-[120px] sm:h-[130px] rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 flex items-center justify-center p-2.5 transition-all group-hover:bg-slate-100/60 group-hover:shadow-md">
+          <div key={img.id} onClick={(e) => { e.preventDefault(); onImageClick?.(img); }} className="w-full group cursor-pointer">
+            <div className="h-[120px] sm:h-[130px] w-full rounded-2xl overflow-hidden bg-slate-50 border border-slate-100 flex items-center justify-center p-2.5 transition-all group-hover:bg-slate-100/60 group-hover:shadow-md">
               <img src={img.image} className="h-full w-auto max-w-full object-contain transition-transform group-hover:scale-[1.03]" referrerPolicy="no-referrer" alt={img.title} />
             </div>
             <div className="mt-2 text-[12px] font-medium text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{img.title}</div>
@@ -2223,6 +2829,112 @@ function AppsLauncher({ isOpen, setIsOpen, isWhite }: { isOpen: boolean, setIsOp
                   <span>{app.name}</span>
                 </a>
               ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SafeSearchSelector({ safeSearch, setSafeSearch }: { safeSearch: 'strict' | 'moderate' | 'off', setSafeSearch: any }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelect = (mode: 'strict' | 'moderate' | 'off') => {
+    setSafeSearch(mode);
+    localStorage.setItem('safe_search', mode);
+    setIsOpen(false);
+    // Reload search to immediately filter results!
+    const searchForm = document.querySelector('form');
+    if (searchForm) {
+      searchForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    }
+  };
+
+  const getLabel = () => {
+    if (safeSearch === 'strict') return 'SafeSearch: Strict';
+    if (safeSearch === 'moderate') return 'SafeSearch: Moderate';
+    return 'SafeSearch: Off';
+  };
+
+  const getColor = () => {
+    if (safeSearch === 'strict') return 'text-green-600 bg-green-50 border-green-100 hover:bg-green-100/70 border-solid';
+    if (safeSearch === 'moderate') return 'text-amber-600 bg-amber-50 border-amber-100 hover:bg-amber-100/70 border-solid';
+    return 'text-slate-500 bg-slate-50 border-slate-200 hover:bg-slate-100 border-solid';
+  };
+
+  return (
+    <div className="relative z-50 text-left" ref={containerRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-bold font-sans tracking-tight transition-all active:scale-95 cursor-pointer ${getColor()}`}
+      >
+        <Shield size={14} className="stroke-[2.5]" />
+        <span>{getLabel()}</span>
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 mt-2 w-56 rounded-2xl bg-white border border-slate-100 shadow-xl z-50 p-2.5 overflow-hidden"
+          >
+            <div className="px-3 py-1.5 text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+              Filter Explicit Results
+            </div>
+            <div className="space-y-1">
+              <button
+                onClick={() => handleSelect('strict')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-medium transition-all cursor-pointer ${
+                  safeSearch === 'strict' ? 'bg-green-50 text-green-700' : 'hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">Strict (Filter)</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Filter explicit text & images</div>
+                </div>
+                {safeSearch === 'strict' && <Check size={14} className="stroke-[2.5]" />}
+              </button>
+
+              <button
+                onClick={() => handleSelect('moderate')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-medium transition-all cursor-pointer ${
+                  safeSearch === 'moderate' ? 'bg-amber-50 text-amber-700' : 'hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">Moderate (Blur)</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Strict web search protection</div>
+                </div>
+                {safeSearch === 'moderate' && <Check size={14} className="stroke-[2.5]" />}
+              </button>
+
+              <button
+                onClick={() => handleSelect('off')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left text-xs font-medium transition-all cursor-pointer ${
+                  safeSearch === 'off' ? 'bg-slate-50 text-slate-900 border border-slate-100' : 'hover:bg-slate-50 text-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">Off</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Show all results (if legal)</div>
+                </div>
+                {safeSearch === 'off' && <Check size={14} className="stroke-[2.5]" />}
+              </button>
             </div>
           </motion.div>
         )}
@@ -2396,6 +3108,41 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             </div>
           </div>
 
+          {res.layout_intent && (
+            <div className="flex items-center gap-1.5 mb-2 mt-1 select-none">
+              {res.layout_intent === 'VIDEO_PLAYER' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-red-600 bg-red-50/80 border border-red-100 shadow-xs">
+                  <Play size={10} fill="currentColor" />
+                  Video Tutorial
+                </span>
+              )}
+              {res.layout_intent === 'LOCAL_MAP' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-600 bg-emerald-50/80 border border-emerald-100 shadow-xs">
+                  <MapPin size={10} />
+                  Local Map / Place
+                </span>
+              )}
+              {res.layout_intent === 'PRODUCT_LIST' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-amber-600 bg-amber-50/80 border border-amber-100 shadow-xs">
+                  <ShoppingBag size={10} />
+                  Product List / Shop
+                </span>
+              )}
+              {res.layout_intent === 'HOW_TO' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-blue-600 bg-blue-50/80 border border-blue-100 shadow-xs">
+                  <BookOpen size={10} />
+                  How-To Guide
+                </span>
+              )}
+              {res.layout_intent === 'NEWS' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-indigo-600 bg-indigo-50/80 border border-indigo-100 shadow-xs">
+                  <Newspaper size={10} />
+                  Editorial News
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="relative group/title inline-block">
             <a onClick={() => onResultClick?.(res.id, res.url, position)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
               <h3 className="text-xl md:text-2xl font-display font-medium text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
@@ -2405,7 +3152,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           </div>
 
           <p className="text-slate-600 text-[15px] leading-relaxed line-clamp-3 mb-4">
-            {res.snippet}
+            {res.snippet && res.snippet.length > 191 ? (res.snippet.substring(0, 188) + '...') : res.snippet}
           </p>
 
           <div className="flex items-center gap-4 flex-wrap">
@@ -2461,7 +3208,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
               const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
               onImageClick?.(imgData);
             }}
-            className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer"
+            className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer flex items-center justify-center p-2.5"
           >
             <AnimatePresence mode="wait">
               <motion.img 
@@ -2471,13 +3218,22 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.5 }}
-                className="w-full h-full object-cover transition-transform hover:scale-105" 
+                className="max-w-full max-h-full object-contain transition-transform hover:scale-105" 
                 referrerPolicy="no-referrer" 
               />
             </AnimatePresence>
+
+            {/* Play Button Overlay for Video Intent */}
+            {res.layout_intent === 'VIDEO_PLAYER' && (
+              <div className="absolute inset-0 bg-black/10 flex items-center justify-center transition-colors group-hover/carousel:bg-black/20">
+                <div className="p-3 bg-white/90 backdrop-blur-md rounded-full shadow-lg text-red-600 transform scale-100 group-hover/carousel:scale-110 transition-transform">
+                  <Play size={16} fill="currentColor" />
+                </div>
+              </div>
+            )}
             
             <button 
-              onClick={() => onVisualSearch?.(activeImage)}
+              onClick={(e) => { e.stopPropagation(); onVisualSearch?.(activeImage); }}
               className="absolute top-2 right-2 p-2 bg-black/40 backdrop-blur-md text-white rounded-full opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 shadow-lg"
               title="Visual Search"
             >
