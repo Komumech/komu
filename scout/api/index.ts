@@ -1297,7 +1297,7 @@ app.get('/api/proxy-image', async (req, res) => {
     const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'User-Agent': 'ScoutSearchEngineApp/2.0 (https://ai.studio/build/76ad9fff-559b-4f9b-9a43-2b13e3635e9b; contact: komumech@gmail.com) Axios/1.4.0',
         'Accept': 'image/*'
       },
       timeout: 5000
@@ -1310,6 +1310,190 @@ app.get('/api/proxy-image', async (req, res) => {
   } catch (err: any) {
     console.warn("⚠️ Image proxy failed for URL:", req.query.url, err.message);
     res.status(500).send('Failed to fetch image');
+  }
+});
+
+// Helper to parse ISO 8601 duration string into formatted duration
+function parseYouTubeDuration(duration: string): string {
+  try {
+    if (!duration) return "";
+    const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!match) return "";
+    const hours = parseInt(match[1] || "0", 10);
+    const minutes = parseInt(match[2] || "0", 10);
+    const seconds = parseInt(match[3] || "0", 10);
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  } catch (e) {
+    return "";
+  }
+}
+
+// Helper to format raw viewCount numbers into readable strings
+function formatViews(viewCountStr: string): string {
+  try {
+    const views = parseInt(viewCountStr, 10);
+    if (isNaN(views)) return "";
+    if (views >= 1000000000) {
+      return `${(views / 1000000000).toFixed(1).replace(/\.0$/, '')}B views`;
+    }
+    if (views >= 1000000) {
+      return `${(views / 1000000).toFixed(1).replace(/\.0$/, '')}M views`;
+    }
+    if (views >= 1000) {
+      return `${Math.round(views / 1000)}K views`;
+    }
+    return `${views} views`;
+  } catch (e) {
+    return "";
+  }
+}
+
+// Relative time calculator for YouTube video publishing time
+function getRelativeTime(isoString: string): string {
+  try {
+    const now = new Date();
+    const past = new Date(isoString);
+    const diffMs = now.getTime() - past.getTime();
+    if (isNaN(diffMs) || diffMs < 0) return "Recent";
+    
+    const seconds = Math.floor(diffMs / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    const months = Math.floor(days / 30);
+    const years = Math.floor(days / 365);
+    
+    if (years > 0) return `${years} year${years > 1 ? 's' : ''} ago`;
+    if (months > 0) return `${months} month${months > 1 ? 's' : ''} ago`;
+    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    return "Just now";
+  } catch (e) {
+    return "Recently";
+  }
+}
+
+// YouTube search discovery endpoint with official YouTube Data API (v3) integration and Gemini fallback
+app.get('/api/youtube-search', async (req, res) => {
+  try {
+    const q = req.query.q as string;
+    if (!q) {
+      return res.status(400).json({ error: 'Missing query parameter q' });
+    }
+
+    const apiKey = process.env.YOUTUBE_API_KEY;
+    if (apiKey) {
+      try {
+        console.log(`🔍 Official YouTube Data API active key. Searching for: "${q}"`);
+        const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=8&q=${encodeURIComponent(q)}&type=video&key=${apiKey}`;
+        const searchRes = await axios.get(searchUrl);
+        const searchData = searchRes.data || {};
+        const items = searchData.items || [];
+        const videoIds = items.map((item: any) => item.id?.videoId).filter(Boolean);
+
+        if (videoIds.length === 0) {
+          return res.json({ videos: [], source: 'youtube_api' });
+        }
+
+        // Fetch detailed videos stats/contentDetails in parallel to obtain accurate duration & viewCount
+        let statsMap: Record<string, { duration: string; views: string }> = {};
+        try {
+          const statsUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${videoIds.join(',')}&key=${apiKey}`;
+          const statsRes = await axios.get(statsUrl);
+          const statsData = statsRes.data || {};
+          (statsData.items || []).forEach((item: any) => {
+            const rawDuration = item.contentDetails?.duration || "";
+            const rawViews = item.statistics?.viewCount || "";
+            statsMap[item.id] = {
+              duration: parseYouTubeDuration(rawDuration) || "Video",
+              views: formatViews(rawViews) || "YouTube Video"
+            };
+          });
+        } catch (statsErr: any) {
+          console.warn("⚠️ Failed to load detailed video stats:", statsErr.message);
+        }
+
+        const videos = items.map((item: any) => {
+          const videoId = item.id.videoId;
+          const snippet = item.snippet || {};
+          const stats = statsMap[videoId] || { duration: "Video", views: "YouTube Video" };
+          const publishedTime = getRelativeTime(snippet.publishedAt);
+
+          return {
+            id: videoId,
+            title: snippet.title || "",
+            url: `https://www.youtube.com/watch?v=${videoId}`,
+            duration: stats.duration,
+            channelTitle: snippet.channelTitle || "",
+            views: stats.views,
+            publishedTime: publishedTime,
+            description: snippet.description || "",
+            thumbnail: snippet.thumbnails?.medium?.url || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`
+          };
+        });
+
+        return res.json({ videos, source: 'youtube_api' });
+      } catch (apiErr: any) {
+        console.warn(`⚠️ YouTube Data API call failed or is restricted: ${apiErr.message}. Falling back to high-precision Gemini fallback search...`);
+      }
+    }
+
+    // Dynamic, premium Gemini fallback when the user has not configured the YouTube Client API Key yet or it failed
+    console.log(`ℹ️ Running high-precision Gemini fallback search discovery for: "${q}"`);
+    const ai = getGenAI();
+    if (!ai) {
+      return res.status(503).json({ error: 'Gemini API not configured' });
+    }
+
+    const prompt = `You are an advanced search assistant specialized in finding high-quality, popular, and real YouTube video results for search queries.
+Users want to find real playable YouTube videos representing: "${q}".
+Generate a list of 6 to 8 highly matching, real, and popular YouTube video results for this query.
+Each item MUST include a real, accurate 11-character YouTube video ID (e.g., watch?v=ID or shorts/ID) that is highly relevant, so that when we embed it in our player, the user can successfully watch the exact video.
+Provide accurate titles, channels, durations (formatted as MM:SS or H:MM:SS), view counts (e.g., "1.2M views"), and relative publish times (e.g., "2 years ago").
+
+Return a valid JSON object matching this exact schema:
+{
+  "videos": [
+    {
+      "id": "string (the 11-char YouTube Video ID, e.g. dQw4w9WgXcQ. Ensure this is a real video ID!)",
+      "title": "string (Accurate title of the video)",
+      "url": "https://www.youtube.com/watch?v=11_CHAR_ID",
+      "duration": "string (e.g. 12:35)",
+      "channelTitle": "string (Channel name)",
+      "views": "string (e.g. 450K views)",
+      "publishedTime": "string (e.g. 5 months ago)",
+      "description": "string (Brief description snippet)",
+      "thumbnail": "https://img.youtube.com/vi/11_CHAR_ID/mqdefault.jpg"
+    }
+  ]
+}
+Only output the valid JSON object, no wrappers or markdown formatting block other than JSON itself.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const text = response.text || "";
+    if (text) {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.videos) {
+        return res.json({ videos: parsed.videos, source: 'gemini_fallback' });
+      }
+    }
+    
+    return res.json({ videos: [], source: 'gemini_fallback' });
+  } catch (err: any) {
+    console.error("⚠️ YouTube search route failed:", err);
+    return res.json({ videos: [], error: err.message });
   }
 });
 
@@ -1454,6 +1638,58 @@ If the query is NOT actually searching for a song or song lyrics, or if you are 
       return null;
     })() : Promise.resolve(null);
 
+    // Holidays calendar discovery and lookup via Gemini
+    const isHolidaysQuery = finalQuery && /holiday|holidays|new year|christmas|thanksgiving|easter|eid|diwali|festivals|national day|bank holiday|bank holidays/i.test(finalQuery);
+    const holidaysPromise = isHolidaysQuery ? (async () => {
+      const ai = getGenAI();
+      if (!ai) return null;
+      try {
+        const prompt = `You are an expert holiday calendar lookup engine. Identify the country or region the user is searching for in: "${finalQuery}".
+If the user specifies a region/country, retrieve public holidays for that region. If they don't, assume the region requested, defaulting to "United States" (or "Nigeria" if there are notes about the region/locale).
+Retrieve and return a clean, structured list of public holidays for the year 2026 (or the year requested if they specify a different year).
+Always return a valid JSON object matching this schema:
+{
+  "country": "string (the official country name, e.g. 'United States')",
+  "countryCode": "string (the 2-letter country code, e.g. 'US')",
+  "year": 2026,
+  "holidays": [
+    {
+      "name": "string (e.g. 'New Year\\'s Day')",
+      "date": "string (YYYY-MM-DD)",
+      "dayOfWeek": "string (e.g. 'Thursday')",
+      "type": "string (e.g. 'National Holiday')"
+    }
+  ],
+  "isSuccess": true
+}
+Ensure dates are historically and astronomically correct for 2026/specified year. Only return valid JSON.`;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json"
+          }
+        });
+
+        const text = response.text || "";
+        if (text) {
+          const parsed = JSON.parse(text);
+          if (parsed && parsed.isSuccess && parsed.holidays) {
+            return {
+              country: parsed.country,
+              countryCode: parsed.countryCode,
+              year: parsed.year || 2026,
+              holidays: parsed.holidays
+            };
+          }
+        }
+      } catch (err) {
+        console.error("Holidays lookup failed dynamically:", err);
+      }
+      return null;
+    })() : Promise.resolve(null);
+
     // Dictionary lookup can be parallelized with embeddings
     const dictionaryPromise = intentDataPromise.then(async (intentData: any) => {
       if (intentData?.is_dictionary && intentData.dictionary_word) {
@@ -1479,12 +1715,13 @@ If the query is NOT actually searching for a song or song lyrics, or if you are 
       return null;
     });
 
-    const [intentData, vector, dictionaryResult, dynamicBusiness, lyricsResult] = await Promise.all([
+    const [intentData, vector, dictionaryResult, dynamicBusiness, lyricsResult, holidaysResult] = await Promise.all([
       intentDataPromise,
       embeddingPromise,
       dictionaryPromise,
       dynamicBusinessPromise,
-      lyricsPromise
+      lyricsPromise,
+      holidaysPromise
     ]);
 
     let suggestKnowledgePanel = intentData?.is_entity || false;
@@ -1886,6 +2123,7 @@ If the query is NOT actually searching for a song or song lyrics, or if you are 
       results: resultsWithOptionalImages,
       dictionary: dictionaryResult,
       lyrics: lyricsResult,
+      holidays: holidaysResult,
       suggestKnowledgePanel,
       detectedEntity,
       isEnglishHelp,

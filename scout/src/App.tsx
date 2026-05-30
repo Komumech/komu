@@ -83,6 +83,9 @@ export default function App() {
   });
   const [dictionary, setDictionary] = useState<any>(null);
   const [lyrics, setLyrics] = useState<any>(null);
+  const [holidays, setHolidays] = useState<any>(null);
+  const [youtubeVideos, setYoutubeVideos] = useState<any[] | null>(null);
+  const [videosLoading, setVideosLoading] = useState<boolean>(false);
   const [appsData, setAppsData] = useState<any[] | null>(null);
   const [businessProfileState, setBusinessProfileState] = useState<any | null>(null);
   const [correction, setCorrection] = useState<string | null>(null);
@@ -461,6 +464,9 @@ export default function App() {
     setVisualAnalysis(null);
     setAiOverview(null);
     setDictionary(null);
+    setHolidays(null);
+    setYoutubeVideos(null);
+    setVideosLoading(false);
     setAppsData(null);
     setBusinessProfileState(null);
     setKnowledgePanel(null);
@@ -501,6 +507,22 @@ export default function App() {
           setAiRateLimited(true);
         }
       }
+    }
+
+    // Launch background search of real YouTube video results for this query in parallel
+    if (requestedPage === 1 && finalQuery.trim()) {
+      setVideosLoading(true);
+      fetch(`/api/youtube-search?q=${encodeURIComponent(finalQuery)}`)
+        .then(res => res.json())
+        .then(data => {
+          setYoutubeVideos(data.videos || []);
+          setVideosLoading(false);
+        })
+        .catch(err => {
+          console.error("⚠️ YouTube video fetch failed:", err);
+          setYoutubeVideos([]);
+          setVideosLoading(false);
+        });
     }
 
     try {
@@ -563,6 +585,7 @@ export default function App() {
       setTotalPages(data.totalPages || 1);
       setDictionary(data.dictionary || null);
       setLyrics(data.lyrics || null);
+      setHolidays(data.holidays || null);
       setAppsData(data.apps || null);
       setBusinessProfileState(data.businessProfile || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
@@ -994,6 +1017,8 @@ export default function App() {
     setAiOverview(null);
     setDictionary(null);
     setLyrics(null);
+    setHolidays(null);
+    setYoutubeVideos(null);
     setAppsData(null);
     setBusinessProfileState(null);
     setIsOverviewExpanded(false);
@@ -1150,6 +1175,9 @@ export default function App() {
             appsData={appsData}
             businessProfile={businessProfileState}
             lyrics={lyrics}
+            holidays={holidays}
+            youtubeVideos={youtubeVideos}
+            videosLoading={videosLoading}
           />
         )}
         {isAnalyticsOpen && (
@@ -1807,7 +1835,367 @@ function LyricsSection({ lyrics }: { lyrics: any }) {
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics }: any) {
+function HolidaysSection({ holidays, onSearch, setQuery }: { holidays: any; onSearch: any; setQuery: any }) {
+  const [filter, setFilter] = useState<'all' | 'upcoming'>('upcoming');
+  
+  if (!holidays || !holidays.holidays || holidays.holidays.length === 0) return null;
+
+  // May 29, 2026 is the current system date as provided by metadata environment context
+  const currentDate = new Date('2026-05-29');
+
+  // Parse and sort holidays by date
+  const sortedHolidays = [...holidays.holidays].map((h: any) => {
+    const hDate = new Date(h.date);
+    const diffTime = hDate.getTime() - currentDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return { ...h, dateObj: hDate, daysRemaining: diffDays };
+  }).sort((a: any, b: any) => a.dateObj.getTime() - b.dateObj.getTime());
+
+  // Split into upcoming and past
+  const upcomingHolidays = sortedHolidays.filter((h: any) => h.daysRemaining >= 0);
+  const displayedHolidays = filter === 'upcoming' ? upcomingHolidays : sortedHolidays;
+
+  // The very next upcoming holiday
+  const nextHoliday = upcomingHolidays[0];
+
+  const handleCountrySwitch = (countryName: string) => {
+    setQuery(`public holidays in ${countryName}`);
+    // Trigger query search execution
+    setTimeout(() => {
+      onSearch();
+    }, 50);
+  };
+
+  const countriesList = [
+    { name: 'Nigeria', code: 'NG' },
+    { name: 'United States', code: 'US' },
+    { name: 'United Kingdom', code: 'GB' },
+    { name: 'Canada', code: 'CA' },
+    { name: 'India', code: 'IN' },
+    { name: 'Germany', code: 'DE' },
+    { name: 'France', code: 'FR' },
+    { name: 'Australia', code: 'AU' }
+  ];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }} 
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white border-2 border-slate-100 rounded-3xl p-6 transition-all mb-6 shadow-xs overflow-hidden"
+    >
+      {/* Widget Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 mb-5">
+        <div>
+          <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1 flex items-center gap-1.5 font-mono">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            National Calendar Insight
+          </div>
+          <h2 className="text-2xl font-display font-black text-slate-800 tracking-tight leading-tight flex items-center gap-2">
+            Holidays in {holidays.country}
+            <span className="text-sm font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md font-mono">{holidays.year}</span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Displaying calendar observances and bank holidays. Filters can be updated dynamically.
+          </p>
+        </div>
+
+        {/* Region / Country Switcher */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-bold text-slate-400 mr-1 uppercase tracking-tight font-mono">Filter Region:</span>
+          {countriesList.map((country) => (
+            <button
+              key={country.code}
+              onClick={() => handleCountrySwitch(country.name)}
+              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all active:scale-95 cursor-pointer border ${
+                holidays.country.toLowerCase() === country.name.toLowerCase() || holidays.countryCode?.toUpperCase() === country.code
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100 shadow-3xs'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-100'
+              }`}
+            >
+              {country.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Upcoming Celebration Highlight Hero Banner */}
+      {nextHoliday && (
+        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-5 text-white mb-5 relative overflow-hidden shadow-sm">
+          <div className="absolute right-0 bottom-0 translate-x-1/10 translate-y-1/10 opacity-10">
+            <svg className="w-48 h-48" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19 19H5V8h14m-3-7v2H8V1H6v2H5c-1.11 0-2 .89-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2h-1V1m-1 11h-5v5h5v-5z" />
+            </svg>
+          </div>
+          <div className="relative z-10">
+            <span className="bg-white/20 text-white font-mono text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full backdrop-blur-md">
+              Next Celebration Banner
+            </span>
+            <h3 className="text-xl md:text-2xl font-black font-display tracking-tight mt-3 leading-tight">
+              {nextHoliday.name}
+            </h3>
+            <p className="text-white/80 text-sm font-medium mt-1">
+              On <span className="font-bold underline">{new Date(nextHoliday.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span> • {nextHoliday.type}
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-xs font-bold">
+              <div className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-1.5 backdrop-blur-md border border-white/10">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {nextHoliday.daysRemaining === 0 ? "Celebrating Today!" : `${nextHoliday.daysRemaining} days remaining`}
+              </div>
+              <button
+                onClick={() => {
+                  setQuery(`origin of ${nextHoliday.name} holiday in ${holidays.country}`);
+                  setTimeout(() => onSearch(), 50);
+                }}
+                className="bg-white text-emerald-800 hover:bg-slate-50 transition-colors px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow-sm"
+              >
+                <Search size={12} className="stroke-[2.5]" />
+                Explore origin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter / Toggle List Segment */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-150">
+          <button
+            onClick={() => setFilter('upcoming')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              filter === 'upcoming' 
+                ? 'bg-white text-slate-800 shadow-2xs' 
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Upcoming ({upcomingHolidays.length})
+          </button>
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              filter === 'all' 
+                ? 'bg-white text-slate-800 shadow-2xs' 
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            All Holidays ({sortedHolidays.length})
+          </button>
+        </div>
+        <span className="text-[10px] font-bold text-slate-400 font-mono">System date: May 29, 2026</span>
+      </div>
+
+      {/* Holidays Grid Display */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        {displayedHolidays.map((h: any, idx: number) => {
+          const isNext = nextHoliday && nextHoliday.name === h.name;
+          return (
+            <div 
+              key={idx}
+              className={`p-4 border rounded-2xl flex items-start justify-between gap-4 transition-all ${
+                isNext 
+                  ? 'bg-emerald-50/40 border-emerald-100 ring-2 ring-emerald-500/5' 
+                  : h.daysRemaining < 0 
+                    ? 'bg-slate-50/50 border-slate-100 opacity-60'
+                    : 'bg-white border-slate-100 hover:border-slate-200 hover:shadow-2xs'
+              }`}
+            >
+              <div className="min-w-0">
+                <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider font-mono mb-1.5 ${
+                  isNext 
+                    ? 'bg-emerald-100 text-emerald-800' 
+                    : h.daysRemaining < 0 
+                      ? 'bg-slate-200 text-slate-600'
+                      : 'bg-slate-100 text-slate-700'
+                }`}>
+                  {h.type || 'Holiday'}
+                </span>
+                <h4 className="font-bold text-slate-800 text-[14px] leading-snug truncate" title={h.name}>{h.name}</h4>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  {new Date(h.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ({h.dayOfWeek})
+                </p>
+              </div>
+              
+              <div className="shrink-0 text-right self-stretch flex flex-col justify-between items-end">
+                {h.daysRemaining === 0 ? (
+                  <span className="text-[10px] font-black text-emerald-600 font-mono uppercase bg-emerald-100 px-2 py-0.5 rounded animate-pulse">TODAY</span>
+                ) : h.daysRemaining < 0 ? (
+                  <span className="text-[10px] font-bold text-slate-400 font-mono">{Math.abs(h.daysRemaining)}d ago</span>
+                ) : (
+                  <span className="text-[10px] font-bold text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-150">in {h.daysRemaining}d</span>
+                )}
+                <button
+                  onClick={() => {
+                    setQuery(`history of ${h.name} in ${holidays.country}`);
+                    setTimeout(() => onSearch(), 50);
+                  }}
+                  className="block mt-2 text-[10px] font-bold text-blue-600 hover:underline transition-all cursor-pointer whitespace-nowrap text-right"
+                >
+                  History
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </motion.div>
+  );
+}
+
+function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVideos: any[] | null, loading: boolean, onMore: () => void, query?: string }) {
+  const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+
+  if (loading) {
+    return (
+      <div className="mb-8 animate-pulse">
+        <div className="h-6 bg-slate-100 rounded w-1/4 mb-4"></div>
+        <div className="space-y-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="flex gap-4 sm:gap-6 py-3 border-t border-slate-100">
+              <div className="w-[130px] sm:w-[170px] aspect-video bg-slate-100 rounded-xl shrink-0"></div>
+              <div className="flex-1 space-y-2 py-1">
+                <div className="h-4 bg-slate-105 rounded w-5/6"></div>
+                <div className="h-3 bg-slate-105 rounded w-1/3"></div>
+                <div className="h-2.5 bg-slate-105 rounded w-1/4"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!youtubeVideos || youtubeVideos.length === 0) return null;
+
+  const displayVideos = youtubeVideos.slice(0, 3);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-8 font-sans bg-transparent border-none p-0"
+    >
+      {/* Header section */}
+      <div className="flex items-center gap-1.5 mb-3 text-slate-900">
+        <h3 className="font-sans font-normal text-[20px] leading-snug">Videos</h3>
+        <svg className="w-5 h-5 text-slate-400 hover:text-slate-600 cursor-pointer ml-1" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+        </svg>
+      </div>
+
+      {/* Vertical list of video rows */}
+      <div className="flex flex-col">
+        {displayVideos.map((vid: any, itemIdx: number) => {
+          const isPlaying = activeVideoId === vid.id;
+          return (
+            <div 
+              key={vid.id} 
+              className={`flex gap-4 sm:gap-6 py-4 border-t border-slate-200/80`}
+            >
+              {/* Left Column: Thumbnail / Video Player */}
+              <div 
+                className="w-[130px] sm:w-[170px] aspect-video rounded-xl overflow-hidden bg-black shrink-0 relative shadow-2xs cursor-pointer group"
+                onClick={() => setActiveVideoId(isPlaying ? null : vid.id)}
+              >
+                {isPlaying ? (
+                  <iframe 
+                    width="100%" 
+                    height="100%" 
+                    src={`https://www.youtube.com/embed/${vid.id}?autoplay=1&rel=0`} 
+                    title={vid.title} 
+                    frameBorder="0" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                    allowFullScreen 
+                    className="w-full h-full"
+                  />
+                ) : (
+                  <>
+                    <img 
+                      src={vid.thumbnail || `https://img.youtube.com/vi/${vid.id}/mqdefault.jpg`} 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                      alt={vid.title}
+                    />
+                    
+                    {/* Centered play button overlay */}
+                    <div className="absolute inset-0 bg-black/5 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/95 scale-95 group-hover:scale-100 transition-all shadow-md flex items-center justify-center text-slate-800 opacity-90 group-hover:opacity-100">
+                        <Play size={14} fill="currentColor" className="ml-0.5" />
+                      </div>
+                    </div>
+                    
+                    {/* Bottom-left duration badge */}
+                    {vid.duration && (
+                      <span className="absolute bottom-1.5 left-1.5 bg-black/80 text-white font-mono text-[10px] sm:text-[11px] font-medium px-1.5 py-0.5 rounded tracking-wide">
+                        {vid.duration}
+                      </span>
+                    )}
+
+                    {/* Top-right zoom/expand indicator to replicate screenshot */}
+                    <div className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                      </svg>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Right Column: Information details in Google style */}
+              <div className="flex-1 min-w-0">
+                <h4 
+                  className="font-sans font-normal text-[#1a0dab] text-[15px] sm:text-[17px] leading-tight hover:underline cursor-pointer line-clamp-2"
+                  onClick={() => setActiveVideoId(isPlaying ? null : vid.id)}
+                >
+                  {vid.title}
+                </h4>
+                
+                <div className="text-[13px] sm:text-[14px] text-slate-500 font-normal leading-relaxed mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <span>YouTube</span>
+                  <span>·</span>
+                  <span>{vid.channelTitle}</span>
+                  <svg className="w-4 h-4 text-slate-400 hover:text-slate-600 cursor-pointer ml-0.5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                  </svg>
+                </div>
+
+                <div className="text-[12px] sm:text-[13px] text-slate-400 font-normal mt-0.5">
+                  {vid.publishedTime}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Center grey pill button for "View all" */}
+      <div className="flex justify-center mt-2 border-t border-slate-200/80 pt-4">
+        <button 
+          onClick={onMore}
+          className="bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-800 text-[13px] font-sans font-semibold px-12 py-2 rounded-full flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-none shadow-none"
+        >
+          View all <ChevronRight size={14} className="text-slate-600" />
+        </button>
+      </div>
+
+      {/* Compliance Policy footer in soft grey */}
+      <div className="mt-5 pt-3 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-400 font-sans gap-2 border-t border-slate-100">
+        <div className="flex items-center gap-1.5">
+          <span>Search integrated with <strong>YouTube™</strong>.</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">YouTube Terms</a>
+          <span>•</span>
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">Privacy Policy</a>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, youtubeVideos, videosLoading }: any) {
   const [isResInputFocused, setIsResInputFocused] = useState(false);
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
@@ -2066,7 +2454,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
         </div>
         <div className={`transition-all duration-300 ease-in-out overflow-hidden px-4 md:px-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto border-t border-slate-50 overflow-x-auto scrollbar-hide ${scrolled ? 'max-h-0 opacity-0 pointer-events-none pt-0' : 'max-h-16 opacity-100 pt-4'}`}>
           <div className="flex items-center gap-8">
-            {['All', 'Images', 'News'].map(tab => (
+            {['All', 'Images', 'Videos', 'News'].map(tab => (
               <button key={tab} className={`pb-3 text-sm font-bold border-b-2 transition-all ${activeTab === tab.toLowerCase() ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-transparent hover:text-slate-700'}`} onClick={() => setActiveTab(tab.toLowerCase())}>{tab}</button>
             ))}
           </div>
@@ -2170,6 +2558,121 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest order-1 sm:order-2">
                   Page <span className="text-slate-900">{page}</span> of {totalPages}
                 </div>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'videos' ? (
+          <div className="w-full px-4 md:px-8 py-8 max-w-[850px] mx-auto">
+            {videosLoading ? (
+              <div className="animate-pulse space-y-8">
+                <div className="h-6 bg-slate-100 rounded w-1/4 mb-6"></div>
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="space-y-3">
+                    <div className="h-4 bg-slate-100 rounded w-1/3"></div>
+                    <div className="h-5 bg-slate-105 rounded w-5/6"></div>
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <div className="w-full sm:w-[180px] aspect-video bg-slate-100 rounded-xl shrink-0" />
+                      <div className="flex-1 space-y-2 py-1">
+                        <div className="h-4 bg-slate-105 rounded w-full"></div>
+                        <div className="h-4 bg-slate-105 rounded w-5/6"></div>
+                        <div className="h-3 bg-slate-101 rounded w-1/4 mt-4"></div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : youtubeVideos && youtubeVideos.length > 0 ? (
+              <div>
+                {/* Header matching Google style */}
+                <div className="flex items-center gap-1.5 mb-8 border-b border-slate-100 pb-4 text-slate-900">
+                  <h2 className="font-sans font-normal text-2xl tracking-normal">Videos</h2>
+                  <svg className="w-5 h-5 text-slate-400 hover:text-slate-600 cursor-pointer ml-1" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                  </svg>
+                </div>
+
+                {/* Vertical Google list design */}
+                <div className="space-y-8">
+                  {youtubeVideos.map((vid: any) => {
+                    const isShorts = vid.duration && (vid.duration.split(':').length === 2 && parseInt(vid.duration.split(':')[0], 10) < 2);
+                    const breadcrumbPath = isShorts ? 'shorts' : 'watch';
+                    return (
+                      <div key={vid.id} className="group font-sans">
+                        {/* 1. Breadcrumb URL */}
+                        <div className="flex items-center gap-1.5 text-[13px] text-slate-600 mb-1">
+                          <span>www.youtube.com</span>
+                          <span className="text-slate-400 text-xs">›</span>
+                          <span>{breadcrumbPath}</span>
+                          <svg className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 cursor-pointer ml-1" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                          </svg>
+                        </div>
+
+                        {/* 2. Blue title heading */}
+                        <h3 className="font-sans font-normal text-[#1a0dab] text-[20px] leading-tight hover:underline mb-2">
+                          <a href={vid.url || `https://www.youtube.com/watch?v=${vid.id}`} target="_blank" rel="noopener noreferrer">
+                            {vid.title}
+                          </a>
+                        </h3>
+
+                        {/* 3. Side-by-side thumbnail & description */}
+                        <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
+                          {/* Left: Thumbnail/Iframe play area */}
+                          <div className="w-full sm:w-[185px] aspect-video rounded-xl overflow-hidden bg-black shrink-0 relative group shadow-3xs">
+                            <iframe 
+                              width="100%" 
+                              height="100%" 
+                              src={`https://www.youtube.com/embed/${vid.id}?rel=0`} 
+                              title={vid.title} 
+                              frameBorder="0" 
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                              allowFullScreen 
+                              className="w-full h-full"
+                            />
+                            {vid.duration && (
+                              <span className="absolute bottom-1.5 left-1.5 bg-black/80 text-white font-mono text-[10px] sm:text-[11px] font-semibold px-1.5 py-0.5 rounded tracking-wide pointer-events-none">
+                                {vid.duration}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Right: Description & Meta */}
+                          <div className="flex-1 flex flex-col justify-between py-0.5 min-w-0">
+                            {vid.description && (
+                              <p className="text-slate-600 text-[14px] leading-relaxed line-clamp-2 md:line-clamp-3">
+                                {vid.description}
+                              </p>
+                            )}
+                            
+                            <div className="text-[13px] sm:text-[14px] text-slate-500 font-normal mt-3 flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-slate-700">YouTube</span>
+                              <span>·</span>
+                              <span>{vid.channelTitle}</span>
+                              <span>·</span>
+                              <span className="text-slate-400">{vid.publishedTime || 'Recent'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Main page attribution bar (Clean, gray design without red icon) */}
+                <div className="mt-14 pt-6 border-t border-slate-200/60 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 font-sans gap-4">
+                  <div className="flex items-center gap-2">
+                    <span>This workspace is integrated with <strong>YouTube™</strong> API Services. Streams load through official endpoints.</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">YouTube Terms</a>
+                    <span>•</span>
+                    <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">Google Privacy Policy</a>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="py-20 text-center text-slate-400 font-medium italic">
+                No playable videos found for your search query. Please try another query.
               </div>
             )}
           </div>
@@ -2512,6 +3015,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <LyricsSection lyrics={lyrics} />
             )}
 
+            {/* Public Holidays Widget Integration */}
+            {activeTab === 'all' && holidays && (
+              <HolidaysSection holidays={holidays} onSearch={onSearch} setQuery={setQuery} />
+            )}
+
             {isSafeSearchIntercepted ? (
               <motion.div 
                 initial={{ opacity: 0, y: 15 }} 
@@ -2554,6 +3062,11 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       {/* Apps Block for tech companies after first organic result */}
                       {idx === 1 && appsData && appsData.length > 0 && (
                         <AppsBlock appsData={appsData} />
+                      )}
+
+                      {/* Video Strip / Video Line after first organic result */}
+                      {idx === 0 && (
+                        <VideoStrip youtubeVideos={youtubeVideos} loading={videosLoading} onMore={() => setActiveTab('videos')} query={query} />
                       )}
 
                       {/* Image Strip after 1st result */}
@@ -3046,6 +3559,41 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
 }
 
 function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, allResults }: any) {
+  const [isPlayingVideo, setIsPlayingVideo] = React.useState(false);
+
+  // Robust helper to extract YouTube video ID from any standard, encoded, or tracking-wrapped links
+  const getYouTubeId = (urlStr: string) => {
+    if (!urlStr) return null;
+    
+    // Decode URLs (handles tracking and encoding wrapped structures)
+    let decoded = urlStr;
+    try {
+      for (let i = 0; i < 3; i++) {
+        const nextDecoded = decodeURIComponent(decoded);
+        if (nextDecoded === decoded) break;
+        decoded = nextDecoded;
+      }
+    } catch (e) {
+      // safe fallback on error
+    }
+
+    // Pattern 1: Match standard/parameter ?v=ID or &v=ID
+    const vParamMatch = decoded.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+    if (vParamMatch) return vParamMatch[1];
+
+    // Pattern 2: Match paths layout (embed, shorts, v, youtu.be, etc.)
+    const pathMatch = decoded.match(/(?:embed\/|shorts\/|v\/|youtu\.be\/|y2u\.be\/)([a-zA-Z0-9_-]{11})/);
+    if (pathMatch) return pathMatch[1];
+
+    // Pattern 3: General fallback search for adjacent 11-char sequence with YouTube host
+    const fallbackMatch = decoded.match(/(?:youtube\.com|youtu\.be|youtube-nocookie\.com).{1,50}?([a-zA-Z0-9_-]{11})/i);
+    if (fallbackMatch) return fallbackMatch[1];
+
+    return null;
+  };
+
+  const youtubeId = getYouTubeId(res.url);
+
   // Check if previously clicked
   const isPreviouslyClicked = clickedUrls?.includes(res.url);
 
@@ -3156,6 +3704,17 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           </p>
 
           <div className="flex items-center gap-4 flex-wrap">
+            {/* Watch YouTube Video Inline Action */}
+            {youtubeId && (
+              <button 
+                onClick={() => setIsPlayingVideo(!isPlayingVideo)}
+                className="flex items-center gap-1.5 text-[11px] font-mono font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-100 px-3 py-1.5 rounded-full transition-all active:scale-95 cursor-pointer shadow-3xs"
+              >
+                <Play size={11} fill="currentColor" />
+                {isPlayingVideo ? 'Close Player' : 'Play YouTube Inline'}
+              </button>
+            )}
+
             {/* Find Similar Button */}
             {activeImage && (
               <button 
@@ -3199,14 +3758,34 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             apiKey={API_KEY} 
             allResults={allResults}
           />
+
+          {/* Inline Playable YouTube Player */}
+          {isPlayingVideo && youtubeId && (
+            <div className="w-full aspect-video mt-5 rounded-3xl overflow-hidden shadow-md border-2 border-slate-100 bg-black relative">
+              <iframe 
+                width="100%" 
+                height="100%" 
+                src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&rel=0`} 
+                title={res.title} 
+                frameBorder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                allowFullScreen 
+                className="w-full h-full"
+              />
+            </div>
+          )}
         </div>
         
         {/* Main Side Image / Carousel */}
         {activeImage && (
           <div 
             onClick={() => {
-              const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
-              onImageClick?.(imgData);
+              if (youtubeId) {
+                setIsPlayingVideo(!isPlayingVideo);
+              } else {
+                const imgData = domainImages[currentImgIndex] || { id: res.id, image: res.image, title: res.title, displayUrl: res.displayUrl, url: res.url, snippet: res.snippet };
+                onImageClick?.(imgData);
+              }
             }}
             className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer flex items-center justify-center p-2.5"
           >
