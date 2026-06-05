@@ -58,9 +58,47 @@ async function getMovieOrTVData(query: string, entityName?: string, entityType?:
       const match = results.find((r: any) => r.media_type === 'movie' || r.media_type === 'tv');
       
       if (match) {
+        const title = (match.title || match.name || '').toLowerCase();
+        const originalTitle = (match.original_title || match.original_name || '').toLowerCase();
+        const cleanQuery = query.toLowerCase().trim();
+        const cleanTarget = targetQuery.toLowerCase().trim();
+        const popularity = match.popularity || 0;
+        
+        // Check for explicit movie or tv keyword indicators
+        const isMovieIntentKeyword = /movie|tv show|tv series|netflix|hbo|imdb|rotten tomatoes|cinematography|episodes of|cast of|season of|episode|season|cast/i.test(cleanQuery) ||
+                                     /media|movie|film|tv\s*show|series|franchise|cinema|anime|drama|show/i.test(entityType || '');
+                                     
+        // Case-insensitive check of exact matching title or original title (with and without space/non-alphanumeric chars)
+        const isExactTitleMatch = title === cleanQuery || originalTitle === cleanQuery ||
+                                  title === cleanTarget || originalTitle === cleanTarget ||
+                                  title.replace(/[^a-z0-9]/g, '') === cleanQuery.replace(/[^a-z0-9]/g, '') ||
+                                  originalTitle.replace(/[^a-z0-9]/g, '') === cleanQuery.replace(/[^a-z0-9]/g, '') ||
+                                  title.replace(/[^a-z0-9]/g, '') === cleanTarget.replace(/[^a-z0-9]/g, '') ||
+                                  originalTitle.replace(/[^a-z0-9]/g, '') === cleanTarget.replace(/[^a-z0-9]/g, '');
+
+        // Check if query is fully contained in the movie title, or vice-versa, and it has high enough popularity
+        const isPopularAndRelevant = (popularity >= 3.0 && (
+          title.includes(cleanQuery) || 
+          originalTitle.includes(cleanQuery) ||
+          cleanQuery.includes(title) ||
+          cleanQuery.includes(originalTitle) ||
+          title.includes(cleanTarget) ||
+          originalTitle.includes(cleanTarget)
+        ));
+
+        // High popularity match (famous movie / series) is generally trusted
+        const isHighPopularity = popularity >= 8.5;
+
+        const isMatchConfidenceHigh = isMovieIntentKeyword || isExactTitleMatch || isPopularAndRelevant || isHighPopularity;
+        
+        if (!isMatchConfidenceHigh) {
+          console.log(`🎬 [TMDB] Filtered candidate match "${match.title || match.name}" due to low confidence (popularity: ${popularity}).`);
+          return null;
+        }
+
         const id = match.id;
         const mediaType = match.media_type;
-        console.log(`🎬 [TMDB] Found match of type "${mediaType}" with ID ${id}`);
+        console.log(`🎬 [TMDB] High-confidence match found of type "${mediaType}" ("${match.title || match.name}") with ID ${id}`);
         
         const detailsRes = await axios.get(`https://api.themoviedb.org/3/${mediaType}/${id}`, {
           params: {
@@ -1428,6 +1466,7 @@ const BUSINESS_PROFILES: Record<string, {
   website: string;
   mapPreviewImage: string;
   claimed: boolean;
+  location?: { latitude: number; longitude: number };
 }> = {
   google: {
     name: "Google LLC",
@@ -1439,7 +1478,8 @@ const BUSINESS_PROFILES: Record<string, {
     phone: "+1 650-253-0000",
     website: "https://about.google",
     mapPreviewImage: "https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=400",
-    claimed: true
+    claimed: true,
+    location: { latitude: 37.4220, longitude: -122.0841 }
   },
   microsoft: {
     name: "Microsoft Corporation",
@@ -1451,7 +1491,8 @@ const BUSINESS_PROFILES: Record<string, {
     phone: "+1 425-882-8080",
     website: "https://www.microsoft.com",
     mapPreviewImage: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=400",
-    claimed: true
+    claimed: true,
+    location: { latitude: 47.6396, longitude: -122.1283 }
   },
   apple: {
     name: "Apple Inc.",
@@ -1463,7 +1504,8 @@ const BUSINESS_PROFILES: Record<string, {
     phone: "+1 408-996-1010",
     website: "https://www.apple.com",
     mapPreviewImage: "https://images.unsplash.com/photo-1449034446853-66c86144b0ad?auto=format&fit=crop&q=80&w=400",
-    claimed: true
+    claimed: true,
+    location: { latitude: 37.3349, longitude: -122.0090 }
   },
   netflix: {
     name: "Netflix, Inc.",
@@ -1475,7 +1517,8 @@ const BUSINESS_PROFILES: Record<string, {
     phone: "+1 408-540-3700",
     website: "https://www.netflix.com",
     mapPreviewImage: "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&q=80&w=400",
-    claimed: true
+    claimed: true,
+    location: { latitude: 37.2597, longitude: -121.9622 }
   },
   spotify: {
     name: "Spotify AB",
@@ -1487,7 +1530,8 @@ const BUSINESS_PROFILES: Record<string, {
     phone: "+46 8 500 000 00",
     website: "https://www.spotify.com",
     mapPreviewImage: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=80&w=400",
-    claimed: true
+    claimed: true,
+    location: { latitude: 59.3326, longitude: 18.0674 }
   },
   meta: {
     name: "Meta Platforms, Inc.",
@@ -1499,7 +1543,8 @@ const BUSINESS_PROFILES: Record<string, {
     phone: "+1 650-543-4800",
     website: "https://meta.com",
     mapPreviewImage: "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=400",
-    claimed: true
+    claimed: true,
+    location: { latitude: 37.4849, longitude: -122.1482 }
   }
 };
 
@@ -1536,6 +1581,34 @@ async function fetchStoreApps(query: string) {
     }
   } catch (err: any) {
     console.warn("⚠️ iTunes search failed:", err.message);
+  }
+  return null;
+}
+
+async function resolveCoordinatesViaGemini(name: string, address: string) {
+  try {
+    const ai = getGenAI();
+    if (!ai) return null;
+    const prompt = `Find the highly accurate, real-world decimal latitude and longitude coordinates for "${name}" (located at or near: "${address}").
+Return strictly a JSON object:
+{
+  "latitude": number,
+  "longitude": number
+}`;
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: { responseMimeType: "application/json" }
+    });
+    const text = response.text || '';
+    if (text) {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.latitude === 'number' && typeof parsed.longitude === 'number') {
+        return { latitude: parsed.latitude, longitude: parsed.longitude };
+      }
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Failed to resolve coordinates via Gemini:", err.message);
   }
   return null;
 }
@@ -1666,6 +1739,19 @@ async function fetchWikipediaProfile(query: string) {
         hours = "Open · Closes 5:00 PM";
       }
       
+      let locationObj = null;
+      if (data.coordinates && typeof data.coordinates.lat === 'number') {
+        locationObj = {
+          latitude: data.coordinates.lat,
+          longitude: data.coordinates.lon || data.coordinates.lng || data.coordinates.longitude
+        };
+      } else {
+        const resolved = await resolveCoordinatesViaGemini(data.title, address);
+        if (resolved) {
+          locationObj = resolved;
+        }
+      }
+
       return {
         name: data.title,
         category: category,
@@ -1676,7 +1762,8 @@ async function fetchWikipediaProfile(query: string) {
         phone: phone,
         website: website,
         mapPreviewImage: mapPreviewImage,
-        claimed: true
+        claimed: true,
+        location: locationObj || undefined
       };
     }
   } catch (err: any) {
@@ -1688,12 +1775,11 @@ async function fetchWikipediaProfile(query: string) {
 async function fetchGooglePlacesProfile(query: string) {
   try {
     const apiKey = process.env.GOOGLE_MAPS_PLATFORM_KEY || 
-                   process.env.GEMINI_API_KEY || 
                    process.env.GOOGLE_API_KEY || 
                    '';
                  
     if (!apiKey) {
-      console.warn("⚠️ No Google Business Profile / Places API key found (Checked GOOGLE_MAPS_PLATFORM_KEY, GEMINI_API_KEY, GOOGLE_API_KEY).");
+      console.warn("⚠️ No Google Business Profile / Places API key found (Checked GOOGLE_MAPS_PLATFORM_KEY, GOOGLE_API_KEY).");
       return null;
     }
 
@@ -1704,7 +1790,7 @@ async function fetchGooglePlacesProfile(query: string) {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.internationalPhoneNumber,places.websiteUri,places.regularOpeningHours,places.primaryType,places.primaryTypeDisplayName,places.editorialSummary,places.photos'
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.internationalPhoneNumber,places.websiteUri,places.regularOpeningHours,places.primaryType,places.primaryTypeDisplayName,places.editorialSummary,places.photos,places.location'
       },
       timeout: 3000
     });
@@ -1787,11 +1873,79 @@ async function fetchGooglePlacesProfile(query: string) {
         phone: phone,
         website: website,
         mapPreviewImage: mapPreviewImage,
-        claimed: true
+        claimed: true,
+        location: p.location
       };
     }
   } catch (err: any) {
     console.warn("⚠️ Google Places API profile fetch failed:", err.message);
+  }
+  return null;
+}
+
+async function fetchGeminiPlacesFallback(query: string) {
+  try {
+    const ai = getGenAI();
+    if (!ai) return null;
+
+    console.log(`📡 [Places Fallback] Synthesizing matching place/business profile via Gemini for: "${query}"`);
+
+    const prompt = `You are a high-fidelity geographic coordinates and corporate headquarters/business location resolver.
+The user is searching for a physical location, office, store, landmark, or headquarters for: "${query}".
+Identify the correct, real-world physical location matching this query.
+Estimate its highly accurate, real-world decimal geographic coordinates (latitude and longitude) and contact/status or address.
+
+Respond strictly with a single JSON object matching this schema:
+{
+  "name": "string (the canonical physical name, e.g., 'Microsoft Redmond Campus')",
+  "category": "string (industry or type, e.g., 'Corporate Headquarters' or 'Supermarket')",
+  "rating": number (between 4.0 and 4.9),
+  "reviewsCount": "string (e.g. '15,240 reviews')",
+  "address": "string (real-world postal or street address)",
+  "hours": "string (status description, e.g. 'Open · Closes 5 PM')",
+  "phone": "string (real phone number or placeholder)",
+  "website": "string (real homepage URL)",
+  "mapPreviewImage": "string (an unsplash photo URL representing the environment)",
+  "claimed": true,
+  "location": {
+    "latitude": number,
+    "longitude": number
+  }
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+
+    const text = response.text || '';
+    if (text) {
+      const data = JSON.parse(text);
+      if (data && data.name && data.location && typeof data.location.latitude === 'number') {
+        console.log(`📡 [Places Fallback] Successfully synthesized: ${data.name} at (${data.location.latitude}, ${data.location.longitude})`);
+        return {
+          name: data.name,
+          category: data.category || "Business Entity",
+          rating: typeof data.rating === 'number' ? data.rating : 4.5,
+          reviewsCount: data.reviewsCount || "1,200 reviews",
+          address: data.address || "International Location",
+          hours: data.hours || "Open Now",
+          phone: data.phone || "",
+          website: data.website || "",
+          mapPreviewImage: data.mapPreviewImage || "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&q=80&w=400",
+          claimed: true,
+          location: {
+            latitude: data.location.latitude,
+            longitude: data.location.longitude
+          }
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn("⚠️ [Places Fallback] Gemini place synthesis failed:", err.message);
   }
   return null;
 }
@@ -1857,18 +2011,20 @@ async function getDynamicBusinessAndApps(query: string) {
     cleanQuery = cleanQuery.replace(/site:\s*[a-zA-Z0-9.-]+/i, '').trim();
   }
 
+  const isNavigational = /direction|route|navigate|map to|way to|get to|drive to|walk to|how do i get/i.test(cleanQuery);
   const isGlobalInfoQuestion = /how|why|what|get|make|money|revenue|work|write|tutorial|guide/i.test(cleanQuery);
-  if (isGlobalInfoQuestion) {
+  if (isGlobalInfoQuestion && !isNavigational) {
     return { businessProfile: null, apps: null };
   }
 
   // 1. Check local static profiles first
   let localProfileKey = "";
   for (const key of Object.keys(BUSINESS_PROFILES)) {
-    const isExact = cleanQuery === key;
-    const isHqSpec = (cleanQuery.includes(key) && /headquarter|office|address|where is|phone|contact|location|hq/i.test(cleanQuery));
+    const isExact = cleanQuery === key || cleanQuery === `${key} hq` || cleanQuery === `directions to ${key}`;
+    const isHqSpec = (cleanQuery.includes(key) && /headquarter|office|address|where is|phone|contact|location|hq|direction|route|navigate|map|way to/i.test(cleanQuery));
     const isInfoQuestion = /how|why|what|get|make|money|revenue|work|write|tutorial|guide/i.test(cleanQuery);
-    if ((isExact || isHqSpec) && !isInfoQuestion) {
+    const isNavMode = /get to|drive to|walk to|way to|directions|map/i.test(cleanQuery);
+    if ((isExact || isHqSpec) && (!isInfoQuestion || isNavMode)) {
       localProfileKey = key;
       break;
     }
@@ -1898,7 +2054,13 @@ async function getDynamicBusinessAndApps(query: string) {
     const profilePromise = isBusinessIntent
       ? fetchGooglePlacesProfile(cleanQuery).then(async (res) => {
           if (res) return res;
-          return fetchWikipediaProfile(cleanQuery);
+          // Strip common direction prefix words for more stable fallback lookups on Wikipedia & Gemini
+          const entityQuery = cleanQuery
+            .replace(/^(directions to|direction to|directions|route to|navigate to|map of|map to|way to|how do i get to|get to|drive to|walk to|gps to)\s+/i, '')
+            .trim();
+          const wikiRes = await fetchWikipediaProfile(entityQuery);
+          if (wikiRes) return wikiRes;
+          return fetchGeminiPlacesFallback(entityQuery);
         })
       : Promise.resolve(null);
 
@@ -1906,8 +2068,9 @@ async function getDynamicBusinessAndApps(query: string) {
       ? fetchStoreApps(cleanQuery)
       : Promise.resolve(null);
 
-    // Run searches in parallel with a strict 500ms timeout
-    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ isTimeout: true }), 500));
+    // Run searches in parallel with appropriate timeouts
+    const timeoutDuration = isBusinessIntent ? 2500 : 800;
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ isTimeout: true }), timeoutDuration));
 
     const winner: any = await Promise.race([
       Promise.all([profilePromise, appsPromise]),
@@ -1918,7 +2081,7 @@ async function getDynamicBusinessAndApps(query: string) {
     let appsResult = null;
 
     if (winner === "timeout") {
-      console.log(`⏱️ [SCOUT DYNAMIC TIMEOUT] Places/App Store API lookup took more than 500ms, bypassing to keep search super fast!`);
+      console.log(`⏱️ [SCOUT DYNAMIC TIMEOUT] Places/App Store API lookup took more than ${timeoutDuration}ms, bypassing to keep search super fast!`);
     } else {
       profileResult = winner[0];
       appsResult = winner[1];
@@ -2391,17 +2554,38 @@ Ensure dates are historically and astronomically correct for 2026/specified year
     });
 
     // Movie & TV Database Search Integration (TMDB + fallback)
-    const moviePromise = intentDataPromise.then(async (intentData: any) => {
-      const entityType = (intentData?.entity_type || '').toLowerCase();
-      const isMovieQueryCheck = finalQuery && (
-        /movie|tv show|tv series|netflix|hbo|imdb|rotten tomatoes|cinematography|episodes of|cast of|season of|episode|season|cast/i.test(finalQuery) ||
-        /media|movie|film|tv\s*show|series|franchise|cinema|anime|drama|show/i.test(entityType)
-      );
-      if (isMovieQueryCheck) {
-        return getMovieOrTVData(finalQuery, intentData?.entity_name, intentData?.entity_type);
+    const moviePromise = (async () => {
+      if (!finalQuery) return null;
+      
+      const cleanQ = finalQuery.toLowerCase().trim();
+      
+      // Fast exclude standard utility prefixes or common non-media structures
+      const excludePatterns = [
+        /^(how to|how do|how can|how much|how many|how long|why does|why is|why do|why can|recipe for|tutorial on|best way to|steps to|symptoms of|treatment for)/i,
+        /^(weather|calculator|translate|translation|speed test|speedtest|clock|time in|convert|unit converter|google map|directions to)/i,
+        /\s+(vs|or|compared to)\s+/i,
+        /^(what is a|what is the)\s+(?!movie|show|series|film)/i
+      ];
+      if (excludePatterns.some(pat => pat.test(cleanQ))) {
+        return null;
       }
-      return null;
-    });
+
+      // To leverage any cached or fast entity classifications, try to briefly race intentDataPromise with 80ms.
+      // If it takes longer, we don't block and proceed immediately with the raw finalQuery.
+      let intentDataSolved: any = null;
+      try {
+        intentDataSolved = await Promise.race([
+          intentDataPromise,
+          new Promise(resolve => setTimeout(() => resolve(null), 80))
+        ]);
+      } catch (err) {}
+
+      return getMovieOrTVData(
+        finalQuery, 
+        intentDataSolved?.entity_name, 
+        intentDataSolved?.entity_type
+      );
+    })();
 
     const [intentData, vector, dictionaryResult, dynamicBusiness, lyricsResult, holidaysResult, movieResult] = await Promise.all([
       intentDataPromise,

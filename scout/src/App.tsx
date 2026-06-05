@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,7 +22,8 @@ import {
 } from './components/SearchWidgets';
 import { PageIntelligencePanel } from './components/PageIntelligence';
 import IntentDecoder from './components/IntentDecoder';
-import MovieSection from './components/MovieSection';
+import MovieSection, { MovieSidebar } from './components/MovieSection';
+import NavigationMap from './components/NavigationMap';
 
 // Initialize Gemini on the Frontend
 const API_KEY = process.env.GEMINI_API_KEY || '';
@@ -111,6 +112,8 @@ export default function App() {
   const [organicFaqs, setOrganicFaqs] = useState<any[]>([]);
   const [isSemanticLoading, setIsSemanticLoading] = useState<boolean>(false);
   const [detectedIntent, setDetectedIntent] = useState<string>('general');
+  const [aiOverviewCopied, setAiOverviewCopied] = useState(false);
+  const [aiOverviewRating, setAiOverviewRating] = useState<'up' | 'down' | null>(null);
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
   const [safeSearch, setSafeSearch] = useState<'strict' | 'moderate' | 'off'>(() => {
     return typeof window !== 'undefined' ? (localStorage.getItem('safe_search') as 'strict' | 'moderate' | 'off') || 'strict' : 'strict';
@@ -825,9 +828,9 @@ export default function App() {
     setAiLoading(true);
     setIsOverviewExpanded(false);
     try {
-      // Include image URLs in the context for the LLM to use
-      const context = contextResults.slice(0, 5).map(r => 
-        `Title: ${r.title}\nSnippet: ${r.snippet}\nSource: ${r.url}${r.image ? `\nImage_URL: ${r.image}` : ''}`
+      // Include image URLs and snippet detail in the context for the LLM to use
+      const context = contextResults.slice(0, 5).map((r, i) => 
+        `Index: ${i + 1}\nTitle: ${r.title}\nSnippet: ${r.snippet}\nSource: ${r.url}${r.image ? `\nImage_URL: ${r.image}` : ''}`
       ).join("\n---\n");
       
       const prompt = linguisticHelp
@@ -840,12 +843,12 @@ export default function App() {
            Instructions:
            1. Start directly with the factual search summary answer. Do NOT start your response with headers or titles like "AI Overview", "AI Overview: [Topic/Query]", "Topic: [Topic]", etc. Jump straight into the content.
            2. Use bullet points for key facts.
-           3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown ![title](Image_URL) if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
-           4. Be objective and professional.
-           5. Use Markdown formatting.`;
+           3. INTEGRATE REFERENCE CITATIONS: At the end of key statements or facts, search to see which of the 5 sources context results the fact came from. Add standard Markdown link citations in the format "[1](URL)", "[2](URL)", "[3](URL)" citing the source URL of that corresponding source index. Always use numbers (1, 2, 3...) corresponding to the context index.
+           4. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown ![title](Image_URL) if it is highly relevant. Use at most 2-3 images.
+           5. Be objective and professional. Use Markdown formatting.`;
 
       const result = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
@@ -863,7 +866,12 @@ export default function App() {
       
       setAiOverview({
         summary: cleanText,
-        sources: contextResults.slice(0, 3).map(r => ({ title: r.title, url: r.url }))
+        sources: contextResults.slice(0, 5).map(r => ({ 
+          title: r.title, 
+          url: r.url,
+          snippet: r.snippet,
+          image: r.image
+        }))
       });
     } catch (e: any) {
       console.error("AI Overview failed:", e);
@@ -882,7 +890,7 @@ export default function App() {
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
       const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-3.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -1255,7 +1263,7 @@ export default function App() {
                <motion.div 
                   animate={{ scale: [1, 1.4, 1], opacity: [0.2, 0.5, 0.2] }}
                   transition={{ repeat: Infinity, duration: 2 }}
-                  className="absolute inset-[-60px] rounded-full bg-linear-to-tr from-blue-600 via-purple-600 to-pink-600 blur-3xl"
+                  className="absolute inset-[-60px] rounded-full bg-linear-to-tr from-blue-600 via-sky-400 to-[#e1f2fa] blur-3xl"
                />
                <div className="relative w-28 h-28 bg-white rounded-full flex items-center justify-center shadow-2xl">
                  <Mic size={48} className="text-blue-600 animate-pulse" />
@@ -1430,57 +1438,63 @@ function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, 
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-white z-[9999] flex flex-col font-sans md:hidden text-slate-800"
     >
-      {/* Top Search Bar */}
-      <div className="bg-white flex items-center px-4 py-3 border-b border-slate-100 gap-3 shrink-0">
-        <button 
-          onClick={onClose} 
-          type="button"
-          className="p-1 hover:bg-slate-50 rounded-full active:scale-95 transition-transform"
-        >
-          <ArrowLeft size={22} className="text-slate-600" />
-        </button>
+      {/* Top Search Bar - Expanded height, squared corners (no rounded edges), with grey camera and audio icons at the bottom left/right */}
+      <div className="bg-slate-50 flex flex-col p-3 pb-2.5 border-b border-slate-150 gap-2.5 shrink-0 select-none">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={onClose} 
+            type="button"
+            className="p-1 hover:bg-slate-200 rounded-lg active:scale-95 transition-transform shrink-0"
+          >
+            <ArrowLeft size={22} className="text-slate-600" />
+          </button>
 
-        <div className="flex-1 flex items-center bg-slate-100 rounded-full px-3.5 py-2 min-w-0">
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                onSearch(query);
-                onClose();
-              }
-            }}
-            className="flex-1 bg-transparent border-none outline-none text-[15px] text-slate-800 placeholder:text-slate-400 font-sans font-medium p-0 min-w-0 focus:ring-0 focus:outline-none"
-            placeholder="Search Scout..."
-          />
-          
-          {query && (
-            <button 
-              type="button" 
-              onClick={() => { setQuery(''); inputRef.current?.focus(); }} 
-              className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
-            >
-              <X size={16} />
-            </button>
-          )}
+          <div className="flex-1 flex items-center bg-white rounded-none border border-slate-250 shadow-2xs px-3.5 py-3 min-w-0">
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onSearch(query);
+                  onClose();
+                }
+              }}
+              className="flex-1 bg-transparent border-none outline-none text-[15.5px] text-slate-800 placeholder:text-slate-450 font-sans font-medium p-0 min-w-0 focus:ring-0 focus:outline-none"
+              placeholder="Search Scout..."
+            />
+            
+            {query && (
+              <button 
+                type="button" 
+                onClick={() => { setQuery(''); inputRef.current?.focus(); }} 
+                className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        {/* Bottom icon row situated on the left and right inside the bar */}
+        <div className="flex items-center justify-between px-10 pt-0.5">
           <button 
             type="button"
             onClick={() => { fileInputRef.current?.click(); onClose(); }}
-            className={`p-2 hover:bg-slate-50 rounded-full transition-all shrink-0 ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-500'}`}
+            className="flex items-center gap-1.5 p-1.5 hover:bg-slate-200/60 rounded text-slate-500 font-medium cursor-pointer bg-transparent border-none"
           >
-            <Camera size={20} />
+            <Camera size={18} className="text-slate-500" />
+            <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Search Image</span>
           </button>
+          
           <button 
             type="button" 
             onClick={() => { onMicClick(); onClose(); }}
-            className="p-2 hover:bg-slate-50 rounded-full text-purple-600 transition-all active:scale-95 shrink-0"
+            className="flex items-center gap-1.5 p-1.5 hover:bg-slate-200/60 rounded text-slate-500 font-medium cursor-pointer bg-transparent border-none"
           >
-            <Mic size={20} />
+            <Mic size={18} className="text-slate-500" />
+            <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Voice Search</span>
           </button>
         </div>
       </div>
@@ -1675,7 +1689,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
             } ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
               <div 
-                className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#a855f7,#ec4899,#22c55e,#3b82f6)] animate-spin"
+                className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#60a5fa,#e1f2fa,#93c5fd,#3b82f6)] animate-spin"
                 style={{ animationDuration: '1.5s', animationTimingFunction: 'linear' }}
               />
             </div>
@@ -1851,17 +1865,38 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
   );
 }
 
-function GoogleBusinessProfileCard({ profile }: { profile: any }) {
+function GoogleBusinessProfileCard({ profile, query }: { profile: any; query?: string }) {
   const [isHoursExpanded, setIsHoursExpanded] = React.useState(false);
   const [isSaved, setIsSaved] = React.useState(false);
 
+  const isDirectionsQuery = React.useMemo(() => {
+    if (!query) return false;
+    const q = query.toLowerCase();
+    return q.includes('direction') || q.includes('route') || q.includes('navigate') || q.includes('get to') || q.includes('way to') || q.includes('how do i get') || q.includes('drive to') || q.includes('walk to') || q.includes('map to');
+  }, [query]);
+
+  const [showNavigationMap, setShowNavigationMap] = React.useState(isDirectionsQuery);
+
+  React.useEffect(() => {
+    if (isDirectionsQuery) {
+      setShowNavigationMap(true);
+    }
+  }, [isDirectionsQuery]);
+
   if (!profile) return null;
+
+  const destinationCoords = {
+    latitude: profile.location?.latitude || profile.location?.lat || 37.4220,
+    longitude: profile.location?.longitude || profile.location?.lng || -122.0841,
+    name: profile.name,
+    address: profile.address
+  };
 
   return (
     <motion.div 
       initial={{ opacity: 0, y: 15 }} 
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xs text-left mb-6 font-sans w-full"
+      className="bg-white rounded-3xl overflow-hidden shadow-xs text-left mb-6 font-sans w-full"
     >
       {/* Map preview */}
       <div className="relative h-32 w-full overflow-hidden bg-slate-100">
@@ -2004,7 +2039,7 @@ function GoogleBusinessProfileCard({ profile }: { profile: any }) {
                 <span className={`text-[9px] text-slate-400 transition-transform duration-200 ${isHoursExpanded ? 'rotate-180' : ''}`}>▼</span>
               </button>
               {isHoursExpanded && (
-                <div className="mt-2 p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs space-y-1.5 text-slate-600">
+                <div className="mt-2 p-3 bg-slate-50 rounded-xl text-xs space-y-1.5 text-slate-600">
                   <div className="flex justify-between"><span>Monday</span><span>9:00 AM – 5:00 PM</span></div>
                   <div className="flex justify-between font-semibold text-slate-800"><span>Tuesday</span><span>9:00 AM – 5:00 PM</span></div>
                   <div className="flex justify-between"><span>Wednesday</span><span>9:00 AM – 5:00 PM</span></div>
@@ -2027,6 +2062,36 @@ function GoogleBusinessProfileCard({ profile }: { profile: any }) {
           <div className="flex items-start gap-2.5 pt-3.5 border-t border-slate-50 text-[11px] text-slate-400 font-medium">
              <span>Is this your business? </span>
              <a href={`https://business.google.com`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Claim it now</a>
+          </div>
+
+          {/* Real-time Embedded GP Companion Navigation System */}
+          <div className="mt-4 pt-1">
+            <button
+              type="button"
+              onClick={() => setShowNavigationMap(!showNavigationMap)}
+              className={`w-full py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-xs transition-all duration-200 cursor-pointer border-none shadow-xs ${
+                showNavigationMap 
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-600' 
+                  : 'bg-slate-900 hover:bg-black text-white hover:shadow-xs'
+              }`}
+            >
+              <Navigation size={13.5} className="" />
+              {showNavigationMap ? "Hide Routing Companion" : "Start Live GPS Route Guide"}
+            </button>
+
+            <AnimatePresence>
+              {showNavigationMap && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.3, ease: 'easeInOut' }}
+                  className="overflow-hidden mt-3.5"
+                >
+                  <NavigationMap destination={destinationCoords} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
@@ -2092,7 +2157,7 @@ function AppsBlock({ appsData }: { appsData: any[] | null }) {
   if (!appsData || appsData.length === 0) return null;
 
   return (
-    <div className="bg-white border border-slate-200 shadow-xs rounded-3xl p-5 mb-6 text-left">
+    <div className="bg-white shadow-xs rounded-3xl p-5 mb-6 text-left">
       <div className="flex items-center gap-2 mb-4">
         {/* Apple Store Blue Round Badge Icon */}
         <div className="w-6.5 h-6.5 rounded-lg bg-[#007aff] flex items-center justify-center text-white shrink-0 shadow-sm">
@@ -2651,6 +2716,8 @@ function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVid
 
 function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent }: any) {
   const [isResInputFocused, setIsResInputFocused] = useState(false);
+  const [aiOverviewCopied, setAiOverviewCopied] = useState(false);
+  const [aiOverviewRating, setAiOverviewRating] = useState<'up' | 'down' | null>(null);
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
@@ -2943,9 +3010,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             <div className="flex items-center gap-5 sm:gap-8 overflow-x-auto scrollbar-hide md:pl-[145px]">
               {/* AI Mode tab + original tabs */}
               {['AI Mode', 'All', 'Images', 'News'].map(tab => {
-                const tabLower = tab.toLowerCase();
-                const isAiModeActive = tab === 'AI Mode' && activeTab === 'all' && isOverviewExpanded;
-                const isActive = (tab === 'AI Mode' && isAiModeActive) || (activeTab === tabLower && tab !== 'AI Mode' && !(tab === 'All' && isOverviewExpanded));
+                const tabLower = tab === 'AI Mode' ? 'ai' : tab.toLowerCase();
+                const isActive = activeTab === tabLower;
                 
                 return (
                   <button 
@@ -2956,15 +3022,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                         : 'text-slate-600 border-transparent hover:text-slate-800'
                     }`} 
                     onClick={() => {
-                      if (tab === 'AI Mode') {
-                        setActiveTab('all');
-                        setIsOverviewExpanded(true);
-                      } else {
-                        if (tabLower === 'all') {
-                          setIsOverviewExpanded(false);
-                        }
-                        setActiveTab(tabLower);
-                      }
+                      setActiveTab(tabLower);
                     }}
                   >
                     {tab}
@@ -2993,7 +3051,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     <div 
                       key={res.id} 
                       onClick={() => setSelectedImage(res)} 
-                      className="break-inside-avoid bg-white rounded-2xl overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all border border-slate-100 cursor-pointer p-2 mb-6 group inline-block w-full"
+                      className="break-inside-avoid bg-white rounded-2xl overflow-hidden hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer p-2 mb-6 group inline-block w-full border-none"
                     >
                       <div className="rounded-xl overflow-hidden bg-slate-50 relative flex items-center justify-center">
                         <img 
@@ -3006,7 +3064,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       </div>
                       <div className="pt-2 px-1 pb-1">
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
-                          <span className="w-3.5 h-3.5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200/50 shrink-0">
+                          <span className="w-3.5 h-3.5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border-none">
                             <img 
                               src={`https://www.google.com/s2/favicons?sz=64&domain=${res.displayUrl || 'wikipedia.org'}`} 
                               className="w-2.5 h-2.5" 
@@ -3191,12 +3249,304 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </div>
             )}
           </div>
+        ) : activeTab === 'ai' ? (
+          <div className="w-full px-6 sm:px-10 md:px-12 py-6 max-w-[1700px] mx-auto select-none">
+            {aiLoading ? (
+              <div className="py-8 animate-pulse max-w-4xl">
+                <div className="flex items-center gap-2.5 mb-6 select-none">
+                  <div className="p-1.5 bg-gradient-to-tr from-blue-500 via-indigo-500 to-purple-500 rounded-lg text-white shadow-xs">
+                    <Sparkles size={15} className="fill-white stroke-none" />
+                  </div>
+                  <span className="text-[16px] font-bold text-slate-800">
+                    {isEnglishHelp ? 'English Spelling Help' : 'AI Overview'}
+                  </span>
+                </div>
+                <div className="space-y-3.5 pl-0.5 max-w-3xl">
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-full" />
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[95%]" />
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[85%]" />
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[60%]" />
+                </div>
+              </div>
+            ) : aiOverview ? (
+              <div className="glass rounded-[24px] sm:rounded-[32px] p-5 sm:p-7 md:p-9 mb-8 overflow-hidden shadow-none border border-white/40">
+                <div className="flex items-center justify-between mb-5 select-none">
+                  <div className="flex items-center gap-2 opacity-70">
+                    <Sparkles size={14} className="text-blue-500 fill-blue-500" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      {isEnglishHelp ? 'English Help' : 'AI Overview'}
+                    </span>
+                  </div>
+                </div>
+                
+                {(() => {
+                  const imageSources = (aiOverview.sources || []).filter((s: any) => s.image);
+                  const backupImages = results ? results.filter((r: any) => r.image).map((r: any) => ({
+                    url: r.url,
+                    title: r.title,
+                    snippet: r.snippet,
+                    image: r.image
+                  })) : [];
+                  const displayImages = [...imageSources, ...backupImages].filter((item, idx, self) => 
+                    self.findIndex(t => t.image === item.image) === idx
+                  ).slice(0, 4);
+
+                  return (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                      {/* Left: Main synthesized answers prose section */}
+                      <div className="lg:col-span-8 flex flex-col justify-between">
+                        <div className="relative">
+                          <div 
+                            className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[260px] md:max-h-[480px]' : 'max-h-none'}`} 
+                            style={{ 
+                              maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', 
+                              WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' 
+                            }}
+                          >
+                            <Markdown 
+                              remarkPlugins={[remarkGfm]} 
+                              components={{
+                                img: ({ ...props }) => (
+                                  <img 
+                                    {...props} 
+                                    className="w-full max-w-md aspect-video object-cover rounded-2xl border border-slate-100 shadow-sm my-4 mx-auto" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ),
+                                a: ({ href, children }) => {
+                                  const text = String(children || '');
+                                  const isNumericRef = /^\d+$/.test(text) || text.startsWith('Source') || text.startsWith('[');
+                                  const cleanIndexText = text.replace(/[\[\]]/g, '');
+                                  const indexVal = parseInt(cleanIndexText, 10);
+                                  
+                                  const sourceItem = (aiOverview && aiOverview.sources) 
+                                    ? aiOverview.sources[indexVal - 1] || aiOverview.sources.find((s: any) => s.url === href)
+                                    : null;
+                                  
+                                  if (isNumericRef && sourceItem) {
+                                    const hostname = (() => {
+                                      try { return new URL(sourceItem.url).hostname.replace('www.', ''); } catch(_) { return 'source'; }
+                                    })();
+                                    
+                                    return (
+                                      <span className="relative inline-block group mx-0.5 align-middle select-none">
+                                        <a
+                                          href={sourceItem.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="no-underline inline-flex items-center justify-center gap-0.5 bg-slate-200/60 hover:bg-indigo-100 hover:text-indigo-700 text-slate-700 rounded-full font-bold text-[9.5px] px-1.5 py-0.5 transition-all h-[17px] leading-none mb-[2px]"
+                                          title={sourceItem.title}
+                                        >
+                                          <ExternalLink size={8} className="shrink-0 text-slate-500" />
+                                          <span>{cleanIndexText}</span>
+                                        </a>
+                                        
+                                        {/* Hover Details Card (Simple Details on hover popover like Google) */}
+                                        <span className="hidden group-hover:block transition-all absolute bottom-[115%] left-1/2 transform -translate-x-1/2 p-3 bg-white text-slate-800 text-xs rounded-xl shadow-xl w-[260px] sm:w-[290px] z-50 text-left cursor-default leading-relaxed border border-slate-200">
+                                          <span className="flex items-center gap-1.5 mb-1.5 border-b border-slate-100 pb-1.5">
+                                            <img 
+                                              src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+                                              className="w-3.5 h-3.5 rounded-full shrink-0" 
+                                              referrerPolicy="no-referrer"
+                                              onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                                            />
+                                            <span className="font-extrabold text-slate-800 truncate block text-[11px] flex-1">{sourceItem.title || 'Source Reference'}</span>
+                                            <span className="text-[8.5px] font-mono text-slate-400 shrink-0">{hostname}</span>
+                                          </span>
+                                          <span className="text-[10.5px] text-slate-500 block line-clamp-3 mb-1.5 font-medium leading-snug">
+                                            {sourceItem.snippet || 'Excerpt reference content from matching verified source for search context.'}
+                                          </span>
+                                          <span className="text-[9.5px] text-indigo-600 font-bold hover:underline block text-right">
+                                            Visit Website ↗
+                                          </span>
+                                        </span>
+                                      </span>
+                                    );
+                                  }
+                                  
+                                  return (
+                                    <a href={href} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-semibold">
+                                      {children}
+                                    </a>
+                                  );
+                                }
+                              }}
+                            >
+                              {aiOverview.summary}
+                            </Markdown>
+                          </div>
+                        </div>
+
+                        {/* Collapsing Toggler - Beautiful blue chip */}
+                        <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-4`}>
+                          <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
+                          <button 
+                            type="button"
+                            onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
+                            className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm cursor-pointer border-none pb-2 pt-2"
+                          >
+                            {isOverviewExpanded ? 'Read less' : 'Read more'}
+                            <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
+                          </button>
+                        </div>
+
+                        {/* Bottom Utility Bar - copy, rating controls */}
+                        <div className="flex items-center gap-2 select-none border-t border-slate-200/50 mt-6 pt-4">
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(aiOverview.summary);
+                              setAiOverviewCopied(true);
+                              setTimeout(() => setAiOverviewCopied(false), 2000);
+                            }}
+                            className={`p-2 hover:bg-slate-200/50 rounded-lg transition-all cursor-pointer border-none bg-transparent flex items-center gap-1.5 ${aiOverviewCopied ? 'text-green-600 font-bold' : 'text-slate-500'}`}
+                            title="Copy overview"
+                          >
+                            <Copy size={14} />
+                            {aiOverviewCopied && <span className="text-[10px]">Copied!</span>}
+                          </button>
+                          
+                          <button 
+                            type="button"
+                            onClick={() => setAiOverviewRating(aiOverviewRating === 'up' ? null : 'up')}
+                            className={`p-2 hover:bg-slate-200/50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'up' ? 'text-green-600' : 'text-slate-500'}`}
+                            title="Helpful"
+                          >
+                            <ThumbsUp size={14} className={aiOverviewRating === 'up' ? 'fill-green-200' : ''} />
+                          </button>
+                          
+                          <button 
+                            type="button"
+                            onClick={() => setAiOverviewRating(aiOverviewRating === 'down' ? null : 'down')}
+                            className={`p-2 hover:bg-slate-200/50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'down' ? 'text-red-500' : 'text-slate-500'}`}
+                            title="Not helpful"
+                          >
+                            <ThumbsDown size={14} className={aiOverviewRating === 'down' ? 'fill-red-200' : ''} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Right Column: site cards showing where the images came from */}
+                      {displayImages.length > 0 && (
+                        <div className="lg:col-span-4 flex flex-col gap-3.5">
+                          <div className="text-[11px] font-bold tracking-wider text-slate-400 uppercase select-none pb-1 border-b border-slate-200/50">
+                            Images & Sources
+                          </div>
+                          
+                          {/* Scrollbar-less Image Carousel on mobile and vertical strip on desktop */}
+                          <div className="flex lg:flex-col gap-4 overflow-x-auto pb-3 lg:pb-0 scrollbar-none scrollbar-hide snap-x select-none">
+                            {displayImages.map((imgItem: any, idx: number) => {
+                              const imgHost = (() => {
+                                try { return new URL(imgItem.url).hostname.replace('www.', ''); } catch(_) { return 'link'; }
+                              })();
+                              
+                              return (
+                                <div 
+                                  key={idx} 
+                                  className="bg-white rounded-2xl overflow-hidden p-2.5 shadow-2xs border border-slate-150 hover:shadow-xs transition-shadow shrink-0 w-[210px] lg:w-full snap-start flex flex-col justify-between"
+                                >
+                                  {/* Site card Image - Scrollbar-less carousel aspect */}
+                                  <div className="h-[110px] w-full rounded-xl overflow-hidden bg-slate-100 mb-2.5 relative">
+                                    <img 
+                                      src={imgItem.image} 
+                                      alt={imgItem.title} 
+                                      className="w-full h-full object-cover select-none"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  </div>
+                                  
+                                  {/* Bottom site card snippet linking straight back to original URL */}
+                                  <a 
+                                    href={imgItem.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="flex items-center gap-2 group/imgcard hover:no-underline"
+                                  >
+                                    <img 
+                                      src={`https://www.google.com/s2/favicons?domain=${imgHost}&sz=32`} 
+                                      className="w-4 h-4 rounded-full shrink-0" 
+                                      referrerPolicy="no-referrer"
+                                      onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <span className="text-[11px] font-extrabold text-slate-700 block truncate group-hover/imgcard:text-indigo-600 leading-snug">
+                                        {imgItem.title}
+                                      </span>
+                                      <span className="text-[9.5px] text-slate-400 block truncate font-medium">
+                                        {imgHost}
+                                      </span>
+                                    </div>
+                                  </a>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Larger Height and high-contrast sources scrollbarless list */}
+                {aiOverview.sources && aiOverview.sources.length > 0 && (
+                  <div className="mt-8 border-t border-slate-200/50 pt-5 animate-in fade-in duration-350">
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3 select-none">
+                      Sources & Citations
+                    </div>
+                    <div className="flex gap-3 overflow-x-auto pb-2.5 snap-x scrollbar-none scrollbar-hide">
+                      {aiOverview.sources.map((source: any, i: number) => {
+                        let hostname = 'link';
+                        try {
+                          hostname = new URL(source.url).hostname.replace('www.', '');
+                        } catch (_) {}
+                        return (
+                          <a 
+                            key={i} 
+                            href={source.url} 
+                            target="_blank" 
+                            rel="noreferrer" 
+                            className="flex items-start gap-2.5 p-3.5 bg-white hover:bg-slate-50 border border-slate-150 rounded-xl transition-all shrink-0 snap-start w-[240px] h-[85px] shadow-2xs hover:shadow-xs"
+                          >
+                            <img 
+                              src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+                              className="w-[18px] h-[18px] rounded-full shrink-0 mt-0.5" 
+                              referrerPolicy="no-referrer"
+                              onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-[12.5px] font-extrabold text-[#1a0dab] leading-tight line-clamp-1">{source.title || 'Source'}</h4>
+                              <p className="text-[10px] text-slate-400 truncate block mt-0.5">{hostname}</p>
+                              <p className="text-[9.5px] text-slate-500 line-clamp-1 truncate block mt-0.5 font-normal">{source.snippet}</p>
+                            </div>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : aiRateLimited ? (
+              <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4 max-w-3xl">
+                <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
+                  <Zap size={20} />
+                </div>
+                <div>
+                  <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Mode hitting limits</h4>
+                  <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="py-20 text-center text-slate-400 font-medium italic">
+                AI Mode is only generated for informational search queries. Try asking a question!
+              </div>
+            )}
+          </div>
         ) : (
           <div className={`flex flex-col lg:flex-row gap-4 sm:gap-6 md:gap-8 lg:gap-10 xl:gap-12 px-6 sm:px-10 md:px-12 py-2 md:py-6 lg:pl-20 xl:pl-24 lg:pr-10 xl:pr-12 max-w-[1700px] mx-auto`}>
-          {activeTab === 'all' && (knowledgePanel || businessProfile) && (
+          {activeTab === 'all' && (knowledgePanel || businessProfile || movie) && (
             <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[368px] shrink-0">
                {businessProfile && (
-                 <GoogleBusinessProfileCard profile={businessProfile} />
+                 <GoogleBusinessProfileCard profile={businessProfile} query={query} />
                )}
                {knowledgePanel && (
                  <motion.div 
@@ -3373,6 +3723,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                  })()}
                  </motion.div>
                )}
+               {movie && (
+                 <MovieSidebar movie={movie} className="hidden lg:flex flex-col gap-5" />
+               )}
             </aside>
           )}
 
@@ -3510,10 +3863,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </div>
             )}
 
-            {/* F2. Fully Loaded AI Overview Block (appears seamlessly once generated) */}
+            {/* Simple AI Overview Block for standard 'all' tab (restored back to how it was before) */}
             {activeTab === 'all' && !aiLoading && (aiOverview || aiRateLimited) && (
-              <div className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
-                <div className="flex items-center justify-between mb-5">
+              <div id="ai-overview-simple" className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
+                <div className="flex items-center justify-between mb-5 select-none">
                   <div className="flex items-center gap-2 opacity-70">
                     <Sparkles size={14} className="text-blue-500 fill-blue-500" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -3556,7 +3909,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
                       <button 
                         onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
-                        className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm"
+                        className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm cursor-pointer border-none pb-2 pt-2"
                       >
                         {isOverviewExpanded ? 'Read less' : 'Read more'}
                         <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
@@ -3587,10 +3940,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                                   src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
                                   className="w-3.5 h-3.5 rounded-full shrink-0" 
                                   referrerPolicy="no-referrer"
-                                  onError={(e: any) => { e.target.style.display = 'none'; }}
+                                  onError={(e: any) => { (e.target as any).style.display = 'none'; }}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <h4 className="text-[12px] font-bold text-slate-750 truncate leading-snug">{source.title || 'Source'}</h4>
+                                  <h4 className="text-[12px] font-bold text-slate-755 truncate leading-snug">{source.title || 'Source'}</h4>
                                   <span className="text-[10px] text-slate-400 truncate block">{hostname}</span>
                                 </div>
                               </a>
@@ -3599,7 +3952,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                         </div>
                       </div>
                     )}
-                  </div>
+                        {/* Removed Redundant Unreachable AI block to keep code clean and performant */}          </div>
                 )}
               </div>
             )}
