@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,6 +22,7 @@ import {
 } from './components/SearchWidgets';
 import { PageIntelligencePanel } from './components/PageIntelligence';
 import IntentDecoder from './components/IntentDecoder';
+import MovieSection from './components/MovieSection';
 
 // Initialize Gemini on the Frontend
 const API_KEY = process.env.GEMINI_API_KEY || '';
@@ -76,6 +77,7 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [homeBg, setHomeBg] = useState<string>('');
   const [bgRotationMode, setBgRotationMode] = useState<'hourly' | 'daily'>(() => {
@@ -84,6 +86,7 @@ export default function App() {
   const [dictionary, setDictionary] = useState<any>(null);
   const [lyrics, setLyrics] = useState<any>(null);
   const [holidays, setHolidays] = useState<any>(null);
+  const [movie, setMovie] = useState<any>(null);
   const [youtubeVideos, setYoutubeVideos] = useState<any[] | null>(null);
   const [videosLoading, setVideosLoading] = useState<boolean>(false);
   const [appsData, setAppsData] = useState<any[] | null>(null);
@@ -104,6 +107,10 @@ export default function App() {
   const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
   const [isVisualSearching, setIsVisualSearching] = useState(false);
   const [visualMathProblem, setVisualMathProblem] = useState<any>(null);
+  const [howTo, setHowTo] = useState<any>(null);
+  const [organicFaqs, setOrganicFaqs] = useState<any[]>([]);
+  const [isSemanticLoading, setIsSemanticLoading] = useState<boolean>(false);
+  const [detectedIntent, setDetectedIntent] = useState<string>('general');
   const [searchStage, setSearchStage] = useState<'idle' | 'extracting' | 'vectorizing' | 'ranking'>('idle');
   const [safeSearch, setSafeSearch] = useState<'strict' | 'moderate' | 'off'>(() => {
     return typeof window !== 'undefined' ? (localStorage.getItem('safe_search') as 'strict' | 'moderate' | 'off') || 'strict' : 'strict';
@@ -292,7 +299,9 @@ export default function App() {
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (query.trim().length < 2) {
-        setSuggestions([]);
+        // Before the user types, show search history and popular/trending queries
+        const initial = [...new Set([...(userHistory || []), "internet speed test", "lyrics finder", "recipe for classic pasta", "weather forecast", "world news"])];
+        setSuggestions(initial.slice(0, 6));
         return;
       }
       try {
@@ -465,6 +474,10 @@ export default function App() {
     setAiOverview(null);
     setDictionary(null);
     setHolidays(null);
+    setHowTo(null);
+    setOrganicFaqs([]);
+    setIsSemanticLoading(requestedPage === 1 && activeTab === 'all');
+    setDetectedIntent('general');
     setYoutubeVideos(null);
     setVideosLoading(false);
     setAppsData(null);
@@ -483,30 +496,29 @@ export default function App() {
 
     // Neural embeddings are now handled server-side using mpnet-base for consistency and precision.
 
-    // AUTOCORRECT ON FRONTEND (Adhering to rules)
+    // NON-BLOCKING BACKGROUND AUTOCORRECT SPELLCHECK (Adhering to rules)
     if (!currentVisualQuery && requestedPage === 1 && finalQuery.length > 3 && API_KEY && API_KEY !== 'AI-NOT-SET') {
-      try {
-        const autocorrectPrompt = `Act as a search engine spell checker. Check if "${finalQuery}" has obvious typos. 
-        If it has an obvious typo, return ONLY the corrected string. 
-        If it is likely correct or a brand name, return the exact same string.
-        Be conservative. Only correct if you are 95% certain.`;
-        
-        const r = await genAI.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
-        });
+      const queryToCheck = finalQuery;
+      const autocorrectPrompt = `Act as a search engine spell checker. Check if "${queryToCheck}" has obvious typos. 
+      If it has an obvious typo, return ONLY the corrected string. 
+      If it is likely correct or a brand name, return the exact same string.
+      Be conservative. Only correct if you are 95% certain.`;
+      
+      genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
+      }).then((r: any) => {
         const text = r.text?.trim() || "";
-        if (text && text.toLowerCase() !== finalQuery.toLowerCase() && text.length < 100) {
+        if (text && text.toLowerCase() !== queryToCheck.toLowerCase() && text.length < 100) {
           setCorrection(text);
-          setOriginalQuery(finalQuery);
-          finalQuery = text;
+          setOriginalQuery(queryToCheck);
         }
-      } catch (e: any) {
-        console.warn("Autocorrect failed:", e);
+      }).catch((e: any) => {
+        console.warn("Autocorrect failed in background:", e);
         if (e.message?.includes('429') || e.status === 429) {
           setAiRateLimited(true);
         }
-      }
+      });
     }
 
     // Launch background search of real YouTube video results for this query in parallel
@@ -586,6 +598,38 @@ export default function App() {
       setDictionary(data.dictionary || null);
       setLyrics(data.lyrics || null);
       setHolidays(data.holidays || null);
+      setMovie(data.movie || null);
+      setHowTo(data.howTo || null);
+      setOrganicFaqs(data.organicFaqs || []);
+      setDetectedIntent(data.detectedIntent || 'general');
+
+      if (requestedPage === 1 && activeTab === 'all' && pineconeResults.length > 0) {
+        setIsSemanticLoading(true);
+        fetch('/api/search/semantic-details', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: finalQuery,
+            results: pineconeResults.slice(0, 5)
+          })
+        })
+        .then(res => res.json())
+        .then(semanticData => {
+          setHowTo(semanticData.howTo || null);
+          setOrganicFaqs(semanticData.organicFaqs || []);
+          if (semanticData.detectedIntent && semanticData.detectedIntent !== 'general') {
+            setDetectedIntent(semanticData.detectedIntent);
+          }
+          setIsSemanticLoading(false);
+        })
+        .catch(err => {
+          console.error("⚠️ Background semantic fetch failed:", err);
+          setIsSemanticLoading(false);
+        });
+      } else {
+        setIsSemanticLoading(false);
+      }
+
       setAppsData(data.apps || null);
       setBusinessProfileState(data.businessProfile || null);
       setIsEnglishHelp(data.isEnglishHelp || false);
@@ -622,6 +666,18 @@ export default function App() {
       setResults(rawResults);
       setLoading(false);
 
+      // Sync Browser URL query parameter (like Google's ?q=...)
+      if (requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
+        const url = new URL(window.location.href);
+        const currentParamQ = url.searchParams.get('q');
+        const currentParamTab = url.searchParams.get('tab') || 'all';
+        if (currentParamQ !== finalQuery.trim() || currentParamTab !== activeTab) {
+          url.searchParams.set('q', finalQuery.trim());
+          url.searchParams.set('tab', activeTab);
+          window.history.pushState({ q: finalQuery.trim(), tab: activeTab }, '', url.toString());
+        }
+      }
+
       // Persist to Firebase history & search clickstream directly
       if (requestedPage === 1 && finalQuery.trim() && finalQuery !== 'Visual Search (Scout Vision)') {
         if (user?.sub) {
@@ -650,7 +706,16 @@ export default function App() {
       // PARALLEL EXECUTION FOR AI FEATURES
       if (requestedPage === 1 && !aiRateLimited) {
         generateAIOverview(finalQuery, rawResults, data.isEnglishHelp || false);
-        generateFAQ(finalQuery, rawResults);
+        
+        // Save token quota: do not request or generate AI FAQ if we have a step guide context
+        const isHowToQuery = data.detectedIntent === 'how_to' || 
+                             finalQuery.toLowerCase().includes('how to') || 
+                             finalQuery.toLowerCase().includes('steps to') || 
+                             finalQuery.toLowerCase().includes('guide to') || 
+                             !!data.howTo;
+        if (!isHowToQuery) {
+          generateFAQ(finalQuery, rawResults);
+        }
         
         // Intelligent triggering for Knowledge Panel (Entity card)
         const topResultIsEntity = rawResults[0]?.displayUrl.includes('wikipedia.org') || 
@@ -702,6 +767,58 @@ export default function App() {
     }
   }, [handleSearch]);
 
+  // INITIAL LOAD WITH q IN URL PARAMETERS (AND POPSTATE HANDLING)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q');
+    const tab = params.get('tab') || 'all';
+    if (q && q.trim()) {
+      setQuery(q);
+      setActiveTab(tab);
+      setIsSearching(true);
+      // Give state a brief moment to settle, then search
+      setTimeout(() => {
+        handleSearch(q, 1);
+      }, 50);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q');
+      const tab = params.get('tab') || 'all';
+      if (q && q.trim()) {
+        setQuery(q);
+        setActiveTab(tab);
+        setIsSearching(true);
+        handleSearch(q, 1);
+      } else {
+        // Clear search to restore home screen cleanly
+        setIsSearching(false);
+        setIsSafeSearchIntercepted(false);
+        setQuery('');
+        setResults([]);
+        setAiOverview(null);
+        setDictionary(null);
+        setLyrics(null);
+        setHolidays(null);
+        setMovie(null);
+        setHowTo(null);
+        setOrganicFaqs([]);
+        setDetectedIntent('general');
+        setYoutubeVideos(null);
+        setAppsData(null);
+        setBusinessProfileState(null);
+        setIsOverviewExpanded(false);
+        setFaq([]);
+        setKnowledgePanel(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [handleSearch]);
+
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET' || aiRateLimited) return;
     
@@ -721,7 +838,7 @@ export default function App() {
            ${context}
            
            Instructions:
-           1. Start with a direct answer.
+           1. Start directly with the factual search summary answer. Do NOT start your response with headers or titles like "AI Overview", "AI Overview: [Topic/Query]", "Topic: [Topic]", etc. Jump straight into the content.
            2. Use bullet points for key facts.
            3. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown ![title](Image_URL) if it is highly relevant to a section of your answer. Place images naturally between paragraphs or near relevant facts. Use at most 2-3 images.
            4. Be objective and professional.
@@ -732,8 +849,20 @@ export default function App() {
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
+      let cleanText = result.text || "No summary available.";
+      let beforeClean = "";
+      while (cleanText !== beforeClean) {
+        beforeClean = cleanText;
+        cleanText = cleanText
+          .replace(/^(?:#+\s*|\**)(?:AI\s+Overview|Topic)(?:\s*:\s*[^\n]*)?(?:\**)?\n+/i, '')
+          .replace(/^(?:#+\s*|\**)[Dd]irect\s+[Aa]nswer(?:\s*:\s*[^\n]*)?(?:\**)?\n+/i, '')
+          .replace(/^(?:#+\s*)?Summary(?:\s*:\s*[^\n]*)?\n+/i, '')
+          .replace(new RegExp(`^(?:#+\\s*|\\**)${queryText.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}(?:\\**)?\\n+`, 'i'), '')
+          .trim();
+      }
+      
       setAiOverview({
-        summary: result.text || "No summary available.",
+        summary: cleanText,
         sources: contextResults.slice(0, 3).map(r => ({ title: r.title, url: r.url }))
       });
     } catch (e: any) {
@@ -783,6 +912,35 @@ export default function App() {
 
   const generateKnowledgePanel = async (entityName: string, entityType?: string) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
+    
+    const isUnsuitedImage = (url: string, query: string): boolean => {
+      if (!url) return true;
+      const lurl = url.toLowerCase();
+      const qStr = query.toLowerCase();
+      
+      const badKeywords = [
+        'disambig', 'wikisource', 'wiktionary', 'commons-logo', 'symbol', 'icon', 'stub', 'alert', 'padlock',
+        'lock', 'magnifying', 'p_vip', 'question', 'check', 'edit', 'folder', 'question_mark', 'warning',
+        'ambox', 'crystal_clear', 'unhappy', 'frustrated', 'stressed', 'stress', 'exhausted', 'sad', 'angry',
+        'confused', 'depressed', 'screaming', 'headache', 'pain', 'frustration', 'laptop_stress', 'troubled',
+        'dissatisfied', 'concerned', 'meta', 'user_feedback', 'editing', 'en-wiki', 'wikipedia-logo'
+      ];
+      
+      for (const kw of badKeywords) {
+        if (lurl.includes(kw) && !qStr.includes(kw)) {
+          return true;
+        }
+      }
+      
+      const isNatureOrTopic = /agriculture|wetland|rice|farm|crop|plant|forest|river|mountain|biology|chemistry|science|food|seed/i.test(qStr);
+      const isHumanTerm = /woman|man|human|lady|guy|girl|boy|laptop|office|computer/i.test(lurl);
+      if (isNatureOrTopic && isHumanTerm && !/human|woman|man|lady/i.test(qStr)) {
+        return true;
+      }
+      
+      return false;
+    };
+
     try {
       let wikiContent = "";
       let wikiImage: string | null = null;
@@ -803,9 +961,9 @@ export default function App() {
           wikiContent = sData.extract || "";
           wikiUrl = sData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(entityName)}`;
           matchedTitle = sData.title || entityName;
-          if (sData.originalimage?.source) {
+          if (sData.originalimage?.source && !isUnsuitedImage(sData.originalimage.source, matchedTitle)) {
             wikiImage = sData.originalimage.source;
-          } else if (sData.thumbnail?.source) {
+          } else if (sData.thumbnail?.source && !isUnsuitedImage(sData.thumbnail.source, matchedTitle)) {
             wikiImage = sData.thumbnail.source;
           }
         }
@@ -825,9 +983,9 @@ export default function App() {
               wikiDesc = sData.description || wikiDesc;
               wikiContent = sData.extract || "";
               wikiUrl = sData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(matchedTitle)}`;
-              if (sData.originalimage?.source) {
+              if (sData.originalimage?.source && !isUnsuitedImage(sData.originalimage.source, matchedTitle)) {
                 wikiImage = sData.originalimage.source;
-              } else if (sData.thumbnail?.source) {
+              } else if (sData.thumbnail?.source && !isUnsuitedImage(sData.thumbnail.source, matchedTitle)) {
                 wikiImage = sData.thumbnail.source;
               }
             }
@@ -852,7 +1010,8 @@ export default function App() {
               }
               return null;
             })
-            .filter(Boolean) as string[];
+            .filter(Boolean)
+            .filter((img: string) => !isUnsuitedImage(img, matchedTitle)) as string[];
 
           extraImages = imagesFound.slice(0, 3);
         } catch (mediaErr: any) {
@@ -1018,12 +1177,36 @@ export default function App() {
     setDictionary(null);
     setLyrics(null);
     setHolidays(null);
+    setMovie(null);
+    setHowTo(null);
+    setOrganicFaqs([]);
+    setDetectedIntent('general');
     setYoutubeVideos(null);
     setAppsData(null);
     setBusinessProfileState(null);
     setIsOverviewExpanded(false);
     setFaq([]);
     setKnowledgePanel(null);
+
+    // Clear URL query parameters
+    const url = new URL(window.location.href);
+    url.search = '';
+    window.history.pushState({}, '', url.toString());
+  };
+
+  const removeHistoryItem = async (item: string) => {
+    const updated = userHistory.filter((h: string) => h !== item);
+    setUserHistory(updated);
+    if (user?.sub) {
+      try {
+        await setDoc(doc(db, "users", user.sub), {
+          queries: updated,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (e) {
+        console.error("Error removing search history:", e);
+      }
+    }
   };
 
   useEffect(() => {
@@ -1115,6 +1298,7 @@ export default function App() {
             onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
             bgRotationMode={bgRotationMode}
             setBgRotationMode={setBgRotationMode}
+            setIsMobileSearchOpen={setIsMobileSearchOpen}
           />
         ) : (
           <ResultsView 
@@ -1176,8 +1360,14 @@ export default function App() {
             businessProfile={businessProfileState}
             lyrics={lyrics}
             holidays={holidays}
+            movie={movie}
             youtubeVideos={youtubeVideos}
             videosLoading={videosLoading}
+            setIsMobileSearchOpen={setIsMobileSearchOpen}
+             howTo={howTo}
+            organicFaqs={organicFaqs}
+            isSemanticLoading={isSemanticLoading}
+            detectedIntent={detectedIntent}
           />
         )}
         {isAnalyticsOpen && (
@@ -1199,11 +1389,177 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {isMobileSearchOpen && (
+          <MobileSearchOverlay 
+            query={query}
+            setQuery={setQuery}
+            userHistory={userHistory}
+            removeHistoryItem={removeHistoryItem}
+            suggestions={suggestions}
+            onSearch={(q: string) => {
+              setQuery(q);
+              handleSearch(q, 1);
+            }}
+            onClose={() => setIsMobileSearchOpen(false)}
+            onMicClick={toggleListening}
+            fileInputRef={fileInputRef}
+            imageQuery={imageQuery}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics, bgRotationMode, setBgRotationMode }: any) {
+function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, suggestions, onSearch, onClose, onMicClick, fileInputRef, imageQuery }: any) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // Focus the input when the overlay opens
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 120);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-white z-[9999] flex flex-col font-sans md:hidden text-slate-800"
+    >
+      {/* Top Search Bar */}
+      <div className="bg-white flex items-center px-4 py-3 border-b border-slate-100 gap-3 shrink-0">
+        <button 
+          onClick={onClose} 
+          type="button"
+          className="p-1 hover:bg-slate-50 rounded-full active:scale-95 transition-transform"
+        >
+          <ArrowLeft size={22} className="text-slate-600" />
+        </button>
+
+        <div className="flex-1 flex items-center bg-slate-100 rounded-full px-3.5 py-2 min-w-0">
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                onSearch(query);
+                onClose();
+              }
+            }}
+            className="flex-1 bg-transparent border-none outline-none text-[15px] text-slate-800 placeholder:text-slate-400 font-sans font-medium p-0 min-w-0 focus:ring-0 focus:outline-none"
+            placeholder="Search Scout..."
+          />
+          
+          {query && (
+            <button 
+              type="button" 
+              onClick={() => { setQuery(''); inputRef.current?.focus(); }} 
+              className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button 
+            type="button"
+            onClick={() => { fileInputRef.current?.click(); onClose(); }}
+            className={`p-2 hover:bg-slate-50 rounded-full transition-all shrink-0 ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-500'}`}
+          >
+            <Camera size={20} />
+          </button>
+          <button 
+            type="button" 
+            onClick={() => { onMicClick(); onClose(); }}
+            className="p-2 hover:bg-slate-50 rounded-full text-purple-600 transition-all active:scale-95 shrink-0"
+          >
+            <Mic size={20} />
+          </button>
+        </div>
+      </div>
+
+      {/* Content Area */}
+      <div className="flex-1 overflow-y-auto bg-white px-2 py-2">
+        {!query ? (
+          <div>
+            {userHistory && userHistory.length > 0 && (
+              <>
+                <div className="text-[11px] uppercase tracking-wider text-slate-400 font-extrabold px-4 py-2 flex items-center gap-1.5 select-none md:hidden">
+                  <Clock size={12} />
+                  <span>Recent searches</span>
+                </div>
+                <div className="flex flex-col mt-1">
+                  {[...userHistory].reverse().slice(0, 8).map((h: string, i: number) => (
+                    <div 
+                      key={i}
+                      onClick={() => { onSearch(h); onClose(); }}
+                      className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 rounded-lg active:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                        <Clock size={16} className="text-slate-400 shrink-0" />
+                        <span className="text-[15px] font-semibold text-slate-700 truncate">{h}</span>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removeHistoryItem(h); }}
+                        className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100/60 transition-colors shrink-0"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-extrabold px-4 py-3 flex items-center gap-1.5 select-none mt-2">
+              <TrendingUp size={12} className="text-slate-450" />
+              <span>Trending searches</span>
+            </div>
+            <div className="flex flex-col mt-1">
+              {["internet speed test", "lyrics finder", "recipe for classic pasta", "weather forecast", "world news", "how does ai search work"].map((t: string, i: number) => (
+                <div 
+                  key={i}
+                  onClick={() => { onSearch(t); onClose(); }}
+                  className="flex items-center gap-3.5 px-4 py-3 hover:bg-slate-50 rounded-lg active:bg-slate-100 transition-colors cursor-pointer text-left"
+                >
+                  <TrendingUp size={16} className="text-slate-400 shrink-0" />
+                  <span className="text-[15px] font-semibold text-slate-700 truncate">{t}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div>
+            {suggestions && suggestions.length > 0 && (
+              <div className="flex flex-col">
+                {suggestions.slice(0, 15).map((s: string, i: number) => (
+                  <div 
+                    key={i}
+                    onClick={() => { onSearch(s); onClose(); }}
+                    className="flex items-center gap-3.5 px-4 py-3 hover:bg-slate-50 rounded-lg active:bg-slate-100 transition-colors cursor-pointer text-left"
+                  >
+                    <Search size={16} className="text-slate-400 shrink-0" />
+                    <span className="text-[15px] font-semibold text-slate-800 truncate">{s}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics, bgRotationMode, setBgRotationMode, setIsMobileSearchOpen }: any) {
   const [glowVisible, setGlowVisible] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -1248,7 +1604,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
 
       <header className="absolute top-0 left-0 right-0 p-6 md:p-10 flex items-center justify-between z-50">
         <div className="flex items-center gap-4">
-           <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-white drop-shadow-lg">Scout</span>
+           <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-white drop-shadow-lg select-none">Scout</span>
         </div>
         <div className="flex items-center gap-4">
           <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} isHome={true} onOpenAnalytics={onOpenAnalytics} />
@@ -1275,16 +1631,45 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           transition={{ delay: 0.4 }}
           className="relative px-4 w-full max-w-2xl mx-auto"
         >
+          {/* MOBILE SEARCH BAR TRIGGER (Replaces wrapping textarea with a clean, static, non-wrapping Google-like search bar on mobile) */}
+          <div 
+            onClick={() => setIsMobileSearchOpen(true)}
+            className="flex items-center gap-3 px-5 py-3 w-full bg-white rounded-full shadow-2xl border border-slate-200/60 cursor-pointer select-none md:hidden text-left"
+          >
+            <Search className="text-slate-400 shrink-0" size={20} />
+            <span className="flex-grow text-slate-400 font-sans text-[15px] truncate font-medium">
+              {query || "Ask Scout anything..."}
+            </span>
+            <div className="flex items-center gap-3 shrink-0">
+              <button 
+                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                type="button" 
+                className="text-slate-400 hover:text-slate-600 focus:outline-none transition-colors"
+                title="Visual Search (Scout Vision)"
+              >
+                <Camera size={20} />
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onMicClick(); }}
+                type="button" 
+                className="text-purple-600 hover:text-purple-800 focus:outline-none transition-colors"
+              >
+                <Mic size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* DESKTOP SEARCH BAR */}
           <form 
             onSubmit={(e) => { e.preventDefault(); onSearch(); }}
-            className={`relative flex items-center gap-3 px-5 py-3 transition-all duration-300 bg-white shadow-2xl ${
+            className={`hidden md:flex relative items-center gap-3 px-5 py-3 transition-all duration-300 bg-white shadow-2xl ${
               showSuggestions && suggestions.length > 0 
                 ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-[1.75rem]') 
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
             }`}
           >
-            {/* Spinning colorful gradient border (3-sec load effect) */}
-            <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${
+            {/* Spinning colorful gradient border (3-sec load effect, thinner) */}
+            <div className={`absolute -inset-[0.6px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${
               showSuggestions && suggestions.length > 0 
                 ? (isExpanded ? 'rounded-t-2xl rounded-b-none border-b-0' : 'rounded-t-[1.75rem] rounded-b-none border-b-0') 
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
@@ -1295,7 +1680,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
               />
             </div>
             {/* Mask to lock border width */}
-            <div className={`absolute inset-[1.5px] bg-white pointer-events-none z-0 ${
+            <div className={`absolute inset-[0.4px] bg-white pointer-events-none z-0 ${
               showSuggestions && suggestions.length > 0 
                 ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-[1.75rem]') 
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
@@ -1307,7 +1692,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
               <div className="relative group/img ml-2 h-8 w-8 shrink-0 rounded overflow-hidden shadow-sm border border-slate-200 z-10">
                 <img src={imageQuery} className="w-full h-full object-cover blur-[2px]" />
                 <div className="absolute inset-0 bg-[#00000022] backdrop-blur-[1px] grid grid-cols-4 grid-rows-4 opacity-70">
-                  {[...Array(16)].map((_, i) => <div key={i} className="border-[0.5px] border-white/20" />)}
+                   {[...Array(16)].map((_, i) => <div key={i} className="border-[0.5px] border-white/20" />)}
                 </div>
                 <button 
                   type="button"
@@ -1348,7 +1733,14 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 ref={inputRef} 
                 value={query} 
                 rows={1}
-                onFocus={() => setShowSuggestions(true)}
+                onFocus={() => {
+                  if (window.innerWidth < 768) {
+                    setIsMobileSearchOpen(true);
+                    inputRef?.current?.blur();
+                  } else {
+                    setShowSuggestions(true);
+                  }
+                }}
                 onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1368,7 +1760,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                   height: 'auto',
                   maxHeight: '160px'
                 }}
-                className="flex-1 bg-transparent border-none outline-none text-inherit placeholder:text-slate-400 overflow-y-auto animate-caret py-0 pr-6 pl-0 font-normal leading-relaxed" 
+                className="w-full flex-1 bg-transparent border-none outline-none text-inherit placeholder:text-slate-400 overflow-y-auto animate-caret py-0 pr-6 pl-0 font-normal leading-relaxed" 
               />
             </div>
 
@@ -1781,7 +2173,7 @@ function LyricsSection({ lyrics }: { lyrics: any }) {
     <motion.div 
       initial={{ opacity: 0, y: 20 }} 
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white border-2 border-slate-100 rounded-3xl p-6 transition-all mb-6 shadow-xs overflow-hidden"
+      className="bg-white rounded-[24px] sm:rounded-3xl p-4 sm:p-6 md:p-8 transition-all mb-6 shadow-xs overflow-hidden"
     >
       <div className="flex items-start justify-between mb-4 pb-4 border-b border-slate-100 gap-4">
         <div>
@@ -1881,7 +2273,7 @@ function HolidaysSection({ holidays, onSearch, setQuery }: { holidays: any; onSe
     <motion.div 
       initial={{ opacity: 0, y: 20 }} 
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white border-2 border-slate-100 rounded-3xl p-6 transition-all mb-6 shadow-xs overflow-hidden"
+      className="bg-white rounded-[24px] sm:rounded-3xl p-4 sm:p-6 md:p-8 transition-all mb-6 shadow-xs overflow-hidden"
     >
       {/* Widget Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 mb-5">
@@ -2046,6 +2438,7 @@ function HolidaysSection({ holidays, onSearch, setQuery }: { holidays: any; onSe
 
 function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVideos: any[] | null, loading: boolean, onMore: () => void, query?: string }) {
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
+  const [isSuggestedPlaying, setIsSuggestedPlaying] = useState<boolean>(false);
 
   if (loading) {
     return (
@@ -2070,6 +2463,8 @@ function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVid
   if (!youtubeVideos || youtubeVideos.length === 0) return null;
 
   const displayVideos = youtubeVideos.slice(0, 3);
+  const suggestedVideo = youtubeVideos[0];
+  const otherVideos = youtubeVideos.slice(1, 3); // Get up to 2 other normal videos
 
   return (
     <motion.div 
@@ -2078,100 +2473,159 @@ function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVid
       className="mb-8 font-sans bg-transparent border-none p-0"
     >
       {/* Header section */}
-      <div className="flex items-center gap-1.5 mb-3 text-slate-900">
+      <div className="flex items-center gap-1.5 mb-4 text-slate-900 border-none">
         <h3 className="font-sans font-normal text-[20px] leading-snug">Videos</h3>
         <svg className="w-5 h-5 text-slate-400 hover:text-slate-600 cursor-pointer ml-1" fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
         </svg>
       </div>
 
-      {/* Vertical list of video rows */}
-      <div className="flex flex-col">
-        {displayVideos.map((vid: any, itemIdx: number) => {
-          const isPlaying = activeVideoId === vid.id;
-          return (
-            <div 
-              key={vid.id} 
-              className={`flex gap-4 sm:gap-6 py-4 border-t border-slate-200/80`}
-            >
-              {/* Left Column: Thumbnail / Video Player */}
+      {/* Expanded Suggested Video (as a borderless shadowless card) */}
+      {suggestedVideo && (
+        <div className="w-full max-w-[652px] mb-6 border-none shadow-none bg-transparent p-0">
+          <div className="text-[12px] font-bold uppercase tracking-widest text-[#5f6368] mb-2.5">Suggested Video</div>
+          <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black relative shadow-none border-none">
+            {isSuggestedPlaying ? (
+              <iframe 
+                width="100%" 
+                height="100%" 
+                src={`https://www.youtube.com/embed/${suggestedVideo.id}?autoplay=1&rel=0`} 
+                title={suggestedVideo.title} 
+                frameBorder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                allowFullScreen 
+                className="w-full h-full border-none"
+              />
+            ) : (
               <div 
-                className="w-[130px] sm:w-[170px] aspect-video rounded-xl overflow-hidden bg-black shrink-0 relative shadow-2xs cursor-pointer group"
-                onClick={() => setActiveVideoId(isPlaying ? null : vid.id)}
+                className="absolute inset-0 cursor-pointer group"
+                onClick={() => setIsSuggestedPlaying(true)}
               >
-                {isPlaying ? (
-                  <iframe 
-                    width="100%" 
-                    height="100%" 
-                    src={`https://www.youtube.com/embed/${vid.id}?autoplay=1&rel=0`} 
-                    title={vid.title} 
-                    frameBorder="0" 
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
-                    allowFullScreen 
-                    className="w-full h-full"
-                  />
-                ) : (
-                  <>
-                    <img 
-                      src={vid.thumbnail || `https://img.youtube.com/vi/${vid.id}/mqdefault.jpg`} 
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                      alt={vid.title}
-                    />
-                    
-                    {/* Centered play button overlay */}
-                    <div className="absolute inset-0 bg-black/5 group-hover:bg-black/25 transition-colors flex items-center justify-center">
-                      <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/95 scale-95 group-hover:scale-100 transition-all shadow-md flex items-center justify-center text-slate-800 opacity-90 group-hover:opacity-100">
-                        <Play size={14} fill="currentColor" className="ml-0.5" />
-                      </div>
-                    </div>
-                    
-                    {/* Bottom-left duration badge */}
-                    {vid.duration && (
-                      <span className="absolute bottom-1.5 left-1.5 bg-black/80 text-white font-mono text-[10px] sm:text-[11px] font-medium px-1.5 py-0.5 rounded tracking-wide">
-                        {vid.duration}
-                      </span>
-                    )}
-
-                    {/* Top-right zoom/expand indicator to replicate screenshot */}
-                    <div className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                      </svg>
-                    </div>
-                  </>
+                <img 
+                  src={suggestedVideo.thumbnail || `https://img.youtube.com/vi/${suggestedVideo.id}/mqdefault.jpg`} 
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                  alt={suggestedVideo.title}
+                />
+                
+                {/* Centered play button overlay */}
+                <div className="absolute inset-0 bg-black/10 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+                  <div className="w-14 h-14 sm:w-16 sm:h-16 bg-white/95 text-slate-800 rounded-full flex items-center justify-center scale-95 group-hover:scale-100 transition-all shadow-md duration-300">
+                    <Play size={20} fill="currentColor" className="ml-1 text-slate-800" />
+                  </div>
+                </div>
+                
+                {/* Bottom-left duration badge */}
+                {suggestedVideo.duration && (
+                  <span className="absolute bottom-3 left-3 bg-black/85 text-white font-mono text-xs font-medium px-2 py-0.5 rounded tracking-wide">
+                    {suggestedVideo.duration}
+                  </span>
                 )}
               </div>
+            )}
+          </div>
+          <div className="mt-3">
+            <h4 
+              className="font-sans font-medium text-[#1a0dab] text-[17px] sm:text-[19px] leading-snug hover:underline cursor-pointer"
+              onClick={() => setIsSuggestedPlaying(true)}
+            >
+              {suggestedVideo.title}
+            </h4>
+            
+            <div className="text-[13px] sm:text-[14px] text-slate-500 font-normal leading-relaxed mt-1 flex items-center gap-1.5 flex-wrap">
+              <span className="font-semibold text-slate-700">{suggestedVideo.channelTitle}</span>
+              <span>·</span>
+              <span>YouTube</span>
+              {suggestedVideo.publishedTime && (
+                <>
+                  <span>·</span>
+                  <span className="text-slate-400">{suggestedVideo.publishedTime}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
-              {/* Right Column: Information details in Google style */}
-              <div className="flex-1 min-w-0">
-                <h4 
-                  className="font-sans font-normal text-[#1a0dab] text-[15px] sm:text-[17px] leading-tight hover:underline cursor-pointer line-clamp-2"
+      {/* Remaining normal videos list */}
+      {otherVideos.length > 0 && (
+        <div className="flex flex-col border-t border-slate-200/60 pt-2 w-full max-w-[652px]">
+          {otherVideos.map((vid: any) => {
+            const isPlaying = activeVideoId === vid.id;
+            return (
+              <div 
+                key={vid.id} 
+                className="flex gap-4 sm:gap-6 py-4 border-b border-slate-200/40 last:border-b-0"
+              >
+                {/* Left Column: Thumbnail / Video Player */}
+                <div 
+                  className="w-[120px] sm:w-[150px] aspect-video rounded-xl overflow-hidden bg-black shrink-0 relative shadow-2xs cursor-pointer group"
                   onClick={() => setActiveVideoId(isPlaying ? null : vid.id)}
                 >
-                  {vid.title}
-                </h4>
-                
-                <div className="text-[13px] sm:text-[14px] text-slate-500 font-normal leading-relaxed mt-1.5 flex items-center gap-1.5 flex-wrap">
-                  <span>YouTube</span>
-                  <span>·</span>
-                  <span>{vid.channelTitle}</span>
-                  <svg className="w-4 h-4 text-slate-400 hover:text-slate-600 cursor-pointer ml-0.5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
-                  </svg>
+                  {isPlaying ? (
+                    <iframe 
+                      width="100%" 
+                      height="100%" 
+                      src={`https://www.youtube.com/embed/${vid.id}?autoplay=1&rel=0`} 
+                      title={vid.title} 
+                      frameBorder="0" 
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                      allowFullScreen 
+                      className="w-full h-full border-none"
+                    />
+                  ) : (
+                    <>
+                      <img 
+                        src={vid.thumbnail || `https://img.youtube.com/vi/${vid.id}/mqdefault.jpg`} 
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                        alt={vid.title}
+                      />
+                      
+                      {/* Centered play button overlay */}
+                      <div className="absolute inset-0 bg-black/5 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full bg-white/95 scale-95 group-hover:scale-100 transition-all shadow-md flex items-center justify-center text-slate-800 opacity-90 group-hover:opacity-100">
+                          <Play size={12} fill="currentColor" className="ml-0.5" />
+                        </div>
+                      </div>
+                      
+                      {/* Bottom-left duration badge */}
+                      {vid.duration && (
+                        <span className="absolute bottom-1 right-1 bg-black/80 text-white font-mono text-[9px] sm:text-[10px] font-medium px-1 py-0.2 rounded tracking-wide">
+                          {vid.duration}
+                        </span>
+                      )}
+                    </>
+                  )}
                 </div>
 
-                <div className="text-[12px] sm:text-[13px] text-slate-400 font-normal mt-0.5">
-                  {vid.publishedTime}
+                {/* Right Column: Information details in Google style */}
+                <div className="flex-1 min-w-0">
+                  <h4 
+                    className="font-sans font-normal text-[#1a0dab] text-[14px] sm:text-[16px] leading-tight hover:underline cursor-pointer line-clamp-2"
+                    onClick={() => setActiveVideoId(isPlaying ? null : vid.id)}
+                  >
+                    {vid.title}
+                  </h4>
+                  
+                  <div className="text-[12px] sm:text-[13px] text-slate-500 font-normal leading-relaxed mt-1 flex items-center gap-1.5 flex-wrap">
+                    <span>YouTube</span>
+                    <span>·</span>
+                    <span>{vid.channelTitle}</span>
+                  </div>
+
+                  <div className="text-[11.5px] sm:text-[12px] text-slate-400 font-normal mt-0.5">
+                    {vid.publishedTime}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Center grey pill button for "View all" */}
-      <div className="flex justify-center mt-2 border-t border-slate-200/80 pt-4">
+      <div className="flex justify-center mt-2 border-t border-slate-200/80 pt-4 w-full max-w-[652px]">
         <button 
           onClick={onMore}
           className="bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-800 text-[13px] font-sans font-semibold px-12 py-2 rounded-full flex items-center justify-center gap-1.5 transition-colors cursor-pointer border-none shadow-none"
@@ -2195,7 +2649,7 @@ function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVid
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, youtubeVideos, videosLoading }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent }: any) {
   const [isResInputFocused, setIsResInputFocused] = useState(false);
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
@@ -2244,6 +2698,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
   const [glowVisible, setGlowVisible] = useState(true);
   const [isPasfExpanded, setIsPasfExpanded] = useState(false);
+  const [isWikiExpanded, setIsWikiExpanded] = useState(false);
   const [isIntentDecoderOpen, setIsIntentDecoderOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -2252,18 +2707,25 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
   useEffect(() => {
     const mainElement = mainRef.current;
-    if (!mainElement) return;
-
     const handleScroll = () => {
-      if (mainElement.scrollTop > 30) {
+      const scrollPos = window.innerWidth < 768 ? window.scrollY : (mainElement ? mainElement.scrollTop : 0);
+      if (scrollPos > 30) {
         setScrolled(true);
       } else {
         setScrolled(false);
       }
     };
 
-    mainElement.addEventListener('scroll', handleScroll, { passive: true });
-    return () => mainElement.removeEventListener('scroll', handleScroll);
+    if (mainElement) {
+      mainElement.addEventListener('scroll', handleScroll, { passive: true });
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      if (mainElement) {
+        mainElement.removeEventListener('scroll', handleScroll);
+      }
+      window.removeEventListener('scroll', handleScroll);
+    };
   }, []);
 
   useEffect(() => {
@@ -2294,88 +2756,97 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   const ghostText = ghostSuggestion ? ghostSuggestion.slice(query.length) : '';
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col h-screen bg-white">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col min-h-screen bg-white">
       <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
-      <header className="bg-white border-b border-slate-50 sticky top-0 z-50">
-        <div className={`flex flex-col sm:flex-row items-center justify-between transition-all duration-300 ease-in-out px-4 md:px-12 max-w-[1700px] mx-auto ${scrolled ? 'py-3 gap-2 md:gap-6' : 'py-6 sm:py-8 gap-4 md:gap-12'}`}>
-          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-4">
-            <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0">
-               <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
-            </div>
-            
-            <div className="flex sm:hidden items-center gap-4">
-              <div ref={appsRef}>
-                <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
+      <header className="bg-white select-none font-sans">
+        {/* MOBILE LAYOUT HEADER (Replicating user's requested Google mobile-style layout) */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 md:hidden">
+          {/* Beaker Lab Flask Icon on Left (Replicates Google Flask - No Bounce) */}
+          <button 
+            type="button"
+            onClick={() => setIsIntentDecoderOpen(true)}
+            className="p-1 px-1.5 transition-colors text-slate-500 hover:text-slate-800 shrink-0"
+            title="Intent Laboratory"
+          >
+            <FlaskConical size={20} className="text-slate-700" />
+          </button>
+
+          {/* Centered purple-gradient Scout logo */}
+          <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0 select-none">
+             <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
+          </div>
+
+          {/* User profile on Right */}
+          <div className="flex items-center shrink-0">
+            <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} />
+          </div>
+        </div>
+
+        {/* Mobile Search input bar (Static, non-wrapping clickable pill) */}
+        <div className="px-6 pt-2 pb-4 md:hidden">
+          <div className="relative w-full">
+            <div 
+              onClick={() => setIsMobileSearchOpen(true)}
+              className="relative flex items-center justify-between px-4 py-2.5 bg-white border border-slate-200/90 shadow-sm rounded-full w-full cursor-pointer select-none"
+            >
+              <div className="flex items-center gap-2.5 flex-1 min-w-0 pr-2">
+                <Search size={16} className="text-slate-450 shrink-0" />
+                <span className="flex-1 text-[15px] font-normal text-slate-900 truncate">
+                  {query || "Search Scout..."}
+                </span>
+                {query && (
+                  <button 
+                    type="button" 
+                    onClick={(e) => { e.stopPropagation(); setQuery(''); }} 
+                    className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none"
+                  >
+                    <X size={15} />
+                  </button>
+                )}
               </div>
-              <div className="flex-shrink-0">
-                <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} />
+              <div className="flex items-center gap-2 shrink-0 border-l border-slate-200 pl-2.5 ml-1">
+                <button 
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                  className={`p-1.5 hover:bg-slate-50 rounded-full transition-all ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-400'}`}
+                >
+                  <Camera size={16} />
+                </button>
+                <button 
+                  type="button" 
+                  onClick={(e) => { e.stopPropagation(); onMicClick(); }}
+                  className="p-1.5 hover:bg-slate-50 rounded-full text-slate-500 transition-all active:scale-95"
+                >
+                  <Mic size={16} />
+                </button>
               </div>
             </div>
           </div>
-          
-          <div className="flex-1 w-full max-w-2xl relative" ref={searchContainerRef}>
-            <form 
-              onSubmit={(e) => { e.preventDefault(); onSearch(); }}
-              className={`relative flex items-center gap-2 px-6 py-2.5 transition-all duration-300 soft-ui ${
-                showSuggestions && suggestions.length > 0 
-                  ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-2xl') 
-                  : (isExpanded ? 'rounded-2xl' : 'rounded-full')
-              }`}
-            >
-              {/* Spinning colorful gradient border (3-sec load effect) */}
-              <div className={`absolute -inset-[2px] pointer-events-none z-0 overflow-hidden transition-opacity duration-1000 ${
-                showSuggestions && suggestions.length > 0 
-                  ? (isExpanded ? 'rounded-t-2xl rounded-b-none border-b-0' : 'rounded-t-2xl rounded-b-none border-b-0') 
-                  : (isExpanded ? 'rounded-2xl' : 'rounded-full')
-              } ${glowVisible ? 'opacity-100' : 'opacity-0'}`}>
-                <div 
-                  className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,#3b82f6,#a855f7,#ec4899,#22c55e,#3b82f6)] animate-spin"
-                  style={{ animationDuration: '1.5s', animationTimingFunction: 'linear' }}
-                />
-              </div>
-              {/* Inner blocking mask */}
-              <div className={`absolute inset-[1.5px] bg-slate-50 pointer-events-none z-0 ${
-                showSuggestions && suggestions.length > 0 
-                  ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-2xl') 
-                  : (isExpanded ? 'rounded-2xl' : 'rounded-full')
-              }`} />
+        </div>
 
-              {imageQuery && (
-                <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100 relative z-10">
-                  <img src={imageQuery} className="w-full h-full object-cover blur-[1.5px]" />
-                  <div className="absolute inset-0 bg-[#00000011] backdrop-blur-[0.5px] grid grid-cols-4 grid-rows-4 opacity-60">
-                    {[...Array(16)].map((_, i) => <div key={i} className="border-[0.25px] border-white/20" />)}
-                  </div>
-                </div>
-              )}
+        {/* DESKTOP LAYOUT HEADER */}
+        <div className="hidden md:flex items-center justify-between px-6 lg:px-12 py-5 max-w-[1700px] mx-auto gap-8">
+          <div className="flex items-center gap-8 flex-1 max-w-3xl">
+            {/* Logo on Left */}
+            <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0 select-none">
+               <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
+            </div>
 
-              {/* Dynamic Resizable Input with suggestions */}
-              <div className="relative flex-1 flex items-stretch min-w-0 min-h-[1.25rem] md:min-h-[1.5rem] relative z-10 text-sm md:text-base font-medium leading-relaxed text-slate-800">
-                {ghostText && (
-                  <div 
-                    className="absolute inset-x-0 inset-y-0 pointer-events-none select-none text-slate-400/40 text-left break-words whitespace-pre-wrap overflow-hidden"
-                    style={{
-                      fontSize: 'inherit',
-                      fontFamily: 'inherit',
-                      lineHeight: 'inherit',
-                      fontWeight: 'inherit',
-                      padding: '0px 24px 0px 0px'
-                    }}
-                  >
-                    <span className="text-transparent border-none p-0 m-0 break-words whitespace-pre-wrap">{query}</span>
-                    <span 
-                      className="text-slate-400 pointer-events-auto select-none cursor-pointer hover:text-slate-500 transition-colors border-b border-dotted border-slate-300" 
-                      title="Tap/Press Tab or ArrowRight to accept suggestion" 
-                      onClick={() => { setQuery(ghostSuggestion); }}
-                    >
-                      {ghostText}
-                    </span>
+            {/* Double Search Bar on Desktop */}
+            <div className="flex-1 max-w-2xl relative" ref={searchContainerRef}>
+              <form 
+                onSubmit={(e) => { e.preventDefault(); onSearch(); }}
+                className="relative flex items-center gap-3 px-5 py-2 bg-white border border-slate-200/90 shadow-sm hover:shadow-md focus-within:shadow-md rounded-full transition-all duration-200"
+              >
+                {imageQuery && (
+                  <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100 relative z-10">
+                    <img src={imageQuery} className="w-full h-full object-cover blur-[1.5px]" />
                   </div>
                 )}
-
+                
                 <textarea 
                   ref={resInputRef}
-                  value={isResInputFocused ? query : (query && query.length > 45 ? query.slice(0, 45) + '...' : query)} 
+                  value={query} 
                   rows={1}
                   onFocus={() => { setIsResInputFocused(true); setShowSuggestions(true); }}
                   onBlur={() => { setTimeout(() => setIsResInputFocused(false), 200); }}
@@ -2385,83 +2856,127 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       e.preventDefault();
                       onSearch();
                       setShowSuggestions(false);
-                    } else if (e.key === 'Tab' || e.key === 'ArrowRight') {
-                      if (ghostSuggestion) {
-                        e.preventDefault();
-                        setQuery(ghostSuggestion);
-                      }
                     }
                   }}
-                  placeholder={imageQuery ? "Image search active" : "Search Scout..."}
+                  placeholder="Search Scout..."
                   style={{
                     resize: 'none',
                     height: 'auto',
-                    maxHeight: '120px'
+                    maxHeight: '100px'
                   }}
-                  className="flex-1 bg-transparent border-none outline-none text-inherit font-medium overflow-y-auto animate-caret py-0 pr-6 pl-0" 
+                  className="w-full flex-1 bg-transparent border-none outline-none text-slate-900 font-normal py-1 h-auto resize-none leading-normal font-sans"
                 />
-              </div>
+                
+                {query && (
+                  <button 
+                    type="button" 
+                    onClick={() => setQuery('')} 
+                    className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
 
-              <div className="flex items-center gap-3 relative z-10 shrink-0">
-                <button 
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`p-2 hover:bg-slate-50 rounded-full transition-all ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-400'}`}
-                >
-                  <Camera size={16} />
-                </button>
-                <button 
-                  type="button" 
-                  onClick={onMicClick}
-                  className="p-2 hover:bg-white hover:shadow-sm rounded-full text-purple-600 transition-all active:scale-95"
-                >
-                  <Mic size={18} />
-                </button>
-                <div className="w-px h-4 bg-slate-200 mx-1" />
-                <Search size={18} className="text-purple-600 cursor-pointer hover:scale-110 transition-transform" onClick={() => onSearch()} />
-              </div>
-            </form>
-            <AnimatePresence>
-              {showSuggestions && suggestions.length > 0 && (
-                <motion.div 
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="absolute top-11 left-0 right-0 border border-slate-200 border-t-0 rounded-b-2xl shadow-xl z-[2100] overflow-hidden glass"
-                >
-                  {suggestions.map && suggestions.map((s: string, i: number) => (
-                    <button 
-                      key={i} 
-                      onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }}
-                      className="w-full px-5 py-3 flex items-center gap-3 text-slate-700 hover:bg-slate-50 transition-colors text-left"
-                    >
-                      <Search size={14} className="text-slate-400" />
-                      <span className="font-medium text-sm">{s}</span>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+                <div className="flex items-center gap-2 shrink-0 border-l border-slate-200 pl-3">
+                  <button 
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`p-1.5 hover:bg-slate-50 rounded-full transition-all ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-400'}`}
+                  >
+                    <Camera size={16} />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={onMicClick}
+                    className="p-1.5 hover:bg-slate-50 rounded-full text-slate-500 transition-all active:scale-95"
+                  >
+                    <Mic size={16} />
+                  </button>
+                  <button type="submit" className="p-1.5 text-slate-400 hover:text-slate-600 hover:scale-105 transition-all" onClick={() => onSearch()}>
+                    <Search size={18} />
+                  </button>
+                </div>
+              </form>
+              <AnimatePresence>
+                {showSuggestions && suggestions.length > 0 && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="absolute top-[48px] left-0 right-0 border border-slate-200 rounded-2xl shadow-xl z-[2100] overflow-hidden bg-white mt-1"
+                  >
+                    {suggestions.map((s: string, i: number) => (
+                      <button 
+                        key={i} 
+                        onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }}
+                        className="w-full px-5 py-3 flex items-center gap-3 text-slate-700 hover:bg-slate-50 transition-colors text-left"
+                      >
+                        <Search size={14} className="text-slate-400" />
+                        <span className="font-medium text-sm text-slate-800">{s}</span>
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-          <div className="hidden sm:flex items-center gap-4">
+
+          <div className="hidden md:flex items-center gap-4 shrink-0">
+            <button 
+              type="button"
+              onClick={() => setIsIntentDecoderOpen(true)}
+              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-full transition-all"
+              title="Intent Laboratory"
+            >
+              <FlaskConical size={18} />
+            </button>
             <div ref={appsRef}>
               <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
             </div>
-            <div className="flex-shrink-0">
-              <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} onOpenAnalytics={onOpenAnalytics} />
-            </div>
+            <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} onOpenAnalytics={onOpenAnalytics} />
           </div>
         </div>
-        <div className={`transition-all duration-300 ease-in-out overflow-hidden px-4 md:px-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto border-t border-slate-50 overflow-x-auto scrollbar-hide ${scrolled ? 'max-h-0 opacity-0 pointer-events-none pt-0' : 'max-h-16 opacity-100 pt-4'}`}>
-          <div className="flex items-center gap-8">
-            {['All', 'Images', 'Videos', 'News'].map(tab => (
-              <button key={tab} className={`pb-3 text-sm font-bold border-b-2 transition-all ${activeTab === tab.toLowerCase() ? 'text-blue-600 border-blue-600' : 'text-slate-400 border-transparent hover:text-slate-700'}`} onClick={() => setActiveTab(tab.toLowerCase())}>{tab}</button>
-            ))}
+
+        {/* TAB NAVIGATION RIBBON (Replicates exact look of Google sub-tab bar with equalized spacing) */}
+        <div className="md:sticky md:top-0 z-40 bg-white border-t border-b border-slate-100 select-none">
+          <div className="px-6 md:px-12 max-w-[1700px] bg-white mx-auto">
+            <div className="flex items-center gap-5 sm:gap-8 overflow-x-auto scrollbar-hide md:pl-[145px]">
+              {/* AI Mode tab + original tabs */}
+              {['AI Mode', 'All', 'Images', 'News'].map(tab => {
+                const tabLower = tab.toLowerCase();
+                const isAiModeActive = tab === 'AI Mode' && activeTab === 'all' && isOverviewExpanded;
+                const isActive = (tab === 'AI Mode' && isAiModeActive) || (activeTab === tabLower && tab !== 'AI Mode' && !(tab === 'All' && isOverviewExpanded));
+                
+                return (
+                  <button 
+                    key={tab} 
+                    className={`pb-3 pt-2.5 px-0.5 text-[14px] border-b-[3px] transition-all whitespace-nowrap shrink-0 relative ${
+                      isActive 
+                        ? 'text-slate-900 font-semibold border-slate-900' 
+                        : 'text-slate-600 border-transparent hover:text-slate-800'
+                    }`} 
+                    onClick={() => {
+                      if (tab === 'AI Mode') {
+                        setActiveTab('all');
+                        setIsOverviewExpanded(true);
+                      } else {
+                        if (tabLower === 'all') {
+                          setIsOverviewExpanded(false);
+                        }
+                        setActiveTab(tabLower);
+                      }
+                    }}
+                  >
+                    {tab}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </header>
 
-      <main ref={mainRef} className="flex-1 overflow-y-auto">
+      <main ref={mainRef} className="flex-1">
         {activeTab === 'images' ? (
           <div className="w-full px-8 py-8 md:px-8">
             {loading ? (
@@ -2661,7 +3176,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 {/* Main page attribution bar (Clean, gray design without red icon) */}
                 <div className="mt-14 pt-6 border-t border-slate-200/60 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 font-sans gap-4">
                   <div className="flex items-center gap-2">
-                    <span>This workspace is integrated with <strong>YouTube™</strong> API Services. Streams load through official endpoints.</span>
+                    <span>This workspace is integrated with <strong>YouTube™</strong> API Services. Videos load through official endpoints.</span>
                   </div>
                   <div className="flex items-center gap-4">
                     <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer" className="hover:text-blue-600 hover:underline">YouTube Terms</a>
@@ -2677,7 +3192,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             )}
           </div>
         ) : (
-          <div className={`flex flex-col lg:flex-row gap-8 lg:gap-10 xl:gap-12 p-4 md:p-8 lg:pl-8 xl:pl-12 lg:pr-6 xl:pr-8 max-w-[1700px] mx-auto`}>
+          <div className={`flex flex-col lg:flex-row gap-4 sm:gap-6 md:gap-8 lg:gap-10 xl:gap-12 px-6 sm:px-10 md:px-12 py-2 md:py-6 lg:pl-20 xl:pl-24 lg:pr-10 xl:pr-12 max-w-[1700px] mx-auto`}>
           {activeTab === 'all' && (knowledgePanel || businessProfile) && (
             <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[368px] shrink-0">
                {businessProfile && (
@@ -2711,33 +3226,72 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                        {/* Image Collage / Mosaic */}
                        {panelImages.length > 0 && (
                          <div className="-mx-2 mb-6">
-                           {panelImages.length === 1 ? (
-                             <div className="aspect-[16/10] w-full rounded-2xl overflow-hidden hover:opacity-95 transition-opacity">
-                               <img src={panelImages[0]} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                             </div>
-                           ) : panelImages.length === 2 ? (
-                             <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden h-[140px]">
-                               <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                               <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                             </div>
-                           ) : (
-                             <div className="grid grid-cols-3 gap-1.5 rounded-xl overflow-hidden h-[140px]">
-                               <div className="col-span-2 h-full">
-                                 <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                               </div>
-                               <div className="grid grid-rows-2 gap-1.5 h-full">
-                                 <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                                 <img src={panelImages[2]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                               </div>
+                           {/* Mobile Scrollable View (Only when more than 1 image) */}
+                           {panelImages.length > 1 && (
+                             <div className="md:hidden flex gap-2.5 overflow-x-auto scrollbar-hide py-1 px-2 snap-x select-none h-[220px]" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                               {panelImages.map((img, i) => (
+                                 <div key={i} className="h-full shrink-0 snap-start bg-slate-50 rounded-2xl overflow-hidden shadow-2xs border border-slate-100">
+                                   <img 
+                                     src={img} 
+                                     className="h-full w-auto object-cover hover:opacity-95 transition-all" 
+                                     referrerPolicy="no-referrer" 
+                                     alt={`${knowledgePanel.title || 'Wikipedia image'} ${i + 1}`} 
+                                   />
+                                 </div>
+                               ))}
                              </div>
                            )}
+
+                           {/* Desktop collage/mosaic view OR mobile single image view */}
+                           <div className={panelImages.length > 1 ? "hidden md:block" : "block"}>
+                             {panelImages.length === 1 ? (
+                               <div className="aspect-[16/10] w-full rounded-2xl overflow-hidden hover:opacity-95 transition-opacity">
+                                 <img src={panelImages[0]} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                               </div>
+                             ) : panelImages.length === 2 ? (
+                               <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden h-[140px]">
+                                 <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                                 <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                               </div>
+                             ) : (
+                               <div className="grid grid-cols-3 gap-1.5 rounded-xl overflow-hidden h-[140px]">
+                                 <div className="col-span-2 h-full">
+                                   <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                                 </div>
+                                 <div className="grid grid-rows-2 gap-1.5 h-full">
+                                   <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                                   <img src={panelImages[2]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
+                                 </div>
+                               </div>
+                             )}
+                           </div>
                          </div>
                        )}
 
                        {/* About description and Wikipedia source link */}
                        <div className="space-y-6">
                          <div className="pb-5 border-b border-slate-100 text-left">
-                           <p className="text-slate-600 leading-relaxed text-[15px]">{knowledgePanel.description}</p>
+                           {(() => {
+                             const descText = knowledgePanel.description || "";
+                             const needsTruncation = descText.length > 280;
+                             const displayedDesc = (isWikiExpanded || !needsTruncation)
+                               ? descText
+                               : `${descText.substring(0, 260).trim()}...`;
+
+                             return (
+                               <p className="text-slate-600 leading-relaxed text-[15px]">
+                                 {displayedDesc}
+                                 {needsTruncation && (
+                                   <button
+                                     onClick={() => setIsWikiExpanded(!isWikiExpanded)}
+                                     className="text-blue-600 hover:underline font-semibold text-[13.5px] ml-1.5 focus:outline-none rounded shrink-0 whitespace-nowrap"
+                                   >
+                                     {isWikiExpanded ? "Read less" : "Read more"}
+                                   </button>
+                                 )}
+                               </p>
+                             );
+                           })()}
                            <span className="text-slate-450 text-[13px] mt-2 block font-normal">
                              Source: <a href={knowledgePanel.wikipediaUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(knowledgePanel.title)}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Wikipedia</a>
                            </span>
@@ -2822,7 +3376,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             </aside>
           )}
 
-          <div className="w-full max-w-[650px] space-y-6 order-2 lg:order-1 lg:pl-10">
+          <div className="w-full max-w-[650px] md:max-w-[850px] lg:max-w-[900px] xl:max-w-[980px] space-y-6 order-2 lg:order-1 lg:pl-10">
             {/* Interactive Search Tool Widgets */}
             {activeTab === 'all' && shouldShowColorPicker(query) && (
               <ColorPickerWidget query={query} />
@@ -2861,101 +3415,13 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <VisualMathDisplay problem={visualMathProblem} stage={searchStage} image={imageQuery} analysis={visualAnalysis} />
             )}
 
-            {/* AI Overview */}
-            {activeTab === 'all' && (aiLoading || aiOverview) && (
-              <div className={`glass rounded-[32px] p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
-                <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-2 opacity-70">
-                    <Sparkles size={14} className="text-blue-500 fill-blue-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                      {isEnglishHelp ? 'English Help' : 'AI Overview'}
-                    </span>
-                  </div>
-                </div>
-                
-                {aiLoading ? (
-                  <div className="space-y-4 animate-pulse">
-                    <div className="h-4 bg-slate-200/50 rounded w-full"/>
-                    <div className="h-4 bg-slate-200/50 rounded w-5/6"/>
-                    <div className="h-4 bg-slate-200/50 rounded w-4/6"/>
-                  </div>
-                ) : aiRateLimited ? (
-                  <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
-                    <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
-                      <Zap size={20} />
-                    </div>
-                    <div>
-                      <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Overview hitting limits</h4>
-                      <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
-                    </div>
-                  </div>
-                ) : aiOverview && (
-                  <div className="relative">
-                    <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[300px]' : 'max-h-none'}`} 
-                         style={{ maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' }}>
-                      <Markdown 
-                        remarkPlugins={[remarkGfm]} 
-                        components={{
-                          img: ({ ...props }) => (
-                            <img 
-                              {...props} 
-                              className="w-full max-w-lg aspect-video object-cover rounded-3xl border border-slate-100 shadow-sm transition-transform hover:scale-[1.02] cursor-zoom-in" 
-                              referrerPolicy="no-referrer"
-                            />
-                          )
-                        }}
-                      >
-                        {aiOverview.summary}
-                      </Markdown>
-                    </div>
-                    
-                    <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-8`}>
-                      <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
-                      <button 
-                        onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
-                        className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm"
-                      >
-                        {isOverviewExpanded ? 'Read less' : 'Read more'}
-                        <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
-                      </button>
-                    </div>
+            {/* AI-GRADE DYNAMIC LAYOUT ORDERING BY INTENT */}
 
-                    {/* Source Attribution Cards (Imitating Google Search style cards) */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      {aiOverview.sources?.map && aiOverview.sources.slice(0, 3).map((source: any, i: number) => (
-                        <a 
-                          key={i} 
-                          href={source.url} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="flex flex-col gap-3 p-4 bg-slate-50/80 rounded-2xl hover:bg-slate-100/80 border border-transparent hover:border-slate-200 transition-all group"
-                        >
-                          <div className="flex items-center gap-2">
-                             <img src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`} className="w-4 h-4 rounded-full" />
-                             <span className="text-[12px] text-slate-500 font-medium truncate">{new URL(source.url).hostname.replace('www.', '')}</span>
-                          </div>
-                          <h4 className="text-[14px] font-bold text-slate-800 line-clamp-2 leading-snug group-hover:text-blue-700 transition-colors">{source.title}</h4>
-                        </a>
-                      ))}
-                      {aiOverview.sources && aiOverview.sources.length > 3 && (
-                        <button className="flex flex-col items-center justify-center gap-2 p-4 bg-slate-50/80 rounded-2xl border border-transparent hover:border-slate-200 hover:bg-slate-100/80 transition-all font-bold text-[13px] text-blue-600">
-                           <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-blue-600 shadow-sm border border-slate-100">
-                             <ChevronRight size={16} />
-                           </div>
-                           View all
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Oxford Dictionary Integration */}
-            {activeTab === 'all' && dictionary && (
+            {/* A. Dictionary Query -> Render Oxford definition at the very top */}
+            {activeTab === 'all' && detectedIntent === 'dictionary' && dictionary && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                className="bg-white border-2 border-slate-100 rounded-3xl p-6 transition-all mb-4"
+                className="bg-white text-left rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 transition-all mb-6 max-w-full shadow-sm"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div>
@@ -2977,7 +3443,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     </div>
                     <span className="inline-block px-3 py-1 bg-slate-100 rounded-full text-slate-500 text-[10px] font-bold uppercase tracking-wider">{dictionary.class}</span>
                   </div>
-                  <div className="text-slate-200 font-display font-bold text-lg italic">Oxford</div>
+                  <div className="text-slate-200 font-display font-bold text-lg italic pr-1">Oxford</div>
                 </div>
                 <div className="space-y-4">
                   <div>
@@ -2985,23 +3451,23 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       {dictionary.definition}
                     </p>
                     {dictionary.example && (
-                      <p className="text-slate-500 italic pl-4 border-l-2 border-slate-200">"{dictionary.example}"</p>
+                      <p className="text-slate-550 italic pl-4 border-l-2 border-slate-200 font-medium">"{dictionary.example}"</p>
                     )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
                     <div>
                       <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Synonyms</h4>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1.5">
                         {dictionary.synonyms?.map((s: string, i: number) => (
-                           <span key={i} className="text-blue-600 hover:underline cursor-pointer text-sm font-medium">{s}{i < dictionary.synonyms.length - 1 ? ',' : ''}</span>
+                           <span key={i} className="text-blue-600 hover:underline cursor-pointer text-sm font-bold">{s}{i < dictionary.synonyms.length - 1 ? ',' : ''}</span>
                         ))}
                       </div>
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Antonyms</h4>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1.5">
                         {dictionary.antonyms?.map((s: string, i: number) => (
-                           <span key={i} className="text-slate-600 text-sm font-medium">{s}{i < dictionary.antonyms.length - 1 ? ',' : ''}</span>
+                           <span key={i} className="text-slate-550 text-sm font-bold">{s}{i < dictionary.antonyms.length - 1 ? ',' : ''}</span>
                         ))}
                       </div>
                     </div>
@@ -3010,14 +3476,206 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </motion.div>
             )}
 
-            {/* Song Lyrics Widget Integration */}
-            {activeTab === 'all' && lyrics && (
+            {/* B. Lyrics Query -> Render lyrics at the very top */}
+            {activeTab === 'all' && detectedIntent === 'lyrics' && lyrics && (
               <LyricsSection lyrics={lyrics} />
             )}
 
-            {/* Public Holidays Widget Integration */}
-            {activeTab === 'all' && holidays && (
+            {/* C. Holiday Query -> Render public holiday calendar at the very top */}
+            {activeTab === 'all' && detectedIntent === 'holiday' && holidays && (
               <HolidaysSection holidays={holidays} onSearch={onSearch} setQuery={setQuery} />
+            )}
+
+            {/* D. Movie Query -> Render movie info card at the very top */}
+            {activeTab === 'all' && detectedIntent === 'movie' && movie && (
+              <MovieSection movie={movie} />
+            )}
+
+            {/* F1. Clean, Beautiful Google SGE-style AI Overview Loader */}
+            {activeTab === 'all' && aiLoading && (
+              <div className="mb-6 py-4 animate-pulse">
+                <div className="flex items-center gap-2.5 mb-4 select-none">
+                  <div className="p-1.5 bg-gradient-to-tr from-blue-500 via-indigo-500 to-purple-550 rounded-lg text-white shadow-xs">
+                    <Sparkles size={15} className="fill-white stroke-none" />
+                  </div>
+                  <span className="text-[15px] font-semibold text-slate-800">
+                    {isEnglishHelp ? 'English Spelling Help' : 'AI Overview'}
+                  </span>
+                </div>
+                <div className="space-y-3.5 pl-0.5 max-w-[652px]">
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[95%]" />
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[90%]" />
+                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[65%]" />
+                </div>
+              </div>
+            )}
+
+            {/* F2. Fully Loaded AI Overview Block (appears seamlessly once generated) */}
+            {activeTab === 'all' && !aiLoading && (aiOverview || aiRateLimited) && (
+              <div className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2 opacity-70">
+                    <Sparkles size={14} className="text-blue-500 fill-blue-500" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      {isEnglishHelp ? 'English Help' : 'AI Overview'}
+                    </span>
+                  </div>
+                </div>
+                
+                {aiRateLimited ? (
+                  <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
+                    <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
+                      <Zap size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Overview hitting limits</h4>
+                      <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
+                    </div>
+                  </div>
+                ) : aiOverview && (
+                  <div className="relative">
+                    <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[260px] md:max-h-[480px]' : 'max-h-none'}`} 
+                         style={{ maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' }}>
+                      <Markdown 
+                        remarkPlugins={[remarkGfm]} 
+                        components={{
+                          img: ({ ...props }) => (
+                            <img 
+                              {...props} 
+                              className="w-full max-w-lg aspect-video object-cover rounded-3xl border border-slate-100 shadow-sm transition-transform hover:scale-[1.02] cursor-zoom-in" 
+                              referrerPolicy="no-referrer"
+                            />
+                          )
+                        }}
+                      >
+                        {aiOverview.summary}
+                      </Markdown>
+                    </div>
+                    
+                    <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-4`}>
+                      <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
+                      <button 
+                        onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
+                        className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm"
+                      >
+                        {isOverviewExpanded ? 'Read less' : 'Read more'}
+                        <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
+                      </button>
+                    </div>
+
+                    {/* Simple horizontally scrollable sources on one line, ONLY shown when expanded */}
+                    {isOverviewExpanded && aiOverview.sources && aiOverview.sources.length > 0 && (
+                      <div className="mt-6 border-t border-slate-100/80 pt-4 animate-in fade-in duration-300">
+                        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3 select-none">
+                          Sources
+                        </div>
+                        <div className="flex gap-2.5 overflow-x-auto pb-3 snap-x scrollbar-none">
+                          {aiOverview.sources.map((source: any, i: number) => {
+                            let hostname = 'link';
+                            try {
+                              hostname = new URL(source.url).hostname.replace('www.', '');
+                            } catch (_) {}
+                            return (
+                              <a 
+                                key={i} 
+                                href={source.url} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="flex items-center gap-2 p-2 px-3 bg-slate-50/80 hover:bg-slate-100/80 border border-slate-100 rounded-xl transition-all shrink-0 snap-start max-w-[200px]"
+                              >
+                                <img 
+                                  src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+                                  className="w-3.5 h-3.5 rounded-full shrink-0" 
+                                  referrerPolicy="no-referrer"
+                                  onError={(e: any) => { e.target.style.display = 'none'; }}
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <h4 className="text-[12px] font-bold text-slate-750 truncate leading-snug">{source.title || 'Source'}</h4>
+                                  <span className="text-[10px] text-slate-400 truncate block">{hostname}</span>
+                                </div>
+                              </a>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+
+            {/* Removed Redundant Organic Faq Block from here for single clean FAQ control */}
+
+            {/* I. Dictionary, lyrics, holidays fallbacks (Render here if present but not matching primary intent) */}
+            {activeTab === 'all' && detectedIntent !== 'dictionary' && dictionary && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                className="bg-white text-left rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 transition-all mb-6 max-w-full shadow-sm"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <div className="flex items-center gap-3 mb-1">
+                      <h2 className="text-2xl font-display font-bold text-slate-900">{dictionary.word}</h2>
+                      <span className="text-slate-400 font-medium italic text-base">{dictionary.phonetic}</span>
+                      {dictionary.audio && (
+                        <button 
+                          onClick={() => {
+                            const audio = new Audio(dictionary.audio);
+                            audio.play().catch(console.error);
+                          }}
+                          className="p-1.5 hover:bg-slate-100 rounded-full text-blue-600 transition-colors active:scale-90"
+                          title="Listen"
+                        >
+                          <Mic size={16} />
+                        </button>
+                      )}
+                    </div>
+                    <span className="inline-block px-3 py-1 bg-slate-100 rounded-full text-slate-500 text-[10px] font-bold uppercase tracking-wider">{dictionary.class}</span>
+                  </div>
+                  <div className="text-slate-200 font-display font-bold text-lg italic pr-1">Oxford</div>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-slate-800 text-[15px] leading-relaxed mb-3 font-normal">
+                      {dictionary.definition}
+                    </p>
+                    {dictionary.example && (
+                      <p className="text-slate-550 italic pl-4 border-l-2 border-slate-200 font-medium">"{dictionary.example}"</p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Synonyms</h4>
+                      <div className="flex flex-wrap gap-1.5">
+                        {dictionary.synonyms?.map((s: string, i: number) => (
+                           <span key={i} className="text-blue-600 hover:underline cursor-pointer text-sm font-bold">{s}{i < dictionary.synonyms.length - 1 ? ',' : ''}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Antonyms</h4>
+                      <div className="flex flex-wrap gap-1.5">
+                        {dictionary.antonyms?.map((s: string, i: number) => (
+                           <span key={i} className="text-slate-550 text-sm font-bold">{s}{i < dictionary.antonyms.length - 1 ? ',' : ''}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'all' && detectedIntent !== 'lyrics' && lyrics && (
+              <LyricsSection lyrics={lyrics} />
+            )}
+
+            {activeTab === 'all' && detectedIntent !== 'holiday' && holidays && (
+              <HolidaysSection holidays={holidays} onSearch={onSearch} setQuery={setQuery} />
+            )}
+
+            {activeTab === 'all' && detectedIntent !== 'movie' && movie && (
+              <MovieSection movie={movie} />
             )}
 
             {isSafeSearchIntercepted ? (
@@ -3056,7 +3714,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 {[1,2,3].map(i => <div key={i} className="animate-pulse space-y-3 p-6 bg-white rounded-3xl border border-slate-100"><div className="h-4 bg-slate-100 rounded w-1/4" /><div className="h-6 bg-slate-100 rounded w-3/4" /><div className="h-20 bg-slate-100 rounded w-full" /></div>)}
               </div>
             ) : filteredResults.length > 0 ? (
-              <div className="space-y-8 md:space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+              <div className="space-y-12 md:space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
                 {groupedResults.map((item: any, idx: number) => (
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
                       {/* Apps Block for tech companies after first organic result */}
@@ -3064,68 +3722,148 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                         <AppsBlock appsData={appsData} />
                       )}
 
-                      {/* Video Strip / Video Line after first organic result */}
-                      {idx === 0 && (
-                        <VideoStrip youtubeVideos={youtubeVideos} loading={videosLoading} onMore={() => setActiveTab('videos')} query={query} />
+                      {/* Video Strip / Video Line after first organic result block (idx === 1) */}
+                      {idx === 1 && youtubeVideos && youtubeVideos.length > 0 && detectedIntent !== 'dictionary' && detectedIntent !== 'lyrics' && detectedIntent !== 'holiday' && (
+                        <div className="my-6">
+                          <VideoStrip youtubeVideos={youtubeVideos} loading={videosLoading} onMore={() => setActiveTab('videos')} query={query} />
+                        </div>
                       )}
 
-                      {/* Image Strip after 1st result */}
-                      {idx === 1 && (
-                        <ImageStrip query={query} results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
-                      )}
-
-                      {/* First FAQ after 3 results */}
-                      {idx === 3 && faq.length > 0 && (
-                        <FAQBlock faq={faq.slice(0, 3)} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
+                      {/* Image Strip after second organic result block (idx === 2) */}
+                      {idx === 2 && detectedIntent !== 'dictionary' && detectedIntent !== 'lyrics' && detectedIntent !== 'holiday' && (
+                        <div className="my-6">
+                          <ImageStrip query={query} results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
+                        </div>
                       )}
                       
                       {item.type === 'single' ? (
-                        <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
+                        <div className="max-w-[652px] w-full">
+                          <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
+                        </div>
                       ) : (
-                        <div className="space-y-4 py-4 mb-8">
+                        <div className="py-2 max-w-[652px] w-full">
                           <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
-                          <div className="ml-4 sm:ml-12 flex flex-col -mt-4">
-                            <div className="border-t border-slate-100 mt-2 mb-4" />
-                            <div className="space-y-0">
-                              {item.secondaries.map((s: any, sIdx: number) => (
-                                <div key={s.id} className="group/sub">
-                                  <a 
-                                    onClick={() => {
-                                      const positionIndex = results ? results.findIndex((r: any) => r.id === s.id) : -1;
-                                      const position = positionIndex !== -1 ? positionIndex + 1 : null;
-                                      onResultClick?.(s.id, s.url, position);
-                                    }} 
-                                    href={s.url} 
-                                    target="_blank" 
-                                    rel="noreferrer" 
-                                    className="flex items-center justify-between py-4 group-hover/sub:bg-slate-50 transition-all px-4 -mx-4 rounded-xl"
-                                  >
-                                    <div className="flex-1 min-w-0 pr-8">
-                                      <h4 className="text-[17px] font-display font-medium text-[#1a0dab] group-hover/sub:underline line-clamp-1">{s.title}</h4>
-                                      <p className="text-slate-600 text-[14px] line-clamp-2 mt-1 leading-relaxed">
-                                        {s.snippet && s.snippet.length > 191 ? (s.snippet.substring(0, 188) + '...') : s.snippet}
-                                      </p>
-                                    </div>
-                                    <ChevronRight size={18} className="text-slate-400 shrink-0 opacity-0 group-hover/sub:opacity-100 group-hover/sub:translate-x-1 transition-all" />
-                                  </a>
-                                  {sIdx < item.secondaries.length - 1 && (
-                                    <div className="border-t border-slate-100 ml-4 h-px" />
-                                  )}
-                                </div>
-                              ))}
+                          {/* Sitelinks (Nested Child Results) Styled Exactly Like Google */}
+                          <div className="mt-2 w-full max-w-[652px]">
+                            <div className="border-t border-slate-200/60 my-2" />
+                            <div className="divide-y divide-slate-100 border-b border-slate-200/60">
+                              {item.secondaries.map((s: any) => {
+                                const isSClicked = clickedUrls?.includes(s.url);
+                                
+                                // Clean sub-site title like meta.com/signing -> Sign in
+                                let cleanedSubTitle = s.title || 'Link';
+                                if (cleanedSubTitle.toLowerCase().includes('.com') || cleanedSubTitle.toLowerCase().includes('/') || cleanedSubTitle.toLowerCase().includes('http')) {
+                                  cleanedSubTitle = 'Sign in';
+                                } else {
+                                  const splitters = [' - ', ' | ', ' : ', ' — '];
+                                  for (const spl of splitters) {
+                                    if (cleanedSubTitle.includes(spl)) {
+                                      cleanedSubTitle = cleanedSubTitle.split(spl)[0];
+                                    }
+                                  }
+                                }
+                                
+                                if (cleanedSubTitle.toLowerCase().includes('signin') || cleanedSubTitle.toLowerCase().includes('signing') || cleanedSubTitle.toLowerCase() === 'sign-in') {
+                                  cleanedSubTitle = 'Sign in';
+                                } else if (cleanedSubTitle.toLowerCase().includes('login') || cleanedSubTitle.toLowerCase() === 'log-in') {
+                                  cleanedSubTitle = 'Log in';
+                                }
+
+                                return (
+                                  <div key={s.id} className="group/sub hover:bg-slate-50 transition-colors">
+                                    <a 
+                                      onClick={() => {
+                                        const positionIndex = results ? results.findIndex((r: any) => r.id === s.id) : -1;
+                                        const position = positionIndex !== -1 ? positionIndex + 1 : null;
+                                        onResultClick?.(s.id, s.url, position);
+                                      }} 
+                                      href={s.url} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      className="flex items-center justify-between py-3.5 px-2"
+                                    >
+                                      <span className="text-[15px] sm:text-[16px] font-sans font-normal text-slate-800 group-hover/sub:underline">
+                                        {cleanedSubTitle}
+                                      </span>
+                                      
+                                      <div className="shrink-0 flex items-center justify-center">
+                                        {isSClicked ? (
+                                          <div className="w-[32px] h-[32px] rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-500 shadow-3xs">
+                                             <Clock size={14} className="text-slate-450 shrink-0" />
+                                          </div>
+                                        ) : (
+                                          <div className="w-[32px] h-[32px] flex items-center justify-center text-slate-400">
+                                             <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </a>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <div className="border-t border-slate-100 mt-4 mb-2" />
                             <button 
                               onClick={() => { setQuery(`site:${item.primary.displayUrl}`); onSearch(`site:${item.primary.displayUrl}`); }}
-                              className="text-sm font-bold text-slate-500 hover:text-blue-600 flex items-center gap-2 mt-4 px-3 py-1.5 hover:bg-slate-50 w-fit rounded-lg transition-all border border-transparent hover:border-slate-100"
+                              className="text-xs font-semibold text-slate-500 hover:text-blue-600 flex items-center gap-1.5 mt-3.5 px-3 py-1.5 hover:bg-slate-50 rounded-lg transition-all border border-slate-100"
                             >
-                              More results from {item.primary.displayUrl.replace('www.', '')} <ArrowRight size={14} />
+                              More results from {item.primary.displayUrl.replace('www.', '')} <ArrowRight size={12} />
                             </button>
                           </div>
                         </div>
                       )}
+
+                      {/* First FAQ or AI Steps directly after the 1st search result (idx === 0) */}
+                      {idx === 0 && (
+                        <>
+                          {/* Skeletons if loading */}
+                          {isSemanticLoading && (
+                            <div className="my-6 max-w-[652px] w-full">
+                              <div className="border-t border-slate-100/80 my-5" />
+                              <StepByStepGuideSkeleton />
+                              <div className="border-t border-slate-100/80 my-5" />
+                            </div>
+                          )}
+                          
+                          {/* Loaded components */}
+                          {!isSemanticLoading && (howTo || (organicFaqs && organicFaqs.length > 0) || (faq && faq.length > 0)) && (
+                            <div className="my-6 max-w-[652px] w-full">
+                              {howTo ? (
+                                <>
+                                  <div className="border-t border-slate-100/80 my-5" />
+                                  <StepByStepGuide howTo={howTo} onResultClick={onResultClick} />
+                                  <div className="border-t border-slate-100/80 my-5" />
+                                </>
+                              ) : (
+                                ((organicFaqs && organicFaqs.length > 0) || (faq && faq.length > 0)) && (
+                                  <>
+                                    <div className="border-t border-slate-100/80 my-5" />
+                                    {organicFaqs && organicFaqs.length > 0 ? (
+                                      <OrganicFaqBlock faqs={organicFaqs} onResultClick={onResultClick} />
+                                    ) : (
+                                      faq && faq.length > 0 && (
+                                        <FAQBlock faq={faq.slice(0, 3)} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
+                                      )
+                                    )}
+                                    <div className="border-t border-slate-100/80 my-5" />
+                                  </>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {/* Line/divider between results */}
+                      {idx < groupedResults.length - 1 && !(idx === 0 && (howTo || (faq && faq.length > 0) || (organicFaqs && organicFaqs.length > 0) || isSemanticLoading)) && (
+                        <div className="my-6">
+                          {/* Desktop: standard clean border line */}
+                          <div className="hidden md:block border-t border-slate-100/80" />
+                          {/* Mobile: Google style full-bleed separator block */}
+                          <div className="md:hidden h-[8px] bg-slate-100/70 -mx-4" />
+                        </div>
+                      )}
                     </React.Fragment>
-                  ))}
+                ))}
               </div>
             ) : <div className="py-20 text-center text-slate-400 font-medium italic">No results found for your query.</div>}
 
@@ -3290,9 +4028,9 @@ function ImageStrip({ results, onMore, onResultClick, onImageClick, query = '' }
         <h2 className="text-lg md:text-xl font-display font-medium text-slate-900 truncate pr-4">Images for <span className="font-bold text-slate-800 italic">"{keywords}"</span></h2>
         <button 
           onClick={onMore} 
-          className="shrink-0 text-white bg-[#1a73e8] hover:bg-blue-700 px-4 py-1.5 rounded-full text-[12px] font-bold flex items-center gap-1 shadow-md shadow-blue-100 cursor-pointer"
+          className="shrink-0 bg-[#f1f3f4] hover:bg-[#e8eaed] text-slate-800 px-4 py-1.5 rounded-full text-[12px] font-sans font-semibold flex items-center gap-1 transition-colors cursor-pointer border-none shadow-none"
         >
-          View all <ChevronRight size={12} />
+          View all <ChevronRight size={12} className="text-slate-650 shrink-0" />
         </button>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full">
@@ -3518,9 +4256,60 @@ function UserProfile({ user, onLogin, onLogout, isSignoutOpen, setIsSignoutOpen,
   );
 }
 
+function FAQFeedbackRow({ question, answer }: { question: string; answer: string }) {
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+
+  const handleFeedback = (type: 'up' | 'down') => {
+    setFeedback(type);
+    
+    // Log to standard endpoint
+    axios.post('/api/feedback', {
+      id: 'faq_' + encodeURIComponent(question.substring(0, 30)),
+      type: type === 'up' ? 'success' : 'pogo',
+      queryText: question,
+      url: 'faq_item_feedback'
+    }).catch(() => {});
+
+    // Save directly to Firestore clickstream
+    try {
+      addDoc(collection(db, "clickstream"), {
+        query: question,
+        type: type === 'up' ? 'thumbs_up' : 'thumbs_down',
+        url: 'faq_item_feedback',
+        timestamp: serverTimestamp(),
+        sessionId: getSessionId(),
+        uid: 'guest'
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5 shrink-0 self-end">
+      <span className="text-xs font-semibold text-slate-400">Helpful?</span>
+      <button 
+        onClick={() => handleFeedback('up')}
+        className={`p-1.5 rounded-lg transition-all active:scale-90 ${feedback === 'up' ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-slate-600'}`}
+        title="Helpful"
+      >
+        <ThumbsUp size={13} className={feedback === 'up' ? 'fill-emerald-600' : ''} />
+      </button>
+      <button 
+        onClick={() => handleFeedback('down')}
+        className={`p-1.5 rounded-lg transition-all active:scale-90 ${feedback === 'down' ? 'text-red-600 bg-red-50' : 'text-slate-400 hover:text-slate-600'}`}
+        title="Not helpful"
+      >
+        <ThumbsDown size={13} className={feedback === 'down' ? 'fill-red-600' : ''} />
+      </button>
+      {feedback && <span className="text-[10px] text-emerald-600 font-bold animate-pulse">Thanks!</span>}
+    </div>
+  );
+}
+
 function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
   return (
-    <div className="py-6 border-y border-slate-100 animate-in fade-in duration-500">
+    <div className="py-4 animate-in fade-in duration-500 w-full md:max-w-[850px] lg:max-w-[900px] xl:max-w-[980px] max-w-full">
       <h4 className="font-display font-bold text-slate-800 text-xl mb-4">People also ask</h4>
       <div className="divide-y divide-slate-100">
         {faq.map((item: any, i: number) => (
@@ -3529,13 +4318,15 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
               onClick={() => openFaqIndex === item.question ? setOpenFaqIndex(null) : setOpenFaqIndex(item.question)}
               className="w-full flex items-center justify-between text-left group"
             >
-              <span className="text-base md:text-lg font-normal text-slate-800 transition-colors">
+              <span className="text-base md:text-lg font-normal text-slate-800 transition-colors whitespace-normal block max-w-full leading-snug" title={item.question}>
                 {item.question}
               </span>
-              <ChevronRight 
-                size={18} 
-                className={`text-slate-400 transition-transform duration-300 ${openFaqIndex === item.question ? 'rotate-90' : ''}`} 
-              />
+              <div className="shrink-0 pl-2">
+                <ChevronRight 
+                  size={18} 
+                  className={`text-slate-400 transition-transform duration-300 ${openFaqIndex === item.question ? 'rotate-90' : ''}`} 
+                />
+              </div>
             </button>
             <AnimatePresence>
               {openFaqIndex === item.question && (
@@ -3546,13 +4337,463 @@ function FAQBlock({ faq, openFaqIndex, setOpenFaqIndex }: any) {
                   className="overflow-hidden"
                 >
                   <div className="pt-3 pb-2 text-[15px] text-slate-600 leading-relaxed mt-2 p-2">
-                    {item.answer}
+                    <p className="mb-3 leading-relaxed">{item.answer}</p>
+                    <div className="flex justify-end pt-2 border-t border-slate-50">
+                      <FAQFeedbackRow question={item.question} answer={item.answer} />
+                    </div>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function FeaturedVideoBlock({ video, onResultClick }: { video: any; onResultClick?: any }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  
+  if (!video) return null;
+
+  const handleFeedback = (type: 'up' | 'down') => {
+    setFeedback(type);
+    
+    // Log to standard endpoint
+    axios.post('/api/feedback', {
+      id: 'youtube_' + video.id,
+      type: type === 'up' ? 'success' : 'pogo',
+      queryText: video.title,
+      url: 'youtube_featured_feedback'
+    }).catch(() => {});
+
+    // Save directly to Firestore clickstream
+    try {
+      addDoc(collection(db, "clickstream"), {
+        query: video.title,
+        type: type === 'up' ? 'thumbs_up' : 'thumbs_down',
+        url: 'youtube_featured_feedback',
+        timestamp: serverTimestamp(),
+        sessionId: getSessionId(),
+        uid: 'guest'
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl sm:rounded-[32px] p-3.5 sm:p-6 md:p-8 shadow-sm overflow-hidden mb-6 group/video max-w-full">
+      <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-slate-955 shadow-sm">
+        {!isPlaying ? (
+          <div className="absolute inset-0 w-full h-full cursor-pointer group" onClick={() => setIsPlaying(true)}>
+            <img 
+              src={video.thumbnail || `https://img.youtube.com/vi/${video.id}/mqdefault.jpg`} 
+              className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500" 
+              alt={video.title} 
+            />
+            <div className="absolute inset-0 bg-black/25 group-hover:bg-black/15 transition-colors flex items-center justify-center">
+              <div className="w-16 h-16 bg-red-650 rounded-full flex items-center justify-center text-white shadow-xl group-hover:scale-110 active:scale-95 transition-all duration-300">
+                <Play size={28} fill="currentColor" className="ml-1" />
+              </div>
+            </div>
+            {video.duration && (
+              <span className="absolute bottom-3.5 right-3.5 bg-black/80 px-2 py-0.5 text-xs text-white font-mono font-bold rounded-md">
+                {video.duration}
+              </span>
+            )}
+          </div>
+        ) : (
+          <iframe 
+            src={`https://www.youtube.com/embed/${video.id}?autoplay=1`} 
+            title={video.title}
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+            allowFullScreen
+            className="w-full h-full"
+          />
+        )}
+      </div>
+
+      <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h3 className="font-display font-bold text-slate-800 text-lg leading-snug hover:text-blue-600 transition-colors">
+            <a href={`https://www.youtube.com/watch?v=${video.id}`} target="_blank" rel="noreferrer" onClick={() => onResultClick?.(video.id, 'youtube_featured')}>
+              {video.title}
+            </a>
+          </h3>
+          <div className="flex flex-wrap items-center text-xs text-slate-500 mt-2.5 gap-x-3 gap-y-1 font-semibold">
+            <span className="font-bold text-slate-700">{video.channelTitle}</span>
+            <span className="text-slate-300">•</span>
+            <span>{video.views || 'YouTube Video'}</span>
+            <span className="text-slate-300">•</span>
+            <span>{video.publishedTime || video.publishedAt || 'Recently'}</span>
+          </div>
+        </div>
+
+        {/* Feedback buttons */}
+        <div className="flex items-center gap-2 border-l border-slate-100 pl-4 shrink-0">
+          <span className="text-xs font-semibold text-slate-400">Helpful?</span>
+          <button 
+            onClick={() => handleFeedback('up')}
+            className={`p-1.5 rounded-lg transition-all active:scale-90 ${feedback === 'up' ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-slate-600'}`}
+            title="Helpful recommendation"
+          >
+            <ThumbsUp size={14} className={feedback === 'up' ? 'fill-emerald-600' : ''} />
+          </button>
+          <button 
+            onClick={() => handleFeedback('down')}
+            className={`p-1.5 rounded-lg transition-all active:scale-90 ${feedback === 'down' ? 'text-red-600 bg-red-50' : 'text-slate-400 hover:text-slate-600'}`}
+            title="Not helpful recommendation"
+          >
+            <ThumbsDown size={14} className={feedback === 'down' ? 'fill-red-600' : ''} />
+          </button>
+          {feedback && <span className="text-[10px] text-emerald-600 font-bold animate-pulse">Thanks!</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepByStepGuideSkeleton() {
+  return (
+    <div className="bg-white rounded-xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 shadow-sm transition-all mb-6 max-w-full animate-pulse border border-slate-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-slate-100 pb-5">
+        <div className="space-y-2">
+          <div className="h-3 w-32 bg-slate-200 rounded"></div>
+          <div className="h-5 w-64 bg-slate-300 rounded"></div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-16 bg-slate-100 rounded-full"></div>
+          <div className="h-6 w-16 bg-slate-100 rounded-full"></div>
+        </div>
+      </div>
+      <div className="mb-6 space-y-2">
+        <div className="flex justify-between">
+          <div className="h-3 w-20 bg-slate-200 rounded"></div>
+          <div className="h-3 w-12 bg-slate-200 rounded"></div>
+        </div>
+        <div className="h-2 bg-slate-100 rounded-full w-full"></div>
+      </div>
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex gap-4 p-4 rounded-xl border border-slate-50 last:mb-0 bg-slate-50/50">
+            <div className="w-6 h-6 rounded-full bg-slate-200 shrink-0"></div>
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-1/2 bg-slate-200 rounded"></div>
+              <div className="h-3 w-5/6 bg-slate-100 rounded"></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OrganicFaqBlockSkeleton() {
+  return (
+    <div className="bg-white rounded-xl sm:rounded-[32px] p-4 sm:p-6 md:p-8 shadow-sm w-full mb-6 max-w-full animate-pulse border border-slate-100">
+      <div className="flex items-center gap-2 mb-6">
+        <div className="w-7 h-7 bg-slate-200 rounded-xl"></div>
+        <div className="h-4 w-48 bg-slate-300 rounded"></div>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="py-4 first:pt-0 last:pb-0">
+            <div className="flex items-center justify-between">
+              <div className="h-5 w-2/3 bg-slate-200 rounded"></div>
+              <div className="w-5 h-5 bg-slate-200 rounded-full"></div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepByStepGuide({ howTo, onResultClick }: { howTo: any; onResultClick?: any }) {
+  const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({});
+  const [expandedStep, setExpandedStep] = useState<number | null>(0);
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+
+  if (!howTo || !howTo.steps || howTo.steps.length === 0) return null;
+
+  const totalSteps = howTo.steps.length;
+  const completedSteps = Object.values(checkedSteps).filter(Boolean).length;
+  const progressPercent = Math.round((completedSteps / totalSteps) * 100);
+
+  const handleCopyAll = () => {
+    const text = `${howTo.title}\n\n` + howTo.steps.map((s: any, idx: number) => {
+      return `${idx + 1}. ${s.step}\n${s.details || ''}\n${s.sourceUrl ? `Source: ${s.sourceUrl}` : ''}`;
+    }).join('\n\n');
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleFeedback = (type: 'up' | 'down') => {
+    setFeedback(type);
+    
+    // Log to standard endpoint
+    axios.post('/api/feedback', {
+      id: 'step_guide_' + encodeURIComponent(howTo.title.substring(0, 30)),
+      type: type === 'up' ? 'success' : 'pogo',
+      queryText: howTo.title,
+      url: 'how_to_guide_feedback'
+    }).catch(() => {});
+
+    // Save directly to Firestore clickstream
+    try {
+      addDoc(collection(db, "clickstream"), {
+        query: howTo.title,
+        type: type === 'up' ? 'thumbs_up' : 'thumbs_down',
+        url: 'how_to_guide_feedback',
+        timestamp: serverTimestamp(),
+        sessionId: getSessionId(),
+        uid: 'guest'
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="w-full py-4 max-w-full">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div className="flex items-center">
+          <span className="text-[12px] font-bold uppercase tracking-widest text-[#5f6368]">Interactive Guided Steps</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {howTo.estimatedTime && (
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500 font-bold bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
+              <Clock size={12} /> {howTo.estimatedTime}
+            </span>
+          )}
+          {howTo.difficulty && (
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500 font-bold bg-slate-50 px-2.5 py-1 rounded-full border border-slate-100">
+              <Zap size={12} /> {howTo.difficulty}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <h3 className="text-xl md:text-2xl font-display font-black text-slate-800 leading-snug tracking-tight mb-4 animate-in fade-in duration-300">
+        {howTo.title}
+      </h3>
+
+      {/* Progress bar */}
+      <div className="flex items-center gap-4 mb-6 select-none">
+        <div className="flex-1 relative h-1.5 bg-slate-200 rounded-full overflow-visible">
+          {/* Active bar */}
+          <div 
+            className="absolute left-0 top-0 h-full bg-[#1a73e8] rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${progressPercent}%` }}
+          />
+          {/* Slider Knob */}
+          <div 
+            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-[#1a73e8] border border-white shadow-md transition-all duration-300 ease-out"
+            style={{ 
+              left: `${progressPercent}%`, 
+              marginLeft: '-8px'
+            }}
+          />
+        </div>
+        <span className="text-xs font-bold text-[#1a73e8] font-sans pr-2 shrink-0">{progressPercent}% complete</span>
+      </div>
+
+      <div className="space-y-3.5">
+        {howTo.steps.map((s: any, idx: number) => {
+          const isCompleted = !!checkedSteps[idx];
+          const isExpanded = expandedStep === idx;
+
+          return (
+            <div 
+              key={idx}
+              className={`group rounded-2xl transition-all duration-300 overflow-hidden ${
+                isCompleted 
+                  ? 'bg-emerald-50/20' 
+                  : isExpanded 
+                    ? 'bg-blue-50/20' 
+                    : 'bg-slate-50/40 hover:bg-slate-50/80'
+              }`}
+            >
+              <div 
+                className="flex items-center justify-between p-4 cursor-pointer" 
+                onClick={() => setExpandedStep(isExpanded ? null : idx)}
+              >
+                <div className="flex items-center gap-3.5 overflow-hidden">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCheckedSteps(prev => ({ ...prev, [idx]: !prev[idx] }));
+                    }}
+                    className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 active:scale-90 ${
+                      isCompleted 
+                        ? 'border-emerald-500 bg-emerald-500 text-white shadow-sm' 
+                        : 'border-slate-300 hover:border-slate-450 bg-white'
+                    }`}
+                  >
+                    {isCompleted && <Check size={14} className="stroke-[3]" />}
+                  </button>
+
+                  <span className={`text-[15px] font-bold tracking-tight text-slate-800 transition-all whitespace-normal block leading-snug ${
+                    isCompleted ? 'line-through text-slate-400 font-normal font-sans' : ''
+                  }`}>
+                    {s.step}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-slate-400 group-hover:text-slate-600 pl-2">
+                  <ChevronRight size={16} className={`transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''}`} />
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="overflow-hidden">
+                  <div className="px-11 pb-4 pr-4 transition-all duration-300 animate-in fade-in slide-in-from-top-1">
+                    <p className="text-[14px] text-slate-600 leading-relaxed font-semibold mb-3">
+                      {s.details}
+                    </p>
+                    {s.sourceUrl && (
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="text-slate-400 font-semibold">Source:</span>
+                        <a 
+                          href={s.sourceUrl} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          onClick={() => onResultClick?.(s.sourceUrl, 'how_to_source')}
+                          className="text-blue-500 hover:underline inline-flex items-center gap-0.5 font-bold truncate max-w-[280px]"
+                        >
+                          {s.sourceUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]} <ExternalLink size={10} />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 pt-5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleCopyAll}
+            className="text-xs font-bold text-slate-500 hover:text-blue-600 flex items-center gap-1.5 transition-colors cursor-pointer bg-slate-50 hover:bg-slate-100 px-3.5 py-2 rounded-xl border border-transparent hover:border-slate-200"
+          >
+            {copied ? (
+              <>
+                <Check size={14} className="text-emerald-600" /> Copied steps!
+              </>
+            ) : (
+              <>
+                <Copy size={13} /> Copy all steps
+              </>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setCheckedSteps({})}
+            className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer bg-transparent hover:bg-slate-50 px-3.5 py-2 rounded-xl"
+          >
+            Reset checklist
+          </button>
+        </div>
+
+        {/* Feedback Section */}
+        <div className="flex items-center gap-2 border-l border-slate-100 pl-4 shrink-0">
+          <span className="text-xs font-semibold text-slate-400">Helpful?</span>
+          <button 
+            onClick={() => handleFeedback('up')}
+            className={`p-1.5 rounded-lg transition-all active:scale-90 ${feedback === 'up' ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-slate-600'}`}
+            title="Helpful steps"
+          >
+            <ThumbsUp size={14} className={feedback === 'up' ? 'fill-emerald-600' : ''} />
+          </button>
+          <button 
+            onClick={() => handleFeedback('down')}
+            className={`p-1.5 rounded-lg transition-all active:scale-90 ${feedback === 'down' ? 'text-red-600 bg-red-50' : 'text-slate-400 hover:text-slate-600'}`}
+            title="Not helpful steps"
+          >
+            <ThumbsDown size={14} className={feedback === 'down' ? 'fill-red-600' : ''} />
+          </button>
+          {feedback && <span className="text-[10px] text-emerald-600 font-bold animate-pulse">Thanks!</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrganicFaqBlock({ faqs, onResultClick }: { faqs: any[]; onResultClick?: any }) {
+  const [openIndex, setOpenIndex] = useState<number | null>(0);
+
+  if (!faqs || faqs.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl sm:rounded-[32px] p-3.5 sm:p-6 md:p-8 shadow-sm w-full mb-6 max-w-full">
+      <div className="flex items-center gap-2 mb-4 animate-in fade-in duration-300">
+        <div className="p-1.5 bg-purple-50 text-purple-600 rounded-xl">
+          <HelpCircle size={18} className="stroke-[2.5]" />
+        </div>
+        <span className="text-xs font-black uppercase tracking-widest text-[#5f6368]">People Also Ask (Semantic)</span>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {faqs.map((faq, idx) => {
+          const isOpen = openIndex === idx;
+          return (
+            <div key={idx} className="py-4 first:pt-0 last:pb-0 font-medium">
+              <button 
+                onClick={() => setOpenIndex(isOpen ? null : idx)}
+                className="w-full flex items-center justify-between text-left font-display font-medium text-slate-800 text-base md:text-[17px] hover:text-blue-600 transition-colors py-1 cursor-pointer"
+              >
+                <span className="pr-4">{faq.question}</span>
+                <ChevronRight size={18} className={`text-slate-400 shrink-0 transition-transform duration-300 ${isOpen ? 'rotate-90' : ''}`} />
+              </button>
+
+              <AnimatePresence initial={false}>
+                {isOpen && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="pt-3 pb-1">
+                      <p className="text-[15px] text-slate-600 leading-relaxed font-normal mb-3">
+                        {faq.answer}
+                      </p>
+                      
+                      <div className="flex flex-wrap items-center justify-between gap-4 mt-3 pt-2.5 border-t border-slate-55">
+                        {faq.sourceUrl ? (
+                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
+                            <span>Answer from:</span>
+                            <a 
+                              href={faq.sourceUrl} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              onClick={() => onResultClick?.(faq.sourceUrl, 'faq_source')}
+                              className="text-blue-500 hover:underline font-bold inline-flex items-center gap-0.5 truncate max-w-[280px]"
+                            >
+                              {faq.sourceUrl.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]} <ExternalLink size={10} />
+                            </a>
+                          </div>
+                        ) : <div />}
+
+                        {/* Thumbs up/down per FAQ */}
+                        <FAQFeedbackRow question={faq.question} answer={faq.answer} />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -3625,11 +4866,11 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
   const activeImage = domainImages.length > 0 ? (domainImages[currentImgIndex].url || domainImages[currentImgIndex].image) : res.image;
 
   return (
-    <article className="group py-5 transition-all border-b border-slate-100 last:border-0 pl-0 overflow-hidden">
+    <article className="group py-3.5 transition-all pl-0 overflow-hidden">
       {isPreviouslyClicked && (
-        <div className="flex items-center gap-2 text-xs font-bold text-blue-600 mb-3 px-1">
-          <Sparkles size={12} strokeWidth={3} />
-          <span>You visited this previously</span>
+        <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-2 px-1">
+          <Clock size={12} />
+          <span>Visited recently</span>
         </div>
       )}
       <div className="flex flex-col sm:flex-row gap-6 items-start">
@@ -3659,9 +4900,9 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           {res.layout_intent && (
             <div className="flex items-center gap-1.5 mb-2 mt-1 select-none">
               {res.layout_intent === 'VIDEO_PLAYER' && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-red-600 bg-red-50/80 border border-red-100 shadow-xs">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-slate-700 bg-slate-100 border border-slate-200">
                   <Play size={10} fill="currentColor" />
-                  Video Tutorial
+                  Video
                 </span>
               )}
               {res.layout_intent === 'LOCAL_MAP' && (
@@ -3693,14 +4934,14 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
 
           <div className="relative group/title inline-block">
             <a onClick={() => onResultClick?.(res.id, res.url, position)} href={res.url} target="_blank" rel="noreferrer" className="block mb-2">
-              <h3 className="text-xl md:text-2xl font-display font-medium text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
+              <h3 className="text-[19px] md:text-[20px] font-sans font-normal text-[#1a0dab] group-hover:underline leading-tight line-clamp-2">
                 {res.title}
               </h3>
             </a>
           </div>
 
-          <p className="text-slate-600 text-[15px] leading-relaxed line-clamp-3 mb-4">
-            {res.snippet && res.snippet.length > 191 ? (res.snippet.substring(0, 188) + '...') : res.snippet}
+          <p className="text-[#4d5156] text-[14.5px] lg:text-[15px] leading-relaxed line-clamp-3 md:line-clamp-4 mb-4">
+            {res.snippet && res.snippet.length > 320 ? (res.snippet.substring(0, 315) + '...') : res.snippet}
           </p>
 
           <div className="flex items-center gap-4 flex-wrap">
@@ -3708,10 +4949,10 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             {youtubeId && (
               <button 
                 onClick={() => setIsPlayingVideo(!isPlayingVideo)}
-                className="flex items-center gap-1.5 text-[11px] font-mono font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-100 px-3 py-1.5 rounded-full transition-all active:scale-95 cursor-pointer shadow-3xs"
+                className="flex items-center gap-1.5 text-[11px] font-bold text-slate-800 bg-[#f1f3f4] hover:bg-[#e8eaed] border border-transparent px-3 py-1.5 rounded-full transition-all active:scale-95 cursor-pointer"
               >
                 <Play size={11} fill="currentColor" />
-                {isPlayingVideo ? 'Close Player' : 'Play YouTube Inline'}
+                {isPlayingVideo ? 'Close Player' : 'Play Video Inline'}
               </button>
             )}
 
@@ -3750,14 +4991,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             </div>
           )}
 
-          {/* Page Intelligence: FAQs, How-To guides, and Database Content Chunks */}
-          <PageIntelligencePanel 
-            url={res.url} 
-            title={res.title} 
-            snippet={res.snippet} 
-            apiKey={API_KEY} 
-            allResults={allResults}
-          />
+          {/* Removed nested PageIntelligencePanel per user request to display single FAQ under 1st result card */}
 
           {/* Inline Playable YouTube Player */}
           {isPlayingVideo && youtubeId && (
@@ -3805,7 +5039,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             {/* Play Button Overlay for Video Intent */}
             {res.layout_intent === 'VIDEO_PLAYER' && (
               <div className="absolute inset-0 bg-black/10 flex items-center justify-center transition-colors group-hover/carousel:bg-black/20">
-                <div className="p-3 bg-white/90 backdrop-blur-md rounded-full shadow-lg text-red-600 transform scale-100 group-hover/carousel:scale-110 transition-transform">
+                <div className="p-3 bg-white/90 backdrop-blur-md rounded-full shadow-lg text-slate-800 transform scale-100 group-hover/carousel:scale-110 transition-transform">
                   <Play size={16} fill="currentColor" />
                 </div>
               </div>

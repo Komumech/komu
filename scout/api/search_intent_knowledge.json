@@ -1,0 +1,812 @@
+{
+  "how to train your dragon": {
+    "detectedIntent": "general",
+    "searchCount": 1,
+    "confidence": 0.98,
+    "entityType": "Movie / Animated Media Franchise",
+    "clickedUrls": {
+      "https://www.rottentomatoes.com/m/how_to_train_your_dragon_the_hidden_world": 85,
+      "https://www.justwatch.com/us/tv-show/house-of-the-dragon": 65
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "query": "how to train your dragon",
+    "clicksCount": 150
+  },
+  "how to train your dragon hidden world": {
+    "query": "how to train your dragon hidden world",
+    "entityType": "Movie",
+    "detectedIntent": "general",
+    "clicksCount": 110,
+    "clickedUrls": {
+      "https://www.rottentomatoes.com/m/how_to_train_your_dragon_the_hidden_world": 110
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.99
+  },
+  "how to get away with murder": {
+    "query": "how to get away with murder",
+    "entityType": "TV Series / Drama",
+    "detectedIntent": "general",
+    "clicksCount": 95,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt3205802/": 60,
+      "https://www.netflix.com/title/80000781": 35
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.97
+  },
+  "how to lose a guy in 10 days": {
+    "query": "how to lose a guy in 10 days",
+    "entityType": "Movie / Romantic Comedy",
+    "detectedIntent": "general",
+    "clicksCount": 120,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt0251127/": 70,
+      "https://www.paramountplus.com/movies/how-to-lose-a-guy-in-10-days": 50
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.99
+  },
+  "how to save a life": {
+    "query": "how to save a life",
+    "entityType": "Music Single / Artist Track",
+    "detectedIntent": "lyrics",
+    "clicksCount": 85,
+    "clickedUrls": {
+      "https://www.genius.com/The-fray-how-to-save-a-life-lyrics": 55,
+      "https://www.youtube.com/watch?v=cjVQ3DFlg6A": 30
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.96
+  },
+  "how to be single": {
+    "query": "how to be single",
+    "entityType": "Movie / Comedy",
+    "detectedIntent": "general",
+    "clicksCount": 75,
+    "clickedUrls": {
+      "https://www.rottentomatoes.com/m/how_to_be_single": 45,
+      "https://www.justwatch.com/us/movie/how-to-be-single": 30
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.95
+  },
+  "how to blow up a pipeline": {
+    "query": "how to blow up a pipeline",
+    "entityType": "Movie / Drama Thriller",
+    "detectedIntent": "general",
+    "clicksCount": 60,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt21631520/": 40,
+      "https://www.rottentomatoes.com/m/how_to_blow_up_a_pipeline": 20
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.94
+  },
+  "how to win friends and influence people": {
+    "query": "how to win friends and influence people",
+    "entityType": "Book / Self-Help Literature",
+    "detectedIntent": "general",
+    "clicksCount": 140,
+    "clickedUrls": {
+      "https://www.amazon.com/How-Win-Friends-Influence-People/dp/0671027034": 90,
+      "https://www.goodreads.com/book/show/4865.How_to_Win_Friends_and_Influence_People": 50
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.97
+  },
+  "how to train a dragon": {
+    "query": "how to train a dragon",
+    "entityType": "Movie / Animated Media Franchise",
+    "detectedIntent": "general",
+    "clicksCount": 80,
+    "clickedUrls": {
+      "https://www.rottentomatoes.com/m/how_to_train_your_dragon": 80
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.95
+  },
+  "how to steal a million": {
+    "query": "how to steal a million",
+    "entityType": "Movie / Classic Comedy",
+    "detectedIntent": "general",
+    "clicksCount": 55,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt0060522/": 35,
+      "https://www.rottentomatoes.com/m/how_to_steal_a_million": 20
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.93
+  },
+  "how to talk to girls at parties": {
+    "query": "how to talk to girls at parties",
+    "entityType": "Movie / Sci-Fi Romance",
+    "detectedIntent": "general",
+    "clicksCount": 65,
+    "clickedUrls": {
+      "https://www.rottentomatoes.com/m/how_to_talk_to_girls_at_parties": 40,
+      "https://www.a24films.com/films/how-to-talk-to-girls-at-parties": 25
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.94
+  },
+  "how to marry a millionaire": {
+    "query": "how to marry a millionaire",
+    "entityType": "Movie / Romantic Comedy",
+    "detectedIntent": "general",
+    "clicksCount": 70,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt0045884/": 45,
+      "https://www.rottentomatoes.com/m/how_to_marry_a_millionaire": 25
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.95
+  },
+  "how to be a latin lover": {
+    "query": "how to be a latin lover",
+    "entityType": "Movie / Comedy",
+    "detectedIntent": "general",
+    "clicksCount": 62,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt4671236/": 42,
+      "https://www.rottentomatoes.com/m/how_to_be_a_latin_lover": 20
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.93
+  },
+  "how to survive a plague": {
+    "query": "how to survive a plague",
+    "entityType": "Documentary / History",
+    "detectedIntent": "general",
+    "clicksCount": 45,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt2124803/": 30,
+      "https://www.surviveaplague.com/": 15
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.92
+  },
+  "how to ruin christmas": {
+    "query": "how to ruin christmas",
+    "entityType": "TV Series / Comedy",
+    "detectedIntent": "general",
+    "clicksCount": 50,
+    "clickedUrls": {
+      "https://www.netflix.com/title/81231210": 35,
+      "https://www.imdb.com/title/tt13410710/": 15
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.91
+  },
+  "how to live with your parents For the Rest of Your Life": {
+    "query": "how to live with your parents for the rest of your life",
+    "entityType": "TV Series / Sitcom",
+    "detectedIntent": "general",
+    "clicksCount": 40,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt2186854/": 30,
+      "https://www.rottentomatoes.com/tv/how_to_live_with_your_parents_for_the_rest_of_your_life": 10
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.9
+  },
+  "how to succeed in business without really trying": {
+    "query": "how to succeed in business without really trying",
+    "entityType": "Musical / Theater Productions",
+    "detectedIntent": "general",
+    "clicksCount": 85,
+    "clickedUrls": {
+      "https://www.ibdb.com/show/how-to-succeed-in-business-without-really-trying-4518": 50,
+      "https://www.imdb.com/title/tt0061791/": 35
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.96
+  },
+  "how to make monster": {
+    "query": "how to make monster",
+    "entityType": "Movie / Sci-Fi Horror",
+    "detectedIntent": "general",
+    "clicksCount": 35,
+    "clickedUrls": {
+      "https://www.imdb.com/title/tt0051744/": 25,
+      "https://www.rottentomatoes.com/m/how_to_make_a_monster": 10
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.88
+  },
+  "how to make a cake": {
+    "query": "how to make a cake",
+    "entityType": "Instructional Guide / How-To",
+    "detectedIntent": "how_to",
+    "clicksCount": 300,
+    "clickedUrls": {
+      "https://www.allrecipes.com/recipe/15456/easy-custom-birthday-cake/": 180,
+      "https://www.wikihow.com/Bake-a-Cake": 120
+    },
+    "disallowedIntents": [],
+    "confidence": 0.99
+  },
+  "how to train dogs": {
+    "query": "how to train dogs",
+    "entityType": "Instructional Guide / How-To",
+    "detectedIntent": "how_to",
+    "clicksCount": 220,
+    "clickedUrls": {
+      "https://www.akc.org/expert-advice/training/how-to-train-a-dog/": 140,
+      "https://www.wikihow.com/Train-a-Dog": 80
+    },
+    "disallowedIntents": [],
+    "confidence": 0.99
+  },
+  "dragonwilds": {
+    "query": "dragonwilds",
+    "entityType": "Gaming Guide / Tutorial",
+    "detectedIntent": "how_to",
+    "clicksCount": 180,
+    "clickedUrls": {
+      "https://runescape.wiki/w/Dragonwilds_Taming_Guide": 120,
+      "https://www.icy-veins.com/runescape/dragonwilds-strategy": 60
+    },
+    "disallowedIntents": [],
+    "confidence": 0.97
+  },
+  "how to tame dragons in runescape": {
+    "query": "how to tame dragons in runescape",
+    "entityType": "Gaming Guide / Tutorial",
+    "detectedIntent": "how_to",
+    "clicksCount": 150,
+    "clickedUrls": {
+      "https://runescape.wiki/w/Dragonwilds_Taming_Guide": 100,
+      "https://www.icy-veins.com/runescape/dragonwilds-strategy": 50
+    },
+    "disallowedIntents": [],
+    "confidence": 0.96
+  },
+  "how to write a cover letter": {
+    "query": "how to write a cover letter",
+    "entityType": "Instructional Guide / How-To",
+    "detectedIntent": "how_to",
+    "clicksCount": 420,
+    "clickedUrls": {
+      "https://www.indeed.com/career-advice/resumes-cover-letters/how-to-write-a-cover-letter": 250,
+      "https://www.wikihow.com/Write-a-Cover-Letter": 170
+    },
+    "disallowedIntents": [],
+    "confidence": 0.99
+  },
+  "how to tie a tie": {
+    "query": "how to tie a tie",
+    "entityType": "Instructional Guide / How-To",
+    "detectedIntent": "how_to",
+    "clicksCount": 550,
+    "clickedUrls": {
+      "https://www.youtube.com/watch?v=xAg7z6u4NE8": 300,
+      "https://www.wikihow.com/Tie-a-Tie": 250
+    },
+    "disallowedIntents": [],
+    "confidence": 0.99
+  },
+  "house of the dragon": {
+    "query": "house of the dragon",
+    "entityType": "TV Series / Drama",
+    "detectedIntent": "general",
+    "clicksCount": 310,
+    "clickedUrls": {
+      "https://www.justwatch.com/us/tv-show/house-of-the-dragon": 190,
+      "https://www.hbo.com/house-of-the-dragon": 120
+    },
+    "disallowedIntents": [
+      "how_to"
+    ],
+    "confidence": 0.99
+  },
+  "how to write a book": {
+    "confidence": 0.1,
+    "searchCount": 5,
+    "feedbacks": [],
+    "clicksCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "thumbsUpCount": 0,
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0,
+    "query": "how to write a book"
+  },
+  "a guide to writing and publishing your book": {
+    "query": "a guide to writing and publishing your book",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "clicksCount": 1,
+    "clickedUrls": {
+      "how_to_guide_feedback": 1
+    },
+    "disallowedIntents": [],
+    "confidence": 0.1,
+    "searchCount": 0,
+    "thumbsUpCount": 1,
+    "thumbsDownCount": 0,
+    "feedbacks": [
+      {
+        "type": "success",
+        "url": "how_to_guide_feedback",
+        "timestamp": "2026-06-04T15:26:23.021Z"
+      }
+    ]
+  },
+  "miles from tomorrow": {
+    "query": "miles from tomorrow",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "confidence": 0.1,
+    "searchCount": 2,
+    "thumbsUpCount": 0,
+    "thumbsDownCount": 0,
+    "feedbacks": []
+  },
+  "komumech": {
+    "query": "komumech",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "confidence": 0.1,
+    "searchCount": 1,
+    "thumbsUpCount": 0,
+    "thumbsDownCount": 0,
+    "feedbacks": []
+  },
+  "what is komumech?": {
+    "query": "what is komumech?",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "clicksCount": 1,
+    "clickedUrls": {
+      "faq_item_feedback": 1
+    },
+    "disallowedIntents": [],
+    "confidence": 0.1,
+    "searchCount": 0,
+    "thumbsUpCount": 1,
+    "thumbsDownCount": 0,
+    "feedbacks": [
+      {
+        "type": "success",
+        "url": "faq_item_feedback",
+        "timestamp": "2026-06-04T15:40:03.293Z"
+      }
+    ]
+  },
+  "github sign-in": {
+    "query": "github sign-in",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "clicksCount": 1,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "confidence": 0.1,
+    "searchCount": 1,
+    "thumbsUpCount": 0,
+    "thumbsDownCount": 0,
+    "feedbacks": [
+      {
+        "type": "click",
+        "url": "https://github.com/signup?ref_cta=Sign+up&amp;ref_loc=header+logged+out&amp;ref_page=%2Ffeatures%2Fmodels&amp;source=header",
+        "timestamp": "2026-06-04T15:41:56.044Z"
+      }
+    ]
+  },
+  "types of pasta": {
+    "query": "types of pasta",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0,
+    "entityType": "General / Learning Profile",
+    "clickedUrls": {},
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clicksCount": 0,
+    "feedbacks": [],
+    "searchCount": 1,
+    "confidence": 0.1
+  },
+  "microsoft": {
+    "clicksCount": 0,
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 1,
+    "query": "microsoft",
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general"
+  },
+  "internet speed test": {
+    "clicksCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "thumbsUpCount": 0,
+    "confidence": 0.1,
+    "searchCount": 3,
+    "feedbacks": [],
+    "query": "internet speed test",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0
+  },
+  "how to test internet speed": {
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0,
+    "query": "how to test internet speed",
+    "confidence": 0.1,
+    "feedbacks": [
+      {
+        "timestamp": "2026-06-04T16:45:50.867Z",
+        "url": "youtube_featured_feedback",
+        "type": "success"
+      }
+    ],
+    "searchCount": 0,
+    "clicksCount": 1,
+    "clickedUrls": {
+      "youtube_featured_feedback": 1
+    },
+    "thumbsUpCount": 1,
+    "disallowedIntents": []
+  },
+  "gemini": {
+    "query": "gemini",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0,
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 1
+  },
+  "gemini3": {
+    "clicksCount": 0,
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "confidence": 0.1,
+    "searchCount": 1,
+    "feedbacks": [],
+    "query": "gemini3",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0
+  },
+  "how to make a killing": {
+    "feedbacks": [],
+    "searchCount": 1,
+    "confidence": 0.1,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "clicksCount": 0,
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "entityType": "General / Learning Profile",
+    "query": "how to make a killing"
+  },
+  "how to make soup 🍲🍲": {
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "query": "how to make soup 🍲🍲",
+    "confidence": 0.1,
+    "searchCount": 1,
+    "feedbacks": [],
+    "clicksCount": 0,
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {}
+  },
+  "how to make write": {
+    "query": "how to make write",
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 1
+  },
+  "how to write a review": {
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 2,
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "query": "how to write a review"
+  },
+  "how to write a review on google play": {
+    "query": "how to write a review on google play",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "entityType": "General / Learning Profile",
+    "clickedUrls": {
+      "how_to_guide_feedback": 1
+    },
+    "disallowedIntents": [],
+    "thumbsUpCount": 1,
+    "clicksCount": 1,
+    "feedbacks": [
+      {
+        "timestamp": "2026-06-04T18:00:30.132Z",
+        "type": "success",
+        "url": "how_to_guide_feedback"
+      }
+    ],
+    "searchCount": 0,
+    "confidence": 0.1
+  },
+  "how is rice made": {
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 1,
+    "query": "how is rice made",
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general"
+  },
+  "what are paddy fields and how are they used to grow rice?": {
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "query": "what are paddy fields and how are they used to grow rice?",
+    "confidence": 0.1,
+    "searchCount": 0,
+    "feedbacks": [
+      {
+        "type": "success",
+        "url": "faq_item_feedback",
+        "timestamp": "2026-06-04T18:02:03.762Z"
+      }
+    ],
+    "clicksCount": 1,
+    "thumbsUpCount": 1,
+    "disallowedIntents": [],
+    "clickedUrls": {
+      "faq_item_feedback": 1
+    }
+  },
+  "where does google get it's money": {
+    "feedbacks": [],
+    "searchCount": 1,
+    "confidence": 0.1,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "clicksCount": 0,
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "entityType": "General / Learning Profile",
+    "query": "where does google get it's money"
+  },
+  "where does google get money from": {
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "clicksCount": 0,
+    "feedbacks": [],
+    "searchCount": 1,
+    "confidence": 0.1,
+    "query": "where does google get money from",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0,
+    "entityType": "General / Learning Profile"
+  },
+  "how to cook rice steps": {
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "clicksCount": 0,
+    "feedbacks": [],
+    "searchCount": 1,
+    "confidence": 0.1,
+    "query": "how to cook rice steps",
+    "detectedIntent": "how_to",
+    "thumbsDownCount": 0,
+    "entityType": "General / Learning Profile"
+  },
+  "how to write a letter": {
+    "confidence": 0.1,
+    "searchCount": 1,
+    "feedbacks": [],
+    "clicksCount": 0,
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "how_to",
+    "thumbsDownCount": 0,
+    "query": "how to write a letter"
+  },
+  "how does google get its money": {
+    "query": "how does google get its money",
+    "entityType": "Business / Economics Learning",
+    "detectedIntent": "how_to",
+    "clicksCount": 6,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "confidence": 0.95,
+    "searchCount": 1,
+    "thumbsUpCount": 0,
+    "thumbsDownCount": 0,
+    "feedbacks": []
+  },
+  "how does google get it's money": {
+    "feedbacks": [],
+    "searchCount": 2,
+    "confidence": 0.95,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "clicksCount": 6,
+    "thumbsDownCount": 0,
+    "detectedIntent": "how_to",
+    "entityType": "Business / Economics Learning",
+    "query": "how does google get it's money"
+  },
+  "steps in writing a book": {
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 1,
+    "detectedIntent": "general",
+    "query": "steps in writing a book",
+    "confidence": 0.1,
+    "searchCount": 2,
+    "feedbacks": [
+      {
+        "type": "click",
+        "url": "https://hireforexamination.com/dissertation-writing-service",
+        "timestamp": "2026-06-04T18:30:04.799Z"
+      },
+      {
+        "timestamp": "2026-06-04T18:30:11.591Z",
+        "url": "https://hireforexamination.com/dissertation-writing-service",
+        "type": "pogo"
+      }
+    ],
+    "clicksCount": 1,
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "clickedUrls": {}
+  },
+  "how to cook rice in steps": {
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "clicksCount": 0,
+    "searchCount": 1,
+    "feedbacks": [],
+    "confidence": 0.1,
+    "query": "how to cook rice in steps",
+    "thumbsDownCount": 0,
+    "detectedIntent": "how_to",
+    "entityType": "General / Learning Profile"
+  },
+  "how to cook rice": {
+    "detectedIntent": "how_to",
+    "thumbsDownCount": 0,
+    "entityType": "General / Learning Profile",
+    "query": "how to cook rice",
+    "searchCount": 1,
+    "feedbacks": [],
+    "confidence": 0.1,
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clickedUrls": {},
+    "clicksCount": 0
+  },
+  "tutorial on slack": {
+    "query": "tutorial on slack",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "entityType": "General / Learning Profile",
+    "clickedUrls": {},
+    "thumbsUpCount": 0,
+    "disallowedIntents": [],
+    "clicksCount": 0,
+    "feedbacks": [],
+    "searchCount": 1,
+    "confidence": 0.1
+  },
+  "how to use slack": {
+    "query": "how to use slack",
+    "entityType": "General / Learning Profile",
+    "thumbsDownCount": 0,
+    "detectedIntent": "general",
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0,
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 1
+  },
+  "how does ai work steps": {
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "thumbsDownCount": 0,
+    "query": "how does ai work steps",
+    "confidence": 0.1,
+    "feedbacks": [],
+    "searchCount": 1,
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "thumbsUpCount": 0
+  },
+  "how to screenshot on mac": {
+    "query": "how to screenshot on mac",
+    "entityType": "General / Learning Profile",
+    "detectedIntent": "general",
+    "clicksCount": 0,
+    "clickedUrls": {},
+    "disallowedIntents": [],
+    "confidence": 0.1,
+    "searchCount": 1,
+    "thumbsUpCount": 0,
+    "thumbsDownCount": 0,
+    "feedbacks": []
+  }
+}

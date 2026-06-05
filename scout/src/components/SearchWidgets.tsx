@@ -41,15 +41,22 @@ export function shouldShowCalculator(query: string): boolean {
     return true;
   }
   
+  // Ensure standalone math functions have word boundaries and look like actual calls (e.g. log(10) or log 10)
+  const mathFunctionRegex = /\b(sin|cos|tan|log|ln|sqrt)\b/i;
+  if (mathFunctionRegex.test(q) && (/\d/.test(q) || q.includes('('))) {
+    return true;
+  }
+
   // Mathematical expression regexes
   const mathSyms = /^[0-9+\-*/().\s^%eπpi]+$/i;
-  const commonFunctions = /(sin|cos|tan|log|ln|sqrt)/i;
+  const hasOperator = /[\+\-\*\/^]/.test(q);
+  const hasNumbers = /[0-9]/.test(q);
   
   // If it is just a pure digit search, don't show calculator
   const isPureNumber = /^\d+(\.\d+)?$/;
   if (isPureNumber.test(q)) return false;
 
-  return (mathSyms.test(q) && /[\d+\-*/()]/.test(q)) || commonFunctions.test(q);
+  return mathSyms.test(q) && hasOperator && hasNumbers;
 }
 
 export function shouldShowCurrency(query: string): boolean {
