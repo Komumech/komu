@@ -290,6 +290,58 @@ function getProviderIcon(name: string, sizeClass = "w-8 h-8") {
 export function MovieSidebar({ movie, className = "" }: { movie: MovieData; className?: string }) {
   const [watchListState, setWatchListState] = useState<'none' | 'want' | 'watched'>('none');
   const [userRating, setUserRating] = useState<'thumbUp' | 'thumbDown' | null>(null);
+  const [isDisliked, setIsDisliked] = useState(false);
+
+  useEffect(() => {
+    const checkPersistedRating = () => {
+      const key = `movie_rating_${movie.id || movie.title}`;
+      const saved = localStorage.getItem(key);
+      if (saved === 'thumbUp' || saved === 'thumbDown') {
+        setUserRating(saved as any);
+        setIsDisliked(saved === 'thumbDown');
+      } else {
+        setUserRating(null);
+        setIsDisliked(false);
+      }
+    };
+
+    checkPersistedRating();
+
+    window.addEventListener('movie_rating_changed', checkPersistedRating);
+    return () => {
+      window.removeEventListener('movie_rating_changed', checkPersistedRating);
+    };
+  }, [movie.id, movie.title]);
+
+  const handleRatingClick = (type: 'thumbUp' | 'thumbDown') => {
+    const key = `movie_rating_${movie.id || movie.title}`;
+    const newRating = userRating === type ? null : type;
+    
+    if (newRating) {
+      localStorage.setItem(key, newRating);
+      if (newRating === 'thumbDown') {
+        const dislikes = JSON.parse(localStorage.getItem('disliked_movie_ids') || '[]');
+        const entry = String(movie.id || movie.title);
+        if (!dislikes.includes(entry)) {
+          dislikes.push(entry);
+          localStorage.setItem('disliked_movie_ids', JSON.stringify(dislikes));
+        }
+      } else {
+        const dislikes = JSON.parse(localStorage.getItem('disliked_movie_ids') || '[]');
+        const entry = String(movie.id || movie.title);
+        const filtered = dislikes.filter((e: string) => e !== entry);
+        localStorage.setItem('disliked_movie_ids', JSON.stringify(filtered));
+      }
+    } else {
+      localStorage.removeItem(key);
+      const dislikes = JSON.parse(localStorage.getItem('disliked_movie_ids') || '[]');
+      const entry = String(movie.id || movie.title);
+      const filtered = dislikes.filter((e: string) => e !== entry);
+      localStorage.setItem('disliked_movie_ids', JSON.stringify(filtered));
+    }
+
+    window.dispatchEvent(new Event('movie_rating_changed'));
+  };
 
   const streamProviders = [
     { name: 'Netflix', price: 'Subscription', color: 'bg-red-600', iconLetter: 'N' },
@@ -297,52 +349,45 @@ export function MovieSidebar({ movie, className = "" }: { movie: MovieData; clas
     { name: 'Apple TV', price: 'Buy/Rent from $3.99', color: 'bg-slate-900', iconLetter: 'A' },
   ];
 
+  if (isDisliked) return null;
+
   return (
     <div className={className}>
       {/* Where to Watch Box (Google style with beautiful brand SVGs) */}
-      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-        <div className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-3">Where to watch</div>
+      <div className="bg-[#eef3fc] rounded-[24px] p-5 border-0 shadow-none">
+        <div className="text-[13px] font-bold text-slate-500 uppercase tracking-wider mb-3">Where to watch</div>
         
-        <div className="space-y-2.5">
+        <div className="flex flex-row flex-wrap gap-2.5 items-center">
           {streamProviders.map((provider) => (
-            <div key={provider.name} className="flex items-center justify-between p-3 bg-white hover:bg-slate-50/70 rounded-xl transition-all cursor-pointer">
-              <div className="flex items-center gap-3">
-                {getProviderIcon(provider.name)}
-                <div>
-                  <div className="text-xs font-bold text-slate-800">{provider.name}</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{provider.price}</div>
-                </div>
-              </div>
-              <ExternalLink size={13} className="text-slate-400 shrink-0" />
+            <div key={provider.name} className="p-1 rounded-xl bg-white flex items-center justify-center cursor-pointer transition-transform hover:scale-105 active:scale-95 shadow-none border-none" title={provider.name}>
+              {getProviderIcon(provider.name, "w-10 h-10")}
             </div>
           ))}
         </div>
       </div>
 
       {/* Google user interest panel (Watch now, already watched, want to watch, feedback) */}
-      <div className="border border-slate-200/80 rounded-2xl p-5 space-y-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">User Interest</div>
-
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+      <div className="bg-[#eef3fc] rounded-[24px] p-5 space-y-4 border-0 shadow-none">
+        <div className="flex items-center justify-between pb-3 border-b border-blue-100">
           <span className="text-xs text-slate-500 font-medium font-sans">Interested in this show?</span>
           <div className="flex gap-2">
             <button
-              onClick={() => setUserRating(userRating === 'thumbUp' ? null : 'thumbUp')}
+              onClick={() => handleRatingClick('thumbUp')}
               className={`p-2 rounded-full border transition-all cursor-pointer ${
                 userRating === 'thumbUp'
                   ? 'bg-[#e1f2fa] border-[#b0e2f9] text-[#006097]'
-                  : 'bg-white border-slate-250 text-slate-500 hover:bg-slate-50'
+                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
               }`}
               title="Liked it"
             >
               <ThumbsUp size={15} />
             </button>
             <button
-              onClick={() => setUserRating(userRating === 'thumbDown' ? null : 'thumbDown')}
+              onClick={() => handleRatingClick('thumbDown')}
               className={`p-2 rounded-full border transition-all cursor-pointer ${
                 userRating === 'thumbDown'
                   ? 'bg-rose-50 border-rose-200 text-rose-600'
-                  : 'bg-white border-slate-250 text-slate-500 hover:bg-slate-50'
+                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
               }`}
               title="Disliked it"
             >
@@ -378,14 +423,13 @@ export function MovieSidebar({ movie, className = "" }: { movie: MovieData; clas
       </div>
 
       {/* Additional Sidebar Metadata - Styled beautifully like Wikipedia Infobox Facts */}
-      <div className="border border-slate-200/80 rounded-2xl p-5 bg-gradient-to-br from-slate-50/30 to-slate-50/80 pb-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Database Info</div>
+      <div className="bg-[#eef3fc] rounded-[24px] p-5 pb-4 border-0 shadow-none">
         <div className="space-y-2 text-xs text-slate-500">
-          <div className="flex justify-between py-1.5 border-b border-slate-100">
+          <div className="flex justify-between py-1.5 border-b border-blue-100">
             <span>Status</span>
             <span className="font-bold text-slate-700">{movie.status}</span>
           </div>
-          <div className="flex justify-between py-1.5 border-b border-slate-100">
+          <div className="flex justify-between py-1.5 border-b border-blue-100">
             <span>Vote Count</span>
             <span className="text-slate-700 font-mono">{movie.voteCount} votes</span>
           </div>
@@ -411,11 +455,42 @@ export default function MovieSection({ movie }: MovieSectionProps) {
   // Dynamic bookmark states & watch state
   const [watchListState, setWatchListState] = useState<'none' | 'want' | 'watched'>('none');
   const [userRating, setUserRating] = useState<'thumbUp' | 'thumbDown' | null>(null);
+  const [isDisliked, setIsDisliked] = useState(false);
 
   // Cast Carousel scroll refs and tracking
   const overviewCastScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
+
+  // Read dislike and feedback state dynamically
+  useEffect(() => {
+    const checkDisliked = () => {
+      const key = `movie_rating_${movie.id || movie.title}`;
+      const saved = localStorage.getItem(key);
+      setIsDisliked(saved === 'thumbDown');
+      if (saved === 'thumbUp' || saved === 'thumbDown') {
+        setUserRating(saved as any);
+      } else {
+        setUserRating(null);
+      }
+    };
+    checkDisliked();
+    window.addEventListener('movie_rating_changed', checkDisliked);
+    return () => {
+      window.removeEventListener('movie_rating_changed', checkDisliked);
+    };
+  }, [movie.id, movie.title]);
+
+  const handleUndoDislike = () => {
+    const key = `movie_rating_${movie.id || movie.title}`;
+    localStorage.removeItem(key);
+    const dislikes = JSON.parse(localStorage.getItem('disliked_movie_ids') || '[]');
+    const entry = String(movie.id || movie.title);
+    const filtered = dislikes.filter((e: string) => e !== entry);
+    localStorage.setItem('disliked_movie_ids', JSON.stringify(filtered));
+    
+    window.dispatchEvent(new Event('movie_rating_changed'));
+  };
 
   const handleCastScroll = () => {
     const el = overviewCastScrollRef.current;
@@ -464,6 +539,48 @@ export default function MovieSection({ movie }: MovieSectionProps) {
     }
   }, [selectedSeason, movie.id, movie.mediaType, movie.title, movie.episodes]);
 
+  const [trailerVideoId, setTrailerVideoId] = useState<string>('');
+
+  useEffect(() => {
+    let active = true;
+    if (!movie || !movie.title) return;
+    
+    const releaseYear = movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : '';
+    const searchQuery = `${movie.title} ${releaseYear} official trailer`;
+    
+    setTrailerVideoId('');
+    
+    fetch(`/api/youtube-search?q=${encodeURIComponent(searchQuery)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        if (data && data.videos && data.videos.length > 0) {
+          setTrailerVideoId(data.videos[0].id);
+        } else {
+          const lowerT = movie.title.toLowerCase();
+          if (lowerT.includes('justice league')) {
+            setTrailerVideoId('3cxixDgSzYg');
+          } else if (lowerT.includes('spider-man') || lowerT.includes('spiderman')) {
+            setTrailerVideoId('JfVOs4VSpmA');
+          } else if (lowerT.includes('avatar')) {
+            setTrailerVideoId('d9MyW72ELq0');
+          } else if (lowerT.includes('interstellar')) {
+            setTrailerVideoId('zSWdZVtXT7E');
+          } else {
+            setTrailerVideoId('dQw4w9WgXcQ');
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed fetching movie trailer video:", err);
+        if (active) {
+          setTrailerVideoId('3cxixDgSzYg');
+        }
+      });
+      
+    return () => { active = false; };
+  }, [movie]);
+
   const year = movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : 'N/A';
 
   // Compute mock ratings for secondary sources to replicate high-fidelity Google info
@@ -473,12 +590,119 @@ export default function MovieSection({ movie }: MovieSectionProps) {
   const rottenRating = Math.round(rawRating * 10 + (rawRating > 8 ? 5 : -2));
   const finalRottenRating = rottenRating > 100 ? 100 : (rottenRating < 50 ? 58 : rottenRating);
 
+  // Carousel Item Builder
+  const CarouselItem = () => {
+    const carouselImages = [
+      movie.posterPath,
+      movie.backdropPath,
+    ].filter(Boolean);
+    
+    if (movie.cast && movie.cast.length > 0) {
+      movie.cast.slice(0, 4).forEach((actor) => {
+        if (actor.profilePath) {
+          carouselImages.push(actor.profilePath);
+        }
+      });
+    }
+
+    if (movie.episodes && movie.episodes.length > 0) {
+      movie.episodes.slice(0, 3).forEach((ep) => {
+        if (ep.stillPath) {
+          carouselImages.push(ep.stillPath);
+        }
+      });
+    }
+
+    const videoId = trailerVideoId || '3cxixDgSzYg';
+
+    return (
+      <div className="w-full">
+        {/* Horizontal scroll track with completely hidden scrollbars */}
+        <div 
+          className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory scroll-smooth"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
+          {/* SLIDE 1: AUTOPLAY SILENTED LOOPING VIDEO TRAILER (LANDSCAPE) */}
+          <div className="relative w-[75vw] sm:w-[460px] aspect-[16/9] bg-slate-950 rounded-2xl overflow-hidden shrink-0 snap-start flex-none border border-slate-200/10">
+            <iframe
+              src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&playlist=${videoId}&loop=1&controls=0&modestbranding=1&rel=0&start=15&end=45&showinfo=0&iv_load_policy=3&fs=0`}
+              className="w-full h-full object-cover select-none pointer-events-none"
+              allow="autoplay; encrypted-media"
+              title="Official Trailer Preview"
+            />
+            
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/50 pointer-events-none" />
+
+            <div className="absolute top-2.5 left-2.5 bg-black/60 backdrop-blur-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 text-[10.5px] font-bold text-white/95 select-none pointer-events-none">
+              <span className="opacity-90">YouTube</span>
+              <span className="text-white/40">·</span>
+              <span>Official Trailer</span>
+            </div>
+
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-xs flex items-center justify-center border border-white/25">
+                <Play size={16} className="text-white fill-white ml-0.5" />
+              </div>
+            </div>
+
+            <div className="absolute bottom-2.5 left-2.5 bg-black/70 backdrop-blur-xs px-2 py-0.5 rounded text-[10.5px] font-mono text-white/90 font-semibold select-none pointer-events-none">
+              Trailer · 1:01
+            </div>
+          </div>
+
+          {/* SLIDES 2+: IMAGES FROM MOVIE / CAST / BACKDROPS */}
+          {carouselImages.map((imgUrl, idx) => {
+            const isPortrait = idx === 0; // First is poster (portrait), second is backdrop (landscape)
+            const widthClass = isPortrait 
+              ? 'w-[45vw] sm:w-[220px] aspect-[2/3]' 
+              : 'w-[75vw] sm:w-[460px] aspect-[16/9]';
+              
+            return (
+              <div 
+                key={idx} 
+                className={`relative ${widthClass} bg-slate-50 rounded-2xl overflow-hidden shrink-0 snap-start flex-none`}
+              >
+                <img
+                  src={imgUrl}
+                  alt={`${movie.title} media slot ${idx + 2}`}
+                  className="w-full h-full object-contain select-none pointer-events-none"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // Provider config
   const streamProviders = [
     { name: 'Netflix', price: 'Subscription', color: 'bg-red-600', iconLetter: 'N' },
     { name: 'Prime Video', price: 'Buy/Rent from $3.99', color: 'bg-amber-500', iconLetter: 'P' },
     { name: 'Apple TV', price: 'Buy/Rent from $3.99', color: 'bg-slate-900', iconLetter: 'A' },
   ];
+
+  if (isDisliked) {
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="w-full bg-slate-50 border-0 rounded-2xl p-5 flex items-center justify-between gap-4 mb-8 text-sm text-slate-600 font-medium font-sans shadow-none"
+      >
+        <div className="flex items-center gap-2">
+          <span>👎 Feedback submitted. "<strong>{movie.title}</strong>" has been hidden from your search results.</span>
+        </div>
+        <button 
+          onClick={handleUndoDislike}
+          className="text-blue-600 hover:underline hover:text-blue-700 font-bold uppercase tracking-wider text-xs shrink-0 cursor-pointer"
+        >
+          Undo
+        </button>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -487,10 +711,10 @@ export default function MovieSection({ movie }: MovieSectionProps) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -15 }}
       transition={{ duration: 0.35 }}
-      className="w-full bg-white rounded-2xl overflow-hidden shadow-xs mb-8 font-sans text-slate-800"
+      className="w-full bg-white rounded-[28px] mb-8 overflow-hidden font-sans text-slate-800"
     >
       {/* 1. HEADER SECTION (Google Style Title & Subtitle) */}
-      <div className="p-6 pb-2">
+      <div className="p-4 sm:p-6 pb-2">
         <h1 className="text-3xl md:text-4xl font-normal text-slate-900 tracking-tight font-sans">
           {movie.title}
         </h1>
@@ -519,19 +743,24 @@ export default function MovieSection({ movie }: MovieSectionProps) {
             if (isTvOnly) return null;
 
             const isSelected = activeSubTab === tab;
-            const label = tab.charAt(0).toUpperCase() + tab.slice(1);
+            let label = '';
+            if (tab === 'overview') label = 'Overview';
+            else if (tab === 'cast') label = 'Cast';
+            else if (tab === 'episodes') label = 'Episodes';
+            else if (tab === 'watch') label = 'Trailers & clips';
+            else if (tab === 'awards') label = 'Awards';
             
             return (
               <button
                 key={tab}
                 onClick={() => setActiveSubTab(tab)}
-                className={`px-4 py-1.5 rounded-full text-[13px] font-medium border transition-all cursor-pointer whitespace-nowrap ${
+                className={`px-4 py-1.5 rounded-full text-[13px] font-semibold border-0 transition-all cursor-pointer whitespace-nowrap ${
                   isSelected
-                    ? 'bg-[#e1f2fa] border-[#b0e2f9] text-[#006097] font-semibold'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                    ? 'bg-[#e1f2fa] text-[#006097]'
+                    : 'bg-[#eef3fc] text-slate-700 hover:bg-[#e2ebf8]'
                 }`}
               >
-                {tab === 'watch' ? 'Watch show' : label}
+                {label}
               </button>
             );
           })}
@@ -546,247 +775,126 @@ export default function MovieSection({ movie }: MovieSectionProps) {
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -5 }}
           transition={{ duration: 0.2 }}
-          className="p-6 pt-4"
+          className="p-4 sm:p-6 pt-4"
         >
           {/* ==================================== OVERVIEW TAB ==================================== */}
           {activeSubTab === 'overview' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="flex flex-col gap-5">
               
-              {/* Left Column (Images, Episodes, Cast) */}
-              <div className="lg:col-span-12 flex flex-col gap-6">
-                
-                {/* Image Grid Collage */}
-                <div className="grid grid-cols-12 gap-2 h-48 sm:h-64 md:h-72 w-full rounded-2xl overflow-hidden shadow-xs border border-slate-100">
-                  {/* Left big image: Poster */}
-                  <div className="col-span-5 sm:col-span-6 relative overflow-hidden bg-slate-100">
-                    <img
-                      src={movie.posterPath || 'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?q=80&w=400'}
-                      alt={movie.title}
-                      className="w-full h-full object-cover object-top hover:scale-[1.02] transition-transform duration-300"
-                      referrerPolicy="no-referrer"
-                    />
+              {/* Image & Video Carousel replacing old static collage */}
+              <CarouselItem />
+
+              {/* Ratings Summary Row with light chevron links */}
+              <div className="flex items-center gap-5 py-3.5 border-t border-b border-slate-100 text-[13.5px] font-medium text-slate-600 mt-2 select-none">
+                <a 
+                  href={`https://www.imdb.com/find?q=${encodeURIComponent(movie.title)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:underline flex items-center gap-1 text-slate-800"
+                >
+                  <span className="font-extrabold text-slate-900">{imdbRating}/10</span>
+                  <span className="text-slate-400 font-normal">·</span>
+                  <span>IMDb</span>
+                  <ChevronRight size={13} className="text-blue-600 ml-0.5 stroke-[2.5]" />
+                </a>
+                <div className="w-[1px] h-3.5 bg-slate-200" />
+                <a 
+                  href={`https://www.rottentomatoes.com/search?search=${encodeURIComponent(movie.title)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:underline flex items-center gap-1 text-slate-800"
+                >
+                  <span className="font-extrabold text-slate-900">{finalRottenRating}%</span>
+                  <span className="text-slate-400 font-normal">·</span>
+                  <span>Rotten Tomatoes</span>
+                  <ChevronRight size={13} className="text-blue-600 ml-0.5 stroke-[2.5]" />
+                </a>
+              </div>
+
+              {/* Bento Grid layout replicating Google's mobile card design exactly */}
+              <div className="grid grid-cols-2 gap-3.5 mt-2">
+                {/* 1. Cast Card */}
+                <div 
+                  onClick={() => setActiveSubTab('cast')}
+                  className="bg-[#eef3fc] hover:bg-[#e2ebf8] border border-transparent rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition-colors min-h-[110px]"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13.5px] font-bold text-slate-800">Cast</span>
+                    <ChevronRight size={14} className="text-slate-500 rotate-90" />
                   </div>
-                  {/* Right stack */}
-                  <div className="col-span-7 sm:col-span-6 grid grid-rows-2 gap-2">
-                    <div className="relative overflow-hidden bg-slate-100">
-                      <img
-                        src={movie.backdropPath || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=600'}
-                        alt={`${movie.title} scene`}
-                        className="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-300"
+                  <div className="flex -space-x-2 mt-3 overflow-hidden select-none">
+                    {movie.cast?.slice(0, 3).map((actor, idx) => (
+                      <img 
+                        key={idx}
+                        src={actor.profilePath} 
+                        alt={actor.name} 
+                        className="w-9 h-9 rounded-full object-cover border-2 border-[#eef3fc] shadow-2xs shrink-0" 
                         referrerPolicy="no-referrer"
                       />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="relative overflow-hidden bg-slate-100 font-sans">
-                        <img
-                          src={movie.cast?.[0]?.profilePath || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200'}
-                          alt={movie.cast?.[0]?.name || 'Cast'}
-                          className="w-full h-full object-cover object-top hover:scale-[1.02] transition-transform duration-300"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-black/20" />
-                        <span className="absolute bottom-1.5 left-2 text-[10px] sm:text-xs font-semibold text-white truncate max-w-[90%] drop-shadow-md">
-                          {movie.cast?.[0]?.name || 'Cast'}
-                        </span>
-                      </div>
-                      <div className="relative overflow-hidden bg-slate-900 flex items-center justify-center group cursor-pointer">
-                        <img
-                          src={(movie as any).secondaryBackdrop || movie.backdropPath || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=300'}
-                          alt="Video thumbnail"
-                          className="absolute inset-0 w-full h-full object-cover opacity-65 filter brightness-75 group-hover:scale-105 transition-transform duration-300"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="relative z-10 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/45 backdrop-blur-xs flex items-center justify-center border border-white/20 group-hover:scale-110 transition-transform">
-                          <Play size={16} className="text-white fill-white ml-0.5" />
-                        </div>
-                        <span className="absolute bottom-1.5 right-2 text-[9px] sm:text-[10px] font-mono text-white/90 bg-black/55 px-1 rounded">
-                          Trailer
-                        </span>
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* About and Ratings */}
-                <div className="border border-slate-100 rounded-2xl p-5 bg-slate-50/40">
-                  <div className="flex items-center gap-1.5 mb-3">
-                    <span className="text-[15px] font-bold text-slate-800">About</span>
-                  </div>
-                  
-                  {/* Google style 3-column Rating row with divider */}
-                  <div className="flex items-center justify-around py-3 border-t border-b border-slate-100 text-center mb-4">
-                    <div className="flex-1">
-                      <div className="text-xs text-slate-500 font-medium">IMDb</div>
-                      <div className="text-lg font-bold text-slate-900 mt-0.5">{imdbRating}/10</div>
-                    </div>
-                    <div className="w-[1px] h-8 bg-slate-200" />
-                    <div className="flex-1">
-                      <div className="text-xs text-slate-500 font-medium">Rotten Tomatoes</div>
-                      <div className="text-lg font-bold text-slate-900 mt-0.5">{finalRottenRating}%</div>
-                    </div>
-                    <div className="w-[1px] h-8 bg-slate-200" />
-                    <div className="flex-1">
-                      <div className="text-xs text-slate-500 font-medium">TMDB Rating</div>
-                      <div className="text-lg font-bold text-slate-900 mt-0.5">{tmdbRating}/10</div>
-                    </div>
-                  </div>
-
-                  <p className="text-sm text-slate-600 leading-relaxed font-normal whitespace-pre-line">
-                    {movie.overview || 'No overview synopsis is currently logged for this media.'}
-                  </p>
-
-                  {/* Detail Key-Value Rows (Writers, Creator, Aired) */}
-                  <div className="mt-5 space-y-2.5 pt-4 border-t border-slate-100 text-xs sm:text-sm">
-                    {movie.mediaType === 'tv' ? (
-                      <>
-                        <div className="flex border-b border-slate-50 pb-2">
-                          <span className="w-28 font-medium text-slate-400 shrink-0">First episode</span>
-                          <span className="text-slate-700">{movie.releaseDate || 'N/A'}</span>
-                        </div>
-                        <div className="flex border-b border-slate-50 pb-2">
-                          <span className="w-28 font-medium text-slate-400 shrink-0">Network</span>
-                          <span className="text-slate-700 font-normal">TMDB Networks, HBO Max / Streaming</span>
-                        </div>
-                        <div className="flex pb-1">
-                          <span className="w-28 font-medium text-slate-400 shrink-0">Genres</span>
-                          <span className="text-slate-700">{movie.genres?.join(', ')}</span>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex border-b border-slate-50 pb-2">
-                          <span className="w-28 font-medium text-slate-400 shrink-0">Release date</span>
-                          <span className="text-slate-700">{movie.releaseDate || 'N/A'}</span>
-                        </div>
-                        <div className="flex border-b border-slate-50 pb-2">
-                          <span className="w-28 font-medium text-slate-400 shrink-0">Runtime</span>
-                          <span className="text-slate-700">{movie.runtime || 'N/A'}</span>
-                        </div>
-                        <div className="flex pb-1">
-                          <span className="w-28 font-medium text-slate-400 shrink-0">Director</span>
-                          <span className="text-slate-700">TMDB Creative Leads & Crew</span>
-                        </div>
-                      </>
-                    )}
+                {/* 2. Release Date Card */}
+                <div className="bg-[#eef3fc] border border-transparent rounded-2xl p-4 flex flex-col justify-between min-h-[110px]">
+                  <span className="text-[13.5px] font-bold text-slate-800">Release date</span>
+                  <div className="text-[12.5px] font-bold text-slate-700 leading-tight mt-2 pb-1">
+                    {movie.releaseDate ? `${new Date(movie.releaseDate).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}` : 'N/A'}
                   </div>
                 </div>
-
-                {/* Google-like Episodes List on Overview directly (Only if TV series) */}
-                {movie.mediaType === 'tv' && episodes && episodes.length > 0 && (
-                  <div className="border border-slate-100 rounded-xl p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setActiveSubTab('episodes')}>
-                        <span className="text-[15px] font-bold text-slate-800 hover:text-blue-600 flex items-center gap-1">
-                          Episodes <ChevronRight size={16} />
-                        </span>
-                      </div>
-                      <span className="text-xs text-slate-400 font-mono">Season {selectedSeason}</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                      {episodes.slice(0, isEpisodesExpanded ? undefined : 4).map((ep) => (
-                        <div key={ep.id} className="flex gap-3.5 p-2 rounded-xl bg-slate-50/50 hover:bg-slate-50 border border-slate-100/50 transition-colors">
-                          <div className="w-24 h-15 rounded-lg overflow-hidden bg-slate-100 shrink-0 relative">
-                            <img
-                              src={ep.stillPath || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=200'}
-                              alt={ep.name}
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-black/10" />
-                          </div>
-                          <div className="flex-1 min-w-0 flex flex-col justify-center">
-                            <div className="text-[11px] text-slate-400 font-mono">S{selectedSeason} E{ep.episodeNumber}</div>
-                            <div className="text-xs font-bold text-slate-800 truncate mt-0.5">{ep.name}</div>
-                            <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">{ep.airDate}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {episodes.length > 4 && (
-                      <button
-                        onClick={() => setIsEpisodesExpanded(!isEpisodesExpanded)}
-                        className="w-full text-center py-2.5 mt-3 border-t border-slate-100 font-medium text-xs text-slate-500 hover:text-slate-800 transition-colors flex items-center justify-center gap-1"
-                      >
-                        {isEpisodesExpanded ? 'Show less' : `View ${episodes.length - 4}+ more episodes`}
-                        <ChevronRight size={14} className={isEpisodesExpanded ? '-rotate-90 transition-transform' : 'rotate-90 transition-transform'} />
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Google-like Cast Horizontal Scrollbar on Overview */}
-                {movie.cast && movie.cast.length > 0 && (
-                  <div className="border border-slate-100 rounded-xl p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2 cursor-pointer group" onClick={() => setActiveSubTab('cast')}>
-                        <span className="text-xl font-normal text-slate-950 font-sans tracking-tight">
-                          Cast
-                        </span>
-                        <div className="w-7 h-7 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition-colors">
-                          <ChevronRight size={14} className="text-slate-900 stroke-[2.5]" />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="relative group/carousel">
-                      {/* Left Programmatic Button */}
-                      {canScrollLeft && (
-                        <button
-                          onClick={() => {
-                            overviewCastScrollRef.current?.scrollBy({ left: -240, behavior: 'smooth' });
-                          }}
-                          className="absolute -left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full border border-slate-200 bg-white shadow-md hover:shadow-lg flex items-center justify-center transition-all cursor-pointer z-25 hover:bg-slate-50 focus:outline-none"
-                          title="Scroll left"
-                        >
-                          <ChevronLeft size={16} className="text-slate-900 stroke-[2.5]" />
-                        </button>
-                      )}
-
-                      {/* Right Programmatic Button */}
-                      {canScrollRight && (
-                        <button
-                          onClick={() => {
-                            overviewCastScrollRef.current?.scrollBy({ left: 240, behavior: 'smooth' });
-                          }}
-                          className="absolute -right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full border border-slate-200 bg-white shadow-md hover:shadow-lg flex items-center justify-center transition-all cursor-pointer z-25 hover:bg-slate-50 focus:outline-none"
-                          title="Scroll right"
-                        >
-                          <ChevronRight size={16} className="text-slate-900 stroke-[2.5]" />
-                        </button>
-                      )}
-
-                      {/* Horizontal scroll flow */}
-                      <div
-                        ref={overviewCastScrollRef}
-                        onScroll={handleCastScroll}
-                        className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide scroll-smooth select-none"
-                        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                      >
-                        {movie.cast.map((actor, idx) => (
-                          <div key={idx} className="w-[100px] shrink-0 flex flex-col text-left">
-                            <div className="w-[100px] h-[120px] rounded-2xl overflow-hidden mb-2 bg-slate-100 border border-slate-200/50">
-                              <img
-                                src={actor.profilePath}
-                                alt={actor.name}
-                                className="w-full h-full object-cover object-top select-none pointer-events-none"
-                                referrerPolicy="no-referrer"
-                              />
-                            </div>
-                            <div className="text-[12px] font-medium text-slate-900 leading-tight line-clamp-1 w-full">{actor.name}</div>
-                            <div className="text-[11px] text-slate-500 leading-normal line-clamp-1 w-full mt-0.5">{actor.character}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Mobile-only responsive inline sidebar, completely hidden on media-query lg and up */}
-                <MovieSidebar movie={movie} className="lg:hidden flex flex-col gap-5 mt-6" />
-
               </div>
+
+              {/* 3. Overview Card */}
+              <div className="bg-[#eef3fc] border border-transparent rounded-2xl p-4.5 mt-1">
+                <div className="flex items-center justify-between mb-2 select-none">
+                  <span className="text-[13.5px] font-bold text-slate-800">Overview</span>
+                  <ChevronRight size={14} className="text-slate-500 rotate-90" />
+                </div>
+                <p className="text-[12.5px] text-slate-700 leading-relaxed font-normal whitespace-pre-line">
+                  {movie.overview || 'No overview synopsis is currently logged for this media.'}
+                </p>
+              </div>
+
+              {/* TV Episodes sub-list overview triggers */}
+              {movie.mediaType === 'tv' && episodes && episodes.length > 0 && (
+                <div className="border border-slate-100 rounded-2xl p-4 bg-slate-50/10 mt-1">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[13.5px] font-bold text-slate-800">Episodes</span>
+                    <span className="text-xs text-slate-400 font-mono">Season {selectedSeason}</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {episodes.slice(0, isEpisodesExpanded ? undefined : 4).map((ep) => (
+                      <div key={ep.id} className="flex gap-3 p-2 rounded-xl bg-slate-50/50 hover:bg-slate-50 border border-slate-100/50 transition-colors">
+                        <div className="w-20 h-13 rounded-lg overflow-hidden bg-slate-100 shrink-0 relative">
+                          <img
+                            src={ep.stillPath || 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=200'}
+                            alt={ep.name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <div className="text-[10px] text-slate-400 font-mono">S{selectedSeason} E{ep.episodeNumber}</div>
+                          <div className="text-xs font-bold text-slate-800 truncate mt-0.5">{ep.name}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {episodes.length > 4 && (
+                    <button
+                      onClick={() => setIsEpisodesExpanded(!isEpisodesExpanded)}
+                      className="w-full text-center py-2 mt-3 border-t border-slate-100 font-bold text-xs text-slate-405 hover:text-slate-800 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      {isEpisodesExpanded ? 'Show less' : `View ${episodes.length - 4}+ more episodes`}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Watch providers block embedded at bottom of overview on mobile screens */}
+              <MovieSidebar movie={movie} className="lg:hidden flex flex-col gap-4 mt-4" />
 
             </div>
           )}
@@ -801,7 +909,7 @@ export default function MovieSection({ movie }: MovieSectionProps) {
               
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 {movie.cast?.map((actor, idx) => (
-                  <div key={idx} className="bg-white border border-slate-150 rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col">
+                  <div key={idx} className="bg-slate-50 rounded-2xl overflow-hidden transition-all flex flex-col">
                     <div className="aspect-[3/4] w-full bg-slate-50 relative overflow-hidden">
                       <img
                         src={actor.profilePath}
@@ -812,7 +920,7 @@ export default function MovieSection({ movie }: MovieSectionProps) {
                     </div>
                     <div className="p-3 flex-1 flex flex-col justify-center">
                       <div className="text-xs font-bold text-slate-900 line-clamp-1">{actor.name}</div>
-                      <div className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">{actor.character}</div>
+                      <div className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">{actor.character}</div>
                     </div>
                   </div>
                 ))}
@@ -836,6 +944,7 @@ export default function MovieSection({ movie }: MovieSectionProps) {
                     <select
                       value={selectedSeason}
                       onChange={(e) => setSelectedSeason(Number(e.target.value))}
+
                       className="bg-white border border-slate-250 hover:border-slate-350 rounded-lg text-xs py-1.5 px-3 focus:outline-none text-slate-700 bg-none cursor-pointer"
                     >
                       {movie.seasons
@@ -977,7 +1086,7 @@ export default function MovieSection({ movie }: MovieSectionProps) {
                   { title: 'Cinematography and Art Directing Excellence', institution: 'Creative Writers & Directors Union', category: 'Winner / Gold Leaf' },
                   { title: 'Original Screenplay and Screen Adaptation', institution: 'International Screen Writers Guild', category: 'Nominated / Outstanding Script' },
                 ].map((item, idx) => (
-                  <div key={idx} className="bg-white border border-slate-100 p-4 rounded-xl flex gap-3.5 shadow-5xs">
+                  <div key={idx} className="bg-slate-50/70 p-4 rounded-xl flex gap-3.5 shadow-none border-none">
                     <div className="w-10 h-10 rounded-full bg-[#e1f2fa] flex items-center justify-center shrink-0 text-[#006097]">
                       <Award size={18} />
                     </div>

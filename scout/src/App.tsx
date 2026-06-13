@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation, ArrowUpLeft, History, Bookmark, Settings, ChevronDown, ChevronUp, MoreVertical, Plus, Share2, Printer } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -23,11 +23,28 @@ import {
 import { PageIntelligencePanel } from './components/PageIntelligence';
 import IntentDecoder from './components/IntentDecoder';
 import MovieSection, { MovieSidebar } from './components/MovieSection';
+import SportsSection from './components/SportsSection';
 import NavigationMap from './components/NavigationMap';
+import PeopleSection from './components/PeopleSection';
 
-// Initialize Gemini on the Frontend
-const API_KEY = process.env.GEMINI_API_KEY || '';
-const genAI = new GoogleGenAI({ apiKey: API_KEY || 'AI-NOT-SET' });
+// Initialize Gemini on the Frontend (Proxied safely through server to prevent client-side Permission Denied in developer iframe)
+const API_KEY: string = 'server_proxied';
+const genAI = new GoogleGenAI({ apiKey: 'server_proxied' });
+
+async function generateContentViaProxy({ model, contents, config }: { model: string, contents: any, config?: any }) {
+  const response = await fetch('/api/ai/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, contents, config })
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Gemini proxy failed with status ${response.status}`);
+  }
+  const data = await response.json();
+  return { text: data.text };
+}
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -59,6 +76,11 @@ const getSessionId = () => {
   return sid;
 };
 
+// Client-side static caching structures to optimize Gemini API usage and protect against quota/rate limit fatigue (429s)
+const clientAiOverviewCache: Record<string, any> = {};
+const clientFaqCache: Record<string, any[]> = {};
+const clientKnowledgePanelCache: Record<string, any> = {};
+
 export default function App() {
   const [query, setQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -88,6 +110,8 @@ export default function App() {
   const [lyrics, setLyrics] = useState<any>(null);
   const [holidays, setHolidays] = useState<any>(null);
   const [movie, setMovie] = useState<any>(null);
+  const [sports, setSports] = useState<any>(null);
+  const [person, setPerson] = useState<any>(null);
   const [youtubeVideos, setYoutubeVideos] = useState<any[] | null>(null);
   const [videosLoading, setVideosLoading] = useState<boolean>(false);
   const [appsData, setAppsData] = useState<any[] | null>(null);
@@ -128,6 +152,28 @@ export default function App() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const handleSearchRef = useRef<any>(null);
+  const [clientCoords, setClientCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && navigator.geolocation) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          setClientCoords({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.warn("Initial client geolocation background watch failed:", error);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+      };
+    }
+  }, []);
 
   const userRef = useRef<any>(null);
   useEffect(() => {
@@ -507,8 +553,8 @@ export default function App() {
       If it is likely correct or a brand name, return the exact same string.
       Be conservative. Only correct if you are 95% certain.`;
       
-      genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
+      generateContentViaProxy({
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
       }).then((r: any) => {
         const text = r.text?.trim() || "";
@@ -540,6 +586,32 @@ export default function App() {
         });
     }
 
+    // Asynchronously obtain client geolocation for precise directions and local places bias
+    let userLatitude: number | undefined = clientCoords?.latitude;
+    let userLongitude: number | undefined = clientCoords?.longitude;
+    if (!userLatitude && typeof window !== 'undefined' && navigator.geolocation) {
+      try {
+        const geoPromise = new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { 
+            enableHighAccuracy: true, 
+            timeout: 1000 
+          });
+        });
+        const geoPos = await Promise.race([
+          geoPromise,
+          new Promise<null>((r) => setTimeout(() => r(null), 1200)) // Safety timeout so search never blocks
+        ]) as GeolocationPosition | null;
+
+        if (geoPos) {
+          userLatitude = geoPos.coords.latitude;
+          userLongitude = geoPos.coords.longitude;
+          setClientCoords({ latitude: userLatitude, longitude: userLongitude });
+        }
+      } catch (err) {
+        console.warn("Could not retrieve client geolocation prior to search call:", err);
+      }
+    }
+
     try {
       const searchRes = await fetch('/api/search', {
         method: 'POST',
@@ -553,7 +625,9 @@ export default function App() {
           vector,
           sessionId: getSessionId(),
           uid: user?.sub || user?.email || 'guest',
-          safeSearch
+          safeSearch,
+          userLatitude,
+          userLongitude
         })
       });
       
@@ -602,6 +676,8 @@ export default function App() {
       setLyrics(data.lyrics || null);
       setHolidays(data.holidays || null);
       setMovie(data.movie || null);
+      setSports(data.sports || null);
+      setPerson(data.person || null);
       setHowTo(data.howTo || null);
       setOrganicFaqs(data.organicFaqs || []);
       setDetectedIntent(data.detectedIntent || 'general');
@@ -807,6 +883,8 @@ export default function App() {
         setLyrics(null);
         setHolidays(null);
         setMovie(null);
+        setSports(null);
+        setPerson(null);
         setHowTo(null);
         setOrganicFaqs([]);
         setDetectedIntent('general');
@@ -824,6 +902,14 @@ export default function App() {
 
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET' || aiRateLimited) return;
+    
+    const cacheKey = (queryText || '').toLowerCase().trim();
+    if (clientAiOverviewCache[cacheKey]) {
+      setAiOverview(clientAiOverviewCache[cacheKey]);
+      setAiLoading(false);
+      setIsOverviewExpanded(false);
+      return;
+    }
     
     setAiLoading(true);
     setIsOverviewExpanded(false);
@@ -847,8 +933,8 @@ export default function App() {
            4. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown ![title](Image_URL) if it is highly relevant. Use at most 2-3 images.
            5. Be objective and professional. Use Markdown formatting.`;
 
-      const result = await genAI.models.generateContent({
-        model: "gemini-3.5-flash",
+      const result = await generateContentViaProxy({
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
@@ -864,7 +950,7 @@ export default function App() {
           .trim();
       }
       
-      setAiOverview({
+      const resData = {
         summary: cleanText,
         sources: contextResults.slice(0, 5).map(r => ({ 
           title: r.title, 
@@ -872,7 +958,9 @@ export default function App() {
           snippet: r.snippet,
           image: r.image
         }))
-      });
+      };
+      clientAiOverviewCache[cacheKey] = resData;
+      setAiOverview(resData);
     } catch (e: any) {
       console.error("AI Overview failed:", e);
       if (e.message?.includes('429') || e.status === 429) {
@@ -885,12 +973,19 @@ export default function App() {
 
   const generateFAQ = async (queryText: string, contextResults: SearchResult[]) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET' || aiRateLimited) return;
+
+    const cacheKey = (queryText || '').toLowerCase().trim();
+    if (clientFaqCache[cacheKey]) {
+      setFaq(clientFaqCache[cacheKey]);
+      return;
+    }
+
     try {
       const context = contextResults.slice(0, 8).map(r => r.snippet).join("\n");
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
-      const response = await genAI.models.generateContent({
-        model: "gemini-3.5-flash",
+      const response = await generateContentViaProxy({
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -909,7 +1004,9 @@ export default function App() {
       });
       
       const data = JSON.parse(response.text || '[]');
-      setFaq(data.slice(0, 3));
+      const cleanFaq = data.slice(0, 3);
+      clientFaqCache[cacheKey] = cleanFaq;
+      setFaq(cleanFaq);
     } catch (e: any) {
       console.error("FAQ generation failed:", e);
       if (e.message?.includes('429') || e.status === 429) {
@@ -920,6 +1017,12 @@ export default function App() {
 
   const generateKnowledgePanel = async (entityName: string, entityType?: string) => {
     if (!API_KEY || API_KEY === 'AI-NOT-SET') return;
+    
+    const cacheKey = (entityName || '').toLowerCase().trim();
+    if (clientKnowledgePanelCache[cacheKey]) {
+      setKnowledgePanel(clientKnowledgePanelCache[cacheKey]);
+      return;
+    }
     
     const isUnsuitedImage = (url: string, query: string): boolean => {
       if (!url) return true;
@@ -1041,6 +1144,7 @@ export default function App() {
           peopleAlsoSearchFor: [],
           wikipediaUrl: wikiUrl
         };
+        clientKnowledgePanelCache[cacheKey] = directData;
         setKnowledgePanel(directData);
         return;
       }
@@ -1074,8 +1178,8 @@ export default function App() {
       
       Make sure to return valid JSON following the schema perfectly.`;
 
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const response = await generateContentViaProxy({
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -1130,6 +1234,7 @@ export default function App() {
         if (wikiUrl) {
           data.wikipediaUrl = wikiUrl;
         }
+        clientKnowledgePanelCache[cacheKey] = data;
         setKnowledgePanel(data);
       }
     } catch (e) {
@@ -1186,6 +1291,8 @@ export default function App() {
     setLyrics(null);
     setHolidays(null);
     setMovie(null);
+    setSports(null);
+    setPerson(null);
     setHowTo(null);
     setOrganicFaqs([]);
     setDetectedIntent('general');
@@ -1369,6 +1476,8 @@ export default function App() {
             lyrics={lyrics}
             holidays={holidays}
             movie={movie}
+            sports={sports}
+            person={person}
             youtubeVideos={youtubeVideos}
             videosLoading={videosLoading}
             setIsMobileSearchOpen={setIsMobileSearchOpen}
@@ -1431,6 +1540,77 @@ function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, 
     return () => clearTimeout(timer);
   }, []);
 
+  const defaultChromeSuggestions = [
+    "komumech",
+    "google maps",
+    "color picker",
+    "internet speed test",
+    "how to talk to gemini",
+    "Modern API Integration: Built with the official @vis.gl/react-google-maps"
+  ];
+
+  const handleInsert = (e: React.MouseEvent, text: string) => {
+    e.stopPropagation();
+    setQuery(text);
+    inputRef.current?.focus();
+  };
+
+  const getFilteredSuggestions = () => {
+    if (!query) {
+      return defaultChromeSuggestions;
+    }
+    // Filter by query
+    const results = defaultChromeSuggestions.filter(s => 
+      s.toLowerCase().includes(query.toLowerCase())
+    );
+    // If suggestions are provided from props, add them
+    if (suggestions && suggestions.length > 0) {
+      suggestions.forEach((s: string) => {
+        if (!results.includes(s)) {
+          results.push(s);
+        }
+      });
+    }
+    return results;
+  };
+
+  const visibleSuggestions = getFilteredSuggestions();
+
+  // Helper inside search overlay to highlight words
+  const renderHighlightedText = (sText: string, currentQuery: string) => {
+    if (!currentQuery) {
+      return <span className="text-[15.5px] font-normal text-slate-800">{sText}</span>;
+    }
+    const queryLower = currentQuery.toLowerCase().trim();
+    const queryWords = queryLower.split(/\s+/).filter(Boolean);
+    const tokens = sText.split(/(\s+)/);
+
+    return (
+      <span className="text-[15.5px] text-slate-800 font-sans tracking-tight">
+        {tokens.map((token, idx) => {
+          const normToken = token.toLowerCase().trim();
+          if (!normToken) return <React.Fragment key={idx}>{token}</React.Fragment>;
+
+          // If the word token exists in query words as a substring or equal, keep regular font-normal. Otherwise bold it!
+          const isWordInQuery = queryWords.some(qw => normToken.includes(qw) || qw.includes(normToken));
+          if (isWordInQuery) {
+            return (
+              <span key={idx} className="font-normal text-slate-500">
+                {token}
+              </span>
+            );
+          } else {
+            return (
+              <span key={idx} className="font-black text-slate-900">
+                {token}
+              </span>
+            );
+          }
+        })}
+      </span>
+    );
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -1438,136 +1618,64 @@ function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, 
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-white z-[9999] flex flex-col font-sans md:hidden text-slate-800"
     >
-      {/* Top Search Bar - Expanded height, squared corners (no rounded edges), with grey camera and audio icons at the bottom left/right */}
-      <div className="bg-slate-50 flex flex-col p-3 pb-2.5 border-b border-slate-150 gap-2.5 shrink-0 select-none">
-        <div className="flex items-center gap-3">
-          <button 
-            onClick={onClose} 
-            type="button"
-            className="p-1 hover:bg-slate-200 rounded-lg active:scale-95 transition-transform shrink-0"
-          >
-            <ArrowLeft size={22} className="text-slate-600" />
-          </button>
+      {/* Top Search Bar area styled EXACTLY like the user's screenshot */}
+      <div className="bg-white px-4 py-3 border-b border-slate-150 flex items-center gap-4 shrink-0 select-none">
+        <button 
+          onClick={onClose} 
+          type="button"
+          className="p-1 hover:bg-slate-50 rounded-full active:scale-95 transition-all shrink-0"
+        >
+          <Plus size={24} className="text-slate-800 stroke-[2.5]" />
+        </button>
 
-          <div className="flex-1 flex items-center bg-white rounded-none border border-slate-250 shadow-2xs px-3.5 py-3 min-w-0">
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  onSearch(query);
-                  onClose();
-                }
-              }}
-              className="flex-1 bg-transparent border-none outline-none text-[15.5px] text-slate-800 placeholder:text-slate-450 font-sans font-medium p-0 min-w-0 focus:ring-0 focus:outline-none"
-              placeholder="Search Scout..."
-            />
-            
-            {query && (
-              <button 
-                type="button" 
-                onClick={() => { setQuery(''); inputRef.current?.focus(); }} 
-                className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
-        </div>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              onSearch(query);
+              onClose();
+            }
+          }}
+          className="flex-1 bg-transparent border-none outline-none text-[15.5px] sm:text-[16.5px] text-slate-900 placeholder:text-slate-400 font-sans font-neutral p-0 focus:ring-0 focus:outline-none min-w-0"
+          placeholder="Search Scout or type URL"
+        />
 
-        {/* Bottom icon row situated on the left and right inside the bar */}
-        <div className="flex items-center justify-between px-10 pt-0.5">
-          <button 
-            type="button"
-            onClick={() => { fileInputRef.current?.click(); onClose(); }}
-            className="flex items-center gap-1.5 p-1.5 hover:bg-slate-200/60 rounded text-slate-500 font-medium cursor-pointer bg-transparent border-none"
-          >
-            <Camera size={18} className="text-slate-500" />
-            <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Search Image</span>
-          </button>
-          
-          <button 
-            type="button" 
-            onClick={() => { onMicClick(); onClose(); }}
-            className="flex items-center gap-1.5 p-1.5 hover:bg-slate-200/60 rounded text-slate-500 font-medium cursor-pointer bg-transparent border-none"
-          >
-            <Mic size={18} className="text-slate-500" />
-            <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">Voice Search</span>
-          </button>
-        </div>
+        <button 
+          type="button" 
+          onClick={query ? () => { setQuery(''); inputRef.current?.focus(); } : onClose} 
+          className="p-1 hover:bg-slate-50 rounded-full text-slate-800 transition-colors focus:outline-none shrink-0"
+        >
+          <X size={24} className="stroke-[2.5]" />
+        </button>
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto bg-white px-2 py-2">
-        {!query ? (
-          <div>
-            {userHistory && userHistory.length > 0 && (
-              <>
-                <div className="text-[11px] uppercase tracking-wider text-slate-400 font-extrabold px-4 py-2 flex items-center gap-1.5 select-none md:hidden">
-                  <Clock size={12} />
-                  <span>Recent searches</span>
-                </div>
-                <div className="flex flex-col mt-1">
-                  {[...userHistory].reverse().slice(0, 8).map((h: string, i: number) => (
-                    <div 
-                      key={i}
-                      onClick={() => { onSearch(h); onClose(); }}
-                      className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 rounded-lg active:bg-slate-100 transition-colors cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                        <Clock size={16} className="text-slate-400 shrink-0" />
-                        <span className="text-[15px] font-semibold text-slate-700 truncate">{h}</span>
-                      </div>
-                      <button 
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); removeHistoryItem(h); }}
-                        className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100/60 transition-colors shrink-0"
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-extrabold px-4 py-3 flex items-center gap-1.5 select-none mt-2">
-              <TrendingUp size={12} className="text-slate-450" />
-              <span>Trending searches</span>
-            </div>
-            <div className="flex flex-col mt-1">
-              {["internet speed test", "lyrics finder", "recipe for classic pasta", "weather forecast", "world news", "how does ai search work"].map((t: string, i: number) => (
-                <div 
-                  key={i}
-                  onClick={() => { onSearch(t); onClose(); }}
-                  className="flex items-center gap-3.5 px-4 py-3 hover:bg-slate-50 rounded-lg active:bg-slate-100 transition-colors cursor-pointer text-left"
-                >
-                  <TrendingUp size={16} className="text-slate-400 shrink-0" />
-                  <span className="text-[15px] font-semibold text-slate-700 truncate">{t}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div>
-            {suggestions && suggestions.length > 0 && (
-              <div className="flex flex-col">
-                {suggestions.slice(0, 15).map((s: string, i: number) => (
-                  <div 
-                    key={i}
-                    onClick={() => { onSearch(s); onClose(); }}
-                    className="flex items-center gap-3.5 px-4 py-3 hover:bg-slate-50 rounded-lg active:bg-slate-100 transition-colors cursor-pointer text-left"
-                  >
-                    <Search size={16} className="text-slate-400 shrink-0" />
-                    <span className="text-[15px] font-semibold text-slate-800 truncate">{s}</span>
-                  </div>
-                ))}
+      {/* Content Area - Clean chrome suggestion list */}
+      <div className="flex-1 overflow-y-auto bg-white">
+        <div className="flex flex-col">
+          {visibleSuggestions.map((s: string, i: number) => (
+            <div 
+              key={i}
+              onClick={() => { onSearch(s); onClose(); }}
+              className="flex items-center justify-between px-4.5 py-4 hover:bg-slate-50 active:bg-slate-100 transition-colors cursor-pointer border-b border-slate-100"
+            >
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                <Search size={20} className="text-slate-400 shrink-0" />
+                <span className="truncate line-clamp-1 flex-1">{renderHighlightedText(s, query)}</span>
               </div>
-            )}
-          </div>
-        )}
+              <button 
+                type="button"
+                onClick={(e) => handleInsert(e, s)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors shrink-0 cursor-pointer ml-2"
+                title="Insert suggestion into search box"
+              >
+                <ArrowUpLeft size={18} className="text-slate-450 stroke-[2.5]" />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </motion.div>
   );
@@ -1648,25 +1756,30 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           {/* MOBILE SEARCH BAR TRIGGER (Replaces wrapping textarea with a clean, static, non-wrapping Google-like search bar on mobile) */}
           <div 
             onClick={() => setIsMobileSearchOpen(true)}
-            className="flex items-center gap-3 px-5 py-3 w-full bg-white rounded-full shadow-2xl border border-slate-200/60 cursor-pointer select-none md:hidden text-left"
+            className="flex items-center justify-between pl-4.5 pr-4 py-3 bg-white border border-slate-200/90 shadow-2xl rounded-full w-full cursor-pointer select-none md:hidden text-left"
           >
-            <Search className="text-slate-400 shrink-0" size={20} />
-            <span className="flex-grow text-slate-400 font-sans text-[15px] truncate font-medium">
-              {query || "Ask Scout anything..."}
-            </span>
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-3.5 flex-1 min-w-0 pr-2">
+              <Search size={20} className="text-slate-500 shrink-0" />
+              <span className="flex-1 text-[16px] font-normal text-slate-800 placeholder:text-slate-400 truncate">
+                {query || "Ask Scout anything..."}
+              </span>
+              {query && (
+                <button 
+                  type="button" 
+                  onClick={(e) => { e.stopPropagation(); setQuery(''); }} 
+                  className="p-1 text-slate-500 hover:text-slate-700 focus:outline-none shrink-0"
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2.5 shrink-0 pl-1">
+              <div className="h-5 w-[1px] bg-slate-200 shrink-0" />
               <button 
-                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
                 type="button" 
-                className="text-slate-400 hover:text-slate-600 focus:outline-none transition-colors"
-                title="Visual Search (Scout Vision)"
-              >
-                <Camera size={20} />
-              </button>
-              <button 
                 onClick={(e) => { e.stopPropagation(); onMicClick(); }}
-                type="button" 
-                className="text-purple-600 hover:text-purple-800 focus:outline-none transition-colors"
+                className="p-1 hover:bg-slate-100 rounded-full text-slate-600 active:scale-95 transition-all select-none focus:outline-none bg-transparent border-none shrink-0"
               >
                 <Mic size={20} />
               </button>
@@ -1875,7 +1988,7 @@ function GoogleBusinessProfileCard({ profile, query }: { profile: any; query?: s
     return q.includes('direction') || q.includes('route') || q.includes('navigate') || q.includes('get to') || q.includes('way to') || q.includes('how do i get') || q.includes('drive to') || q.includes('walk to') || q.includes('map to');
   }, [query]);
 
-  const [showNavigationMap, setShowNavigationMap] = React.useState(isDirectionsQuery);
+  const [showNavigationMap, setShowNavigationMap] = React.useState(false);
 
   React.useEffect(() => {
     if (isDirectionsQuery) {
@@ -2069,14 +2182,14 @@ function GoogleBusinessProfileCard({ profile, query }: { profile: any; query?: s
             <button
               type="button"
               onClick={() => setShowNavigationMap(!showNavigationMap)}
-              className={`w-full py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-xs transition-all duration-200 cursor-pointer border-none shadow-xs ${
+              className={`w-full py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 font-bold text-xs transition-all duration-200 cursor-pointer border border-slate-200/50 ${
                 showNavigationMap 
                   ? 'bg-rose-50 hover:bg-rose-100 text-rose-600' 
-                  : 'bg-slate-900 hover:bg-black text-white hover:shadow-xs'
+                  : 'bg-slate-900 hover:bg-black text-white'
               }`}
             >
               <Navigation size={13.5} className="" />
-              {showNavigationMap ? "Hide Routing Companion" : "Start Live GPS Route Guide"}
+              {showNavigationMap ? "Hide Directions" : "Show Directions"}
             </button>
 
             <AnimatePresence>
@@ -2086,7 +2199,7 @@ function GoogleBusinessProfileCard({ profile, query }: { profile: any; query?: s
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.3, ease: 'easeInOut' }}
-                  className="overflow-hidden mt-3.5"
+                  className="overflow-hidden mt-3.5 -mx-5 -mb-5 rounded-b-3xl"
                 >
                   <NavigationMap destination={destinationCoords} />
                 </motion.div>
@@ -2714,19 +2827,200 @@ function VideoStrip({ youtubeVideos, loading, onMore, query = '' }: { youtubeVid
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent }: any) {
+
+function RecipeIntegrationBox({ recipes, onResultClick, onImageError }: { recipes: any[]; onResultClick?: any; onImageError?: any }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  if (!recipes || recipes.length === 0) return null;
+
+  // Initially show only 4 recipes (matches the 2x2 grid in screenshot!)
+  const visibleRecipes = isExpanded ? recipes : recipes.slice(0, 4);
+
+  return (
+    <div className="bg-transparent mb-8 w-full max-w-[652px] select-none">
+      {/* Title & Settings Cog Line */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[20px] font-sans font-medium text-slate-900 tracking-tight flex items-center gap-1.5 leading-none">
+          Recipes
+        </h3>
+        <div className="w-8 h-8 rounded-full bg-[#1a73e8] hover:bg-blue-700 text-white flex items-center justify-center cursor-pointer transition-colors shadow-3xs" title="Recipe Settings">
+          <Settings size={15} className="stroke-[2.5]" />
+        </div>
+      </div>
+
+      {/* Subfilters list (Image 2 mockup pills) */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-3.5 scrollbar-none scrollbar-hide select-none" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        <div className="flex items-center gap-1 bg-[#1a73e8] text-white px-3 py-1 bg-[#1a73e8] rounded-full text-xs font-bold shadow-2xs border-none cursor-default shrink-0">
+          <X size={12} className="stroke-[2.5]" />
+          <span>Bacon</span>
+        </div>
+        <div className="bg-white border border-[#dadce0] text-slate-700 px-3.5 py-1.2 rounded-full text-xs font-medium hover:bg-slate-50 transition-all shrink-0 cursor-pointer active:scale-95 leading-relaxed">
+          Quick
+        </div>
+        <div className="bg-white border border-[#dadce0] text-slate-700 px-3.5 py-1.2 rounded-full text-xs font-medium hover:bg-slate-50 transition-all shrink-0 cursor-pointer active:scale-95 leading-relaxed">
+          Oven
+        </div>
+        <div className="bg-white border border-[#dadce0] text-slate-700 px-3.5 py-1.2 rounded-full text-xs font-medium hover:bg-slate-50 transition-all shrink-0 cursor-pointer active:scale-95 leading-relaxed">
+          Low Calorie
+        </div>
+      </div>
+
+      {/* 2x2 Recipe Grid */}
+      <div className="grid grid-cols-2 gap-3.5 sm:gap-4 md:gap-5 py-1.5 select-none">
+        {visibleRecipes.map((res: any, idx: number) => {
+          let details: any = {};
+          try {
+            details = typeof res.card_details === 'string' ? JSON.parse(res.card_details) : (res.card_details || {});
+          } catch (_) {
+            details = {};
+          }
+
+          const cardImg = details.card_image || res.image || "https://images.unsplash.com/photo-1606787366850-de6330128bfc?q=80&w=350";
+          
+          return (
+            <div key={res.id || idx} className="flex flex-col group/recipe-card min-w-0">
+              {/* Image with overlay elements */}
+              <div className="aspect-[1.15] sm:aspect-[1.25] w-full rounded-2xl overflow-hidden relative bg-slate-50 shrink-0 select-none">
+                <img 
+                  src={cardImg} 
+                  className="w-full h-full object-cover group-hover/recipe-card:scale-[1.03] transition-transform duration-500" 
+                  referrerPolicy="no-referrer"
+                  alt={res.title}
+                  onError={() => {
+                    if (cardImg) onImageError?.(cardImg);
+                  }}
+                />
+                
+                {/* Translucent Bookmark icon top right */}
+                <div 
+                  className="absolute top-2 right-2 w-7.5 h-7.5 rounded-lg bg-black/45 backdrop-blur-xs flex items-center justify-center text-white hover:scale-105 active:scale-95 transition-all cursor-pointer z-10"
+                  onClick={(e) => { e.stopPropagation(); }}
+                  title="Save Recipe"
+                >
+                  <Bookmark size={14} className="stroke-[2.5]" />
+                </div>
+
+                {/* Left & Right Chevron navigation representing dynamic item pager */}
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 w-6.5 h-6.5 rounded-full bg-black/35 backdrop-blur-3xs flex items-center justify-center text-white pointer-events-none opacity-85">
+                  <ChevronLeft size={13} className="stroke-[2.5]" />
+                </div>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 w-6.5 h-6.5 rounded-full bg-black/35 backdrop-blur-3xs flex items-center justify-center text-white pointer-events-none opacity-85">
+                  <ChevronRight size={13} className="stroke-[2.5]" />
+                </div>
+
+                {/* Visual Carousel Pager dots at the bottom-center */}
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.2 py-1 bg-black/30 backdrop-blur-xs rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white block" />
+                  <span className="w-2.2 h-[3.5px] bg-white rounded-full block" />
+                  <span className="w-1.5 h-1.5 bg-white/55 rounded-full block" />
+                </div>
+              </div>
+
+              {/* Text metadata block below */}
+              <div className="flex-1 flex flex-col min-w-0 pt-2 bg-white">
+                {/* Title Line next to 3-dots */}
+                <div className="flex justify-between items-start gap-1.5 min-w-0">
+                  <a 
+                    href={res.url} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    onClick={() => onResultClick?.(res.id, res.url, idx + 1)}
+                    className="block hover:underline shrink-0 flex-1 min-w-0 text-left"
+                  >
+                    <h4 className="font-sans font-medium text-[#1a0dab] text-[14.5px] sm:text-[15.5px] leading-snug line-clamp-2 pr-0.5 break-words">
+                      {res.title}
+                    </h4>
+                  </a>
+                  <div className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5 rounded-full hover:bg-slate-100 transition-colors shrink-0">
+                    <MoreVertical size={16} />
+                  </div>
+                </div>
+
+                {/* Subtitle publisher */}
+                <span className="text-[12.5px] font-normal text-slate-500 mt-1 block text-left truncate">
+                  {details.publisher || new URL(res.url).hostname.replace('www.', '')}
+                </span>
+
+                {/* Google-like star rating row matching high status display */}
+                <div className="flex items-center gap-1 text-[12.5px] mt-0.5 select-none leading-none text-left">
+                  <span className="text-slate-800 font-extrabold">{parseFloat(details.rating || "5.0").toFixed(1)}</span>
+                  <div className="flex items-center text-amber-500 font-normal">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <span key={i} className={i < Math.round(parseFloat(details.rating || "5.0")) ? "text-amber-500" : "text-slate-200"}>★</span>
+                    ))}
+                  </div>
+                  <span className="text-slate-500 font-normal text-[11.5px] ml-0.5">({details.reviews || "52"})</span>
+                </div>
+
+                {/* Detail text caption */}
+                <span className="text-[12px] text-slate-500 block text-left font-normal mt-0.5 truncate">
+                  {details.ingredients || "1 ingredient"} {details.time ? `· ${details.time.replace('PT','').replace('M','m').replace('H','h')}` : "· 20m"}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Large-capsule custom full width bottom toggle "More recipes" button */}
+      {recipes.length > 4 && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          type="button"
+          className="mt-4 w-full bg-[#f1f3f4] hover:bg-slate-200 text-slate-800 text-[13.5px] font-extrabold py-3.2 px-5 rounded-full border-none outline-none focus:outline-none flex items-center justify-center gap-1.5 text-center cursor-pointer select-none transition-all duration-200 active:scale-98"
+        >
+          <span>{isExpanded ? "Less recipes" : "More recipes"}</span>
+          <ChevronDown size={16} className={`text-slate-500 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, sports, person, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent }: any) {
   const [isResInputFocused, setIsResInputFocused] = useState(false);
   const [aiOverviewCopied, setAiOverviewCopied] = useState(false);
   const [aiOverviewRating, setAiOverviewRating] = useState<'up' | 'down' | null>(null);
+
+  // Keep track of broken image URLs to automatically filter them from results
+  const [brokenUrls, setBrokenUrls] = useState<string[]>([]);
+  const onImageError = (url: string) => {
+    if (url) {
+      setBrokenUrls(prev => {
+        if (prev.includes(url)) return prev;
+        return [...prev, url];
+      });
+    }
+  };
+
   // Helper to check if a URL is an image
   const isImageUrl = (url: string) => /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(url.split('?')[0]);
 
-  // Group images by domain for the carousel
-  const carouselImages = results.filter((res: any) => isImageUrl(res.url));
+  // Clean the results by omitting cards that contain a known-broken image URL
+  const cleanResults = (results || []).filter((res: any) => {
+    if (res.image && brokenUrls.includes(res.image)) return false;
+    if (brokenUrls.includes(res.url)) return false;
+    
+    let cardImg = '';
+    if (res.card_details) {
+      try {
+        const details = typeof res.card_details === 'string' ? JSON.parse(res.card_details) : res.card_details;
+        cardImg = details.card_image || details.image;
+      } catch (_) {}
+    }
+    if (cardImg && brokenUrls.includes(cardImg)) return false;
+    return true;
+  });
+
+  // Group images by domain for the carousel using our cleaned up results list
+  const carouselImages = cleanResults.filter((res: any) => isImageUrl(res.url));
+
+  // Get all recipes to show inside the RecipeIntegrationBox
+  const recipes = cleanResults.filter((res: any) => res.card_type === 'recipe');
 
   const filteredResults = activeTab === 'images' 
-    ? results.filter((res: any) => isImageUrl(res.url) || res.image)
-    : results.filter((res: any) => !isImageUrl(res.url)); // Keep 'all' list focused on webpages, but results still contains images
+    ? cleanResults.filter((res: any) => isImageUrl(res.url) || res.image)
+    : cleanResults.filter((res: any) => !isImageUrl(res.url) && res.card_type !== 'recipe'); // Keep 'all' list focused on webpages, but omit premium recipes to prevent duplication
 
   // Group results by domain (simple grouping)
   const groupedResults: any[] = [];
@@ -2734,15 +3028,14 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   const maxNested = 3; // Nesting limit
   
   if (activeTab === 'all') {
-    results.filter((res: any) => !isImageUrl(res.url)).forEach((res: any) => {
+    filteredResults.forEach((res: any) => {
       // Normalize domain for reliable grouping (remove www. and lowercase)
       const groupKey = res.displayUrl.toLowerCase().replace(/^www\./, '');
       
       if (processedDomains.has(groupKey)) return;
 
-      // Find all results for this domain in the full results set
-      const domainMatches = results.filter(r => 
-        !isImageUrl(r.url) &&
+      // Find all results for this domain in the filtered results set
+      const domainMatches = filteredResults.filter(r => 
         r.displayUrl.toLowerCase().replace(/^www\./, '') === groupKey
       );
       
@@ -2766,6 +3059,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   const [glowVisible, setGlowVisible] = useState(true);
   const [isPasfExpanded, setIsPasfExpanded] = useState(false);
   const [isWikiExpanded, setIsWikiExpanded] = useState(false);
+  const [isThreeDotsOpen, setIsThreeDotsOpen] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState("");
   const [isIntentDecoderOpen, setIsIntentDecoderOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -2854,37 +3149,31 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
           <div className="relative w-full">
             <div 
               onClick={() => setIsMobileSearchOpen(true)}
-              className="relative flex items-center justify-between px-4 py-2.5 bg-white border border-slate-200/90 shadow-sm rounded-full w-full cursor-pointer select-none"
+              className="relative flex items-center justify-between pl-4.5 pr-4 py-2.5 bg-white border border-slate-200/90 shadow-md rounded-full w-full cursor-pointer select-none"
             >
-              <div className="flex items-center gap-2.5 flex-1 min-w-0 pr-2">
-                <Search size={16} className="text-slate-450 shrink-0" />
-                <span className="flex-1 text-[15px] font-normal text-slate-900 truncate">
+              <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+                <Search size={20} className="text-slate-500 shrink-0" />
+                <span className="flex-1 text-[16px] font-normal text-slate-800 placeholder:text-slate-450 truncate">
                   {query || "Search Scout..."}
                 </span>
                 {query && (
                   <button 
                     type="button" 
                     onClick={(e) => { e.stopPropagation(); setQuery(''); }} 
-                    className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none"
+                    className="p-1 text-slate-500 hover:text-slate-700 focus:outline-none shrink-0"
                   >
-                    <X size={15} />
+                    <X size={20} />
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0 border-l border-slate-200 pl-2.5 ml-1">
-                <button 
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                  className={`p-1.5 hover:bg-slate-50 rounded-full transition-all ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-400'}`}
-                >
-                  <Camera size={16} />
-                </button>
+              <div className="flex items-center gap-2.5 shrink-0 pl-1">
+                <div className="h-5 w-[1px] bg-slate-200 shrink-0" />
                 <button 
                   type="button" 
                   onClick={(e) => { e.stopPropagation(); onMicClick(); }}
-                  className="p-1.5 hover:bg-slate-50 rounded-full text-slate-500 transition-all active:scale-95"
+                  className="p-1 hover:bg-slate-100 rounded-full text-slate-600 active:scale-95 transition-all focus:outline-none bg-transparent border-none shrink-0"
                 >
-                  <Mic size={16} />
+                  <Mic size={20} />
                 </button>
               </div>
             </div>
@@ -3060,6 +3349,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                           style={{ maxHeight: '280px' }} 
                           referrerPolicy="no-referrer" 
                           alt={res.title} 
+                          onError={() => {
+                            if (imgUrl) onImageError?.(imgUrl);
+                          }}
                         />
                       </div>
                       <div className="pt-2 px-1 pb-1">
@@ -3250,7 +3542,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             )}
           </div>
         ) : activeTab === 'ai' ? (
-          <div className="w-full px-6 sm:px-10 md:px-12 py-6 max-w-[1700px] mx-auto select-none">
+          <div className="w-full px-4 sm:px-10 md:px-12 py-6 max-w-[1700px] mx-auto select-none">
             {aiLoading ? (
               <div className="py-8 animate-pulse max-w-4xl">
                 <div className="flex items-center gap-2.5 mb-6 select-none">
@@ -3526,14 +3818,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 )}
               </div>
             ) : aiRateLimited ? (
-              <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4 max-w-3xl">
-                <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
-                  <Zap size={20} />
-                </div>
-                <div>
-                  <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Mode hitting limits</h4>
-                  <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
-                </div>
+              <div className="py-20 text-center text-slate-400 font-medium italic">
+                AI Overview is temporarily unavailable. Please try again soon.
               </div>
             ) : (
               <div className="py-20 text-center text-slate-400 font-medium italic">
@@ -3551,7 +3837,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                {knowledgePanel && (
                  <motion.div 
                    initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                   className="bg-white border border-slate-200 rounded-2xl overflow-hidden"
+                   className="bg-white rounded-[28px] overflow-hidden border-0"
                  >
                  {(() => {
                    const panelImages = (knowledgePanel.images && knowledgePanel.images.length > 0) 
@@ -3560,13 +3846,100 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
                    return (
                      <div className="p-4 md:p-5">
-                       {/* Header: Title, Subtitle, and Three Dots Menu */}
+                       {/* Header: Title, Subtitle, and Share + Three Dots Menu */}
                        <div className="flex justify-between items-start mb-6">
                          <div>
                            <h2 className="text-2xl font-display font-medium text-slate-900 tracking-tight leading-tight">{knowledgePanel.title}</h2>
                            <p className="text-sm text-slate-500 mt-1 font-normal">{knowledgePanel.subtitle}</p>
                          </div>
-                         <div className="flex flex-col gap-1 items-center justify-center w-8 h-8 rounded-full hover:bg-slate-100 cursor-pointer text-slate-450 hover:text-slate-600 shrink-0 select-none">
+                         <div className="flex items-center gap-1.5 shrink-0 select-none relative animate-none">
+                            {/* Share button */}
+                            <button
+                              id="wiki-share-btn"
+                              title="Share this card"
+                              type="button"
+                              onClick={() => {
+                                const url = knowledgePanel.wikipediaUrl || window.location.href;
+                                if (navigator.share) {
+                                  navigator.share({
+                                    title: knowledgePanel.title || 'Wikipedia Information',
+                                    url: url
+                                  }).catch(() => {
+                                    navigator.clipboard.writeText(url);
+                                    setCopyFeedback("Copied link!");
+                                    setTimeout(() => setCopyFeedback(""), 2000);
+                                  });
+                                } else {
+                                  navigator.clipboard.writeText(url);
+                                  setCopyFeedback("Copied link!");
+                                  setTimeout(() => setCopyFeedback(""), 2000);
+                                }
+                              }}
+                              className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-slate-100 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors border-none bg-transparent"
+                            >
+                              <Share2 size={13} className="shrink-0" />
+                            </button>
+                            
+                            {/* 3 dots button */}
+                            <button
+                              id="wiki-more-btn"
+                              title="More options"
+                              type="button"
+                              onClick={() => setIsThreeDotsOpen(!isThreeDotsOpen)}
+                              className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-slate-100 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors border-none bg-transparent relative"
+                            >
+                              <MoreVertical size={13} className="shrink-0" />
+                            </button>
+
+                            {/* Toast / feedback popup on copy */}
+                            {copyFeedback && (
+                              <div className="absolute top-[110%] right-0 bg-slate-800 text-white text-[10px] sm:text-xs font-bold px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
+                                {copyFeedback}
+                              </div>
+                            )}
+
+                            {/* Dropdown Menu for 3 Dots */}
+                            {isThreeDotsOpen && (
+                              <div className="absolute top-[110%] right-0 bg-white border border-slate-150 rounded-xl shadow-lg p-1.5 z-50 min-w-[150px] animate-in fade-in slide-in-from-top-1 duration-150 text-left">
+                                <a
+                                  href={knowledgePanel.wikipediaUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(knowledgePanel.title || '')}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={() => setIsThreeDotsOpen(false)}
+                                  className="flex items-center gap-2 px-3 py-2 text-xs text-slate-705 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-colors font-medium hover:no-underline"
+                                >
+                                  <ExternalLink size={11} />
+                                  <span>View on Wikipedia</span>
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsThreeDotsOpen(false);
+                                    window.print();
+                                  }}
+                                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-705 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-colors font-medium border-none bg-transparent cursor-pointer"
+                                >
+                                  <Printer size={11} />
+                                  <span>Print this panel</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsThreeDotsOpen(false);
+                                    const text = `${knowledgePanel.title} - ${knowledgePanel.description || ''}`;
+                                    navigator.clipboard.writeText(text);
+                                    setCopyFeedback("Copied info!");
+                                    setTimeout(() => setCopyFeedback(""), 2000);
+                                  }}
+                                  className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-750 hover:bg-slate-50 hover:text-blue-600 rounded-lg transition-colors font-medium border-none bg-transparent cursor-pointer"
+                                >
+                                  <Copy size={11} />
+                                  <span>Copy information</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                         <div className="hidden">
                            <div className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
                            <div className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
                            <div className="w-1.5 h-1.5 bg-slate-500 rounded-full" />
@@ -3729,7 +4102,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             </aside>
           )}
 
-          <div className="w-full max-w-[650px] md:max-w-[850px] lg:max-w-[900px] xl:max-w-[980px] space-y-6 order-2 lg:order-1 lg:pl-10">
+          <div className="w-full max-w-[650px] md:max-w-[850px] lg:max-w-[900px] xl:max-w-[980px] space-y-6 order-2 lg:order-1 lg:pl-0">
             {/* Interactive Search Tool Widgets */}
             {activeTab === 'all' && shouldShowColorPicker(query) && (
               <ColorPickerWidget query={query} />
@@ -3844,6 +4217,16 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <MovieSection movie={movie} />
             )}
 
+            {/* Sports Query -> Render sports matches info card at the very top */}
+            {activeTab === 'all' && detectedIntent === 'sports' && sports && (
+              <SportsSection sports={sports} />
+            )}
+
+            {/* E. Person Query -> Render famous person card at the very top */}
+            {activeTab === 'all' && detectedIntent === 'person' && person && (
+              <PeopleSection person={person} />
+            )}
+
             {/* F1. Clean, Beautiful Google SGE-style AI Overview Loader */}
             {activeTab === 'all' && aiLoading && (
               <div className="mb-6 py-4 animate-pulse">
@@ -3864,7 +4247,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             )}
 
             {/* Simple AI Overview Block for standard 'all' tab (restored back to how it was before) */}
-            {activeTab === 'all' && !aiLoading && (aiOverview || aiRateLimited) && (
+            {activeTab === 'all' && !aiLoading && aiOverview && !aiRateLimited && (
               <div id="ai-overview-simple" className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
                 <div className="flex items-center justify-between mb-5 select-none">
                   <div className="flex items-center gap-2 opacity-70">
@@ -3875,18 +4258,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   </div>
                 </div>
                 
-                {aiRateLimited ? (
-                  <div className="p-6 bg-amber-50 border border-amber-100 rounded-3xl flex items-start gap-4">
-                    <div className="p-2 bg-amber-100 rounded-xl text-amber-600">
-                      <Zap size={20} />
-                    </div>
-                    <div>
-                      <h4 className="text-[15px] font-bold text-amber-900 mb-1">AI Overview hitting limits</h4>
-                      <p className="text-[13px] text-amber-800 leading-relaxed font-medium">Scout's neural generators are processing a high volume of requests. AI Overviews and FAQs are temporarily limited to preserve search speed. Please try again in 60 seconds.</p>
-                    </div>
-                  </div>
-                ) : aiOverview && (
-                  <div className="relative">
+                <div className="relative">
                     <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[260px] md:max-h-[480px]' : 'max-h-none'}`} 
                          style={{ maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' }}>
                       <Markdown 
@@ -3952,8 +4324,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                         </div>
                       </div>
                     )}
-                        {/* Removed Redundant Unreachable AI block to keep code clean and performant */}          </div>
-                )}
+                    {/* Removed Redundant Unreachable AI block to keep code clean and performant */}
+                  </div>
               </div>
             )}
 
@@ -4031,6 +4403,18 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <MovieSection movie={movie} />
             )}
 
+            {activeTab === 'all' && detectedIntent !== 'sports' && sports && (
+              <SportsSection sports={sports} />
+            )}
+
+            {activeTab === 'all' && detectedIntent !== 'person' && person && (
+              <PeopleSection person={person} />
+            )}
+
+            {activeTab === 'all' && recipes && recipes.length > 0 && (
+              <RecipeIntegrationBox recipes={recipes} onResultClick={onResultClick} onImageError={onImageError} />
+            )}
+
             {isSafeSearchIntercepted ? (
               <motion.div 
                 initial={{ opacity: 0, y: 15 }} 
@@ -4068,6 +4452,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </div>
             ) : filteredResults.length > 0 ? (
               <div className="space-y-12 md:space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
+
+
                 {groupedResults.map((item: any, idx: number) => (
                     <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
                       {/* Apps Block for tech companies after first organic result */}
@@ -4085,17 +4471,17 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       {/* Image Strip after second organic result block (idx === 2) */}
                       {idx === 2 && detectedIntent !== 'dictionary' && detectedIntent !== 'lyrics' && detectedIntent !== 'holiday' && (
                         <div className="my-6">
-                          <ImageStrip query={query} results={results} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
+                          <ImageStrip query={query} results={cleanResults} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
                         </div>
                       )}
                       
                       {item.type === 'single' ? (
                         <div className="max-w-[652px] w-full">
-                          <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
+                          <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={cleanResults} onImageError={onImageError} />
                         </div>
                       ) : (
                         <div className="py-2 max-w-[652px] w-full">
-                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={results} />
+                          <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={cleanResults} onImageError={onImageError} />
                           {/* Sitelinks (Nested Child Results) Styled Exactly Like Google */}
                           <div className="mt-2 w-full max-w-[652px]">
                             <div className="border-t border-slate-200/60 my-2" />
@@ -4103,23 +4489,86 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                               {item.secondaries.map((s: any) => {
                                 const isSClicked = clickedUrls?.includes(s.url);
                                 
-                                // Clean sub-site title like meta.com/signing -> Sign in
+                                // Clean sub-site title beautifully (e.g. docs/editing/getting-started -> Getting Started)
                                 let cleanedSubTitle = s.title || 'Link';
-                                if (cleanedSubTitle.toLowerCase().includes('.com') || cleanedSubTitle.toLowerCase().includes('/') || cleanedSubTitle.toLowerCase().includes('http')) {
-                                  cleanedSubTitle = 'Sign in';
-                                } else {
-                                  const splitters = [' - ', ' | ', ' : ', ' — '];
-                                  for (const spl of splitters) {
-                                    if (cleanedSubTitle.includes(spl)) {
-                                      cleanedSubTitle = cleanedSubTitle.split(spl)[0];
+                                
+                                const urlObj = (() => {
+                                  try { return new URL(s.url); } catch { return null; }
+                                })();
+                                const urlPath = urlObj ? urlObj.pathname : '';
+                                const hostname = urlObj ? urlObj.hostname.replace('www.', '') : '';
+                                const domainName = hostname.split('.')[0] || '';
+                                const parentTitle = item.primary?.title || '';
+
+                                const splitters = [' - ', ' | ', ' : ', ' — ', ' – '];
+                                for (const spl of splitters) {
+                                  if (cleanedSubTitle.includes(spl)) {
+                                    cleanedSubTitle = cleanedSubTitle.split(spl)[0];
+                                  }
+                                }
+
+                                const isRepetitiveOrGeneric = !cleanedSubTitle ||
+                                  cleanedSubTitle.toLowerCase() === 'link' ||
+                                  cleanedSubTitle.toLowerCase() === 'url' ||
+                                  cleanedSubTitle.toLowerCase() === hostname.toLowerCase() ||
+                                  cleanedSubTitle.toLowerCase() === domainName.toLowerCase() ||
+                                  cleanedSubTitle.toLowerCase() === parentTitle.toLowerCase() ||
+                                  cleanedSubTitle.toLowerCase().includes('.com') ||
+                                  cleanedSubTitle.toLowerCase().includes('/') ||
+                                  cleanedSubTitle.toLowerCase().includes('http');
+
+                                if (isRepetitiveOrGeneric && urlPath && urlPath !== '/') {
+                                  const pathParts = urlPath.split('/').filter(p => p && p.trim() !== '');
+                                  if (pathParts.length > 0) {
+                                    let lastPart = pathParts[pathParts.length - 1];
+                                    if ((lastPart.toLowerCase() === 'index' || lastPart.toLowerCase() === 'main' || lastPart.length < 2) && pathParts.length > 1) {
+                                      lastPart = pathParts[pathParts.length - 2];
+                                    }
+                                    
+                                    cleanedSubTitle = lastPart
+                                      .replace(/[-_]/g, ' ')
+                                      .replace(/\b\w/g, c => c.toUpperCase());
+
+                                    const pathKeywords: Record<string, string> = {
+                                      'signin': 'Sign In',
+                                      'signup': 'Sign Up',
+                                      'login': 'Log In',
+                                      'register': 'Register',
+                                      'about': 'About Us',
+                                      'contact': 'Contact Us',
+                                      'docs': 'Documentation',
+                                      'faq': 'FAQ',
+                                      'support': 'Support',
+                                      'pricing': 'Pricing',
+                                      'features': 'Features',
+                                      'block': 'Block',
+                                      'blog': 'Blog',
+                                      'careers': 'Careers',
+                                      'download': 'Download',
+                                      'getting started': 'Getting Started',
+                                      'getting-started': 'Getting Started',
+                                      'terms': 'Terms of Service',
+                                      'privacy': 'Privacy Policy'
+                                    };
+
+                                    const mapped = pathKeywords[cleanedSubTitle.toLowerCase()];
+                                    if (mapped) {
+                                      cleanedSubTitle = mapped;
                                     }
                                   }
                                 }
-                                
-                                if (cleanedSubTitle.toLowerCase().includes('signin') || cleanedSubTitle.toLowerCase().includes('signing') || cleanedSubTitle.toLowerCase() === 'sign-in') {
-                                  cleanedSubTitle = 'Sign in';
-                                } else if (cleanedSubTitle.toLowerCase().includes('login') || cleanedSubTitle.toLowerCase() === 'log-in') {
-                                  cleanedSubTitle = 'Log in';
+
+                                if (cleanedSubTitle.toLowerCase() === 'link' || cleanedSubTitle.toLowerCase() === parentTitle.toLowerCase() || cleanedSubTitle.length < 2) {
+                                  if (s.url.includes('signin') || s.url.includes('sign-in')) cleanedSubTitle = 'Sign In';
+                                  else if (s.url.includes('login') || s.url.includes('log-in')) cleanedSubTitle = 'Log In';
+                                  else if (s.url.includes('about')) cleanedSubTitle = 'About Us';
+                                  else if (s.url.includes('contact')) cleanedSubTitle = 'Contact Us';
+                                  else if (s.url.includes('doc')) cleanedSubTitle = 'Documentation';
+                                  else if (s.url.includes('pricing')) cleanedSubTitle = 'Pricing';
+                                  else if (s.url.includes('download')) cleanedSubTitle = 'Download';
+                                  else if (s.url.includes('faq')) cleanedSubTitle = 'FAQ';
+                                  else if (s.url.includes('github')) cleanedSubTitle = 'Source Code';
+                                  else cleanedSubTitle = 'About';
                                 }
 
                                 return (
@@ -4288,8 +4737,8 @@ function QuickSummary({ text }: { text: string }) {
       }
       try {
         const prompt = `Summarize precisely in one short sentence (max 15 words): "${text}"`;
-        const res = await genAI.models.generateContent({
-          model: "gemini-3-flash-preview",
+        const res = await generateContentViaProxy({
+          model: "gemini-2.5-flash",
           contents: [{ role: 'user', parts: [{ text: prompt }] }]
         });
         if (isMounted) setSummary(res.text || text);
@@ -5152,8 +5601,18 @@ function OrganicFaqBlock({ faqs, onResultClick }: { faqs: any[]; onResultClick?:
   );
 }
 
-function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, allResults }: any) {
+function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrls, onVisualSearch, onImageClick, allResults, onImageError }: any) {
   const [isPlayingVideo, setIsPlayingVideo] = React.useState(false);
+  const [expandedFaqIndex, setExpandedFaqIndex] = React.useState<number | null>(null);
+
+  const details = React.useMemo(() => {
+    if (!res.card_details) return {};
+    try {
+      return typeof res.card_details === 'string' ? JSON.parse(res.card_details) : res.card_details;
+    } catch (e) {
+      return {};
+    }
+  }, [res.card_details]);
 
   // Robust helper to extract YouTube video ID from any standard, encoded, or tracking-wrapped links
   const getYouTubeId = (urlStr: string) => {
@@ -5297,6 +5756,219 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             {res.snippet && res.snippet.length > 320 ? (res.snippet.substring(0, 315) + '...') : res.snippet}
           </p>
 
+          {/* DYNAMIC HIGH-FIDELITY SCHEMAS & VISUAL CARDS RENDERER */}
+          {res.card_type && res.card_type !== 'none' && (
+            <div className="mt-3 mb-4 select-none">
+              {res.card_type === 'product' && (
+                <div className="py-2.5 space-y-3 max-w-[500px]">
+                  <div className="flex gap-4">
+                    {/* Tiny product thumbnail if available */}
+                    {details.card_image ? (
+                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-100 shrink-0">
+                        <img 
+                          src={details.card_image} 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer" 
+                          onError={() => {
+                            if (details.card_image) onImageError?.(details.card_image);
+                          }}
+                        />
+                      </div>
+                    ) : res.image ? (
+                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-100 shrink-0">
+                        <img 
+                          src={res.image} 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer" 
+                          onError={() => {
+                            if (res.image) onImageError?.(res.image);
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* High res site favicon */}
+                        <img 
+                          src={`https://www.google.com/s2/favicons?domain=${res.displayUrl}&sz=32`} 
+                          className="w-4 h-4 rounded-full shrink-0" 
+                          referrerPolicy="no-referrer"
+                          onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                        />
+                        <span className="text-xs font-bold text-slate-700">{displaySiteName}</span>
+                      </div>
+                      <div className="text-[20px] font-extrabold text-[#1f2937] tracking-tight leading-normal">
+                        {details.currency || "₦"}{details.price}
+                      </div>
+                      {(details.rating || details.reviews) && (
+                        <div className="flex items-center gap-1 text-[11.5px] font-bold text-slate-500">
+                          <span className="text-amber-500 text-sm leading-none">★</span>
+                          <span className="text-slate-800 font-extrabold">{details.rating || "5.0"}</span>
+                          <span>({details.reviews || "10+"} reviews)</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between gap-3 pt-2.5 border-t border-slate-150/60">
+                    <div className="flex items-center gap-1.5 text-[12px] font-bold text-emerald-600">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 block animate-pulse" />
+                      <span>{details.availability || "In stock"}</span>
+                    </div>
+                    
+                    <a 
+                      href={res.url} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#f1f3f4] hover:bg-slate-200 text-slate-800 font-extrabold text-[12.5px] rounded-full transition-all active:scale-95 cursor-pointer decoration-none border-none"
+                    >
+                      <span>Visit {displaySiteName}</span>
+                      <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" fill="none" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {res.card_type === 'recipe' && (
+                <div className="py-2.5 space-y-3 max-w-[500px]">
+                  <div className="flex gap-4">
+                    {/* Beautiful preview image with a flag overlay like Image 2 */}
+                    {details.card_image ? (
+                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-100 shrink-0 relative group/recipe-card-img">
+                        <img 
+                          src={details.card_image} 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer" 
+                          onError={() => {
+                            if (details.card_image) onImageError?.(details.card_image);
+                          }}
+                        />
+                        <div className="absolute top-1 right-1 p-0.5 bg-black/35 backdrop-blur-xs rounded text-white">
+                          <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
+                            <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+                          </svg>
+                        </div>
+                      </div>
+                    ) : res.image ? (
+                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-100 shrink-0 relative">
+                        <img 
+                          src={res.image} 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer" 
+                          onError={() => {
+                            if (res.image) onImageError?.(res.image);
+                          }}
+                        />
+                        <div className="absolute top-1 right-1 p-0.5 bg-black/35 backdrop-blur-xs rounded text-white">
+                          <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
+                            <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+                          </svg>
+                        </div>
+                      </div>
+                    ) : null}
+                    
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-1 text-[13px] text-slate-800 font-extrabold flex-wrap">
+                        <span className="text-amber-500 text-sm leading-none">★</span>
+                        <span>{details.rating || "5.0"}</span>
+                        <span className="text-slate-400 font-normal">({details.reviews || "20+"} reviews)</span>
+                        {details.calories && (
+                          <>
+                            <span className="text-slate-300">·</span>
+                            <span className="text-slate-500 font-normal text-xs">{details.calories}</span>
+                          </>
+                        )}
+                      </div>
+                      
+                      <div className="text-xs text-slate-500 font-semibold flex items-center gap-1 flex-wrap">
+                        <span>Prep & Cook: {details.time ? details.time.replace('PT','').replace('M','m').replace('H','h') : '15 min'}</span>
+                        <span>·</span>
+                        <span>By {details.publisher || displaySiteName}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="pt-2 border-t border-slate-150/60 flex justify-end">
+                    <a 
+                      href={res.url} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#f1f3f4] hover:bg-slate-200 text-slate-800 font-extrabold text-[12.5px] rounded-full transition-all active:scale-95 cursor-pointer decoration-none border-none"
+                    >
+                      <span>Read full recipe on {displaySiteName}</span>
+                      <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" fill="none" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {res.card_type === 'faq' && (
+                <div className="space-y-2 border-t border-slate-200/70 pt-3 max-w-[650px]">
+                  <div className="flex items-center gap-1.5 mb-2.5">
+                    <img 
+                      src={`https://www.google.com/s2/favicons?domain=${res.displayUrl}&sz=32`} 
+                      className="w-3.5 h-3.5 rounded-full shrink-0" 
+                      referrerPolicy="no-referrer"
+                      onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                    />
+                    <h4 className="text-[14px] font-bold text-slate-800 leading-none">Answers from {displaySiteName}:</h4>
+                  </div>
+                  <div className="divide-y divide-slate-150 border-y border-slate-200/70">
+                    {(details.qa_data || []).map((faq: any, i: number) => {
+                      const isFaqExpanded = expandedFaqIndex === i;
+                      return (
+                        <div key={i} className="py-2.5 text-left transition-colors hover:bg-slate-50/40">
+                          <button 
+                            onClick={(e) => { e.preventDefault(); setExpandedFaqIndex(isFaqExpanded ? null : i); }}
+                            className="w-full flex items-center justify-between gap-3 text-[14px] sm:text-[14.5px] font-medium text-slate-800 hover:text-blue-600 transition-colors text-left focus:outline-none"
+                          >
+                            <span>{faq.question}</span>
+                            <ChevronRight size={15} className={`text-slate-400 shrink-0 transition-transform duration-250 ${isFaqExpanded ? 'rotate-90 text-blue-600' : ''}`} />
+                          </button>
+                          {isFaqExpanded && (
+                            <div className="mt-2 text-[13.5px] sm:text-[14px] text-slate-600 leading-relaxed pl-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                              {faq.answer}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {res.card_type === 'news_article' && (
+                <div className="py-2.5 max-w-[500px]">
+                  <div className="text-[10px] text-indigo-600 font-extrabold uppercase tracking-wider mb-1 leading-none">Editorial News Article</div>
+                  {details.author && <div className="text-[12.5px] text-slate-800 font-bold">By {details.author}</div>}
+                  {details.published_date && <div className="text-[11px] text-slate-400 mt-1">Date: {details.published_date}</div>}
+                </div>
+              )}
+
+              {res.card_type === 'event' && (
+                <div className="py-2.5 flex gap-3 align-center max-w-[500px]">
+                  <div className="w-11 h-11 rounded-lg bg-rose-50 border border-rose-100 flex flex-col items-center justify-center text-rose-600 font-bold tracking-tight shrink-0">
+                    <span className="text-[9px] font-black uppercase leading-none">Event</span>
+                    <span className="text-xs leading-none mt-1">Calendar</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h5 className="font-extrabold text-[13.5px] text-slate-800 leading-snug">{details.event_name || 'Upcoming Event'}</h5>
+                    {details.start_date && (
+                      <p className="text-xs text-slate-500 mt-0.5 font-medium truncate">
+                        {details.start_date} {details.location ? `· ${details.location}` : ''}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-4 flex-wrap">
             {/* Watch YouTube Video Inline Action */}
             {youtubeId && (
@@ -5386,6 +6058,9 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 transition={{ duration: 0.5 }}
                 className="max-w-full max-h-full object-contain transition-transform hover:scale-105" 
                 referrerPolicy="no-referrer" 
+                onError={() => {
+                  if (activeImage) onImageError?.(activeImage);
+                }}
               />
             </AnimatePresence>
 

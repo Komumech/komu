@@ -11,12 +11,80 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId"]
+    },
+    "Clickstream": {
+      "title": "Search Clickstream Log",
+      "description": "Stores anonymous or authenticated search interactions and clicks.",
+      "type": "object",
+      "properties": {
+        "query": { "type": "string" },
+        "type": { "type": "string" },
+        "url": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "uid": { "type": "string" },
+        "duration": { "type": "number" },
+        "position": { "type": "number" }
+      },
+      "required": []
+    },
+    "QueryPreference": {
+      "title": "Query Preference Rule",
+      "description": "Rules, intent categorization overrides, and aggregate telemetry details for search queries.",
+      "type": "object",
+      "properties": {
+        "query": { "type": "string" },
+        "entityType": { "type": "string" },
+        "detectedIntent": { "type": "string" },
+        "clicksCount": { "type": "number" },
+        "clickedUrls": { "type": "object" },
+        "disallowedIntents": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "number" },
+        "searchCount": { "type": "number" },
+        "thumbsUpCount": { "type": "number" },
+        "thumbsDownCount": { "type": "number" },
+        "feedbacks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string" },
+              "url": { "type": "string" },
+              "timestamp": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["query"]
+    },
+    "GlobalUrlClick": {
+      "title": "Global URL Click Statistics",
+      "description": "Aggregated clicks for search result URLs to boost ranking globally.",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "clicks": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["url"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "UserHistory",
       "description": "Per-user data including history and clicks."
+    },
+    "/clickstream/{eventId}": {
+      "schema": "Clickstream",
+      "description": "Global search queries and behavior events."
+    },
+    "/query_preferences/{ruleId}": {
+      "schema": "QueryPreference",
+      "description": "Rule overrides, categorizations, and click analytics per dynamic query."
+    },
+    "/global_url_clicks/{docId}": {
+      "schema": "GlobalUrlClick",
+      "description": "Aggregated URL clicks for global search result ranking."
     }
   }
 }

@@ -9,6 +9,9 @@
 }
 
 @layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
   body {
     @apply bg-white text-slate-900 antialiased overflow-x-hidden;
   }
@@ -119,9 +122,9 @@
 /* Caret color sequence shift animation */
 @keyframes caretColorSequence {
   0% { caret-color: #3b82f6; } /* Blue */
-  25% { caret-color: #a855f7; } /* Purple */
-  50% { caret-color: #ec4899; } /* Pink */
-  75% { caret-color: #22c55e; } /* Green */
+  25% { caret-color: #60a5fa; } /* Sky Blue */
+  50% { caret-color: #e1f2fa; } /* Bright Accent Blue */
+  75% { caret-color: #93c5fd; } /* Soft Blue */
   100% { caret-color: #3b82f6; }
 }
 
@@ -167,11 +170,13 @@
 }
 
 /* Hide scrollbar for Chrome, Safari and Opera */
-.scrollbar-hide::-webkit-scrollbar {
+.scrollbar-hide::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
   display: none;
 }
 /* Hide scrollbar for IE, Edge and Firefox */
-.scrollbar-hide {
+.scrollbar-hide,
+.scrollbar-none {
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
 }

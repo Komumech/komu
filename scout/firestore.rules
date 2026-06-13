@@ -16,5 +16,17 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if isOwner(userId);
     }
+
+    match /clickstream/{eventId} {
+      allow read, write: if true;
+    }
+
+    match /query_preferences/{ruleId} {
+      allow read, write: if true;
+    }
+
+    match /global_url_clicks/{docId} {
+      allow read, write: if true;
+    }
   }
 }
