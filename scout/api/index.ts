@@ -104,8 +104,8 @@ async function getSportsData(query: string): Promise<any | null> {
     },
     {
       group: "Group C",
-      team1: { name: "Haiti", flag: "🇭🇹" },
-      team2: { name: "Scotland", flag: "🇬🇧" },
+      team1: { name: "Haiti", flag: "🇹🇭" },
+      team2: { name: "Scotland", flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿" },
       status: "Sun, 14 Jun",
       time: "02:00"
     }
@@ -198,6 +198,126 @@ async function getSportsData(query: string): Promise<any | null> {
       headline: "Real Madrid and Bayern go to Extra Time in thrilling Wembley final",
       time: "LIVE",
       live: true
+    };
+  } else if (/\b(basketball|nba|fiba|lakers|celtics|warriors|bulls)\b/i.test(cleanQ)) {
+    title = "NBA Championship 2026";
+    matches = [
+      {
+        group: "NBA Finals",
+        team1: { name: "Boston Celtics", flag: "🟢", score: 104 },
+        team2: { name: "LA Lakers", flag: "🟡", score: 101 },
+        status: "FT",
+        time: "Today"
+      },
+      {
+        group: "NBA Finals",
+        team1: { name: "Golden State Warriors", flag: "🔵", score: 98 },
+        team2: { name: "Miami Heat", flag: "🔴", score: 95 },
+        status: "FT",
+        time: "Yesterday"
+      },
+      {
+        group: "Playoffs",
+        team1: { name: "Milwaukee Bucks", flag: "🦌" },
+        team2: { name: "Philadelphia 76ers", flag: "🔔" },
+        status: "Tomorrow",
+        time: "19:00"
+      }
+    ];
+    table = [
+      { rank: 1, flag: "🟢", team: "Boston Celtics", mp: 82, w: 64, d: 0, l: 18, gd: 460, pts: 64 },
+      { rank: 2, flag: "🦌", team: "Milwaukee Bucks", mp: 82, w: 49, d: 0, l: 33, gd: 210, pts: 49 },
+      { rank: 3, flag: "🔔", team: "Philadelphia 76ers", mp: 82, w: 47, d: 0, l: 35, gd: 150, pts: 47 },
+      { rank: 4, flag: "🔴", team: "Miami Heat", mp: 82, w: 46, d: 0, l: 36, gd: 110, pts: 46 }
+    ];
+    news = {
+      source: "ESPN Sport",
+      headline: "Celtics hold off Lakers late surge behind Tatum's 38-point gold masterpiece",
+      time: "45 mins ago",
+      live: false
+    };
+  } else if (/\b(tennis|wimbledon|federer|nadal|djokovic|alcaraz|sinner)\b/i.test(cleanQ)) {
+    title = "Wimbledon Men's Championship 2026";
+    matches = [
+      {
+        group: "Grand Final",
+        team1: { name: "Carlos Alcaraz", flag: "🇪🇸", score: 3 },
+        team2: { name: "Jannik Sinner", flag: "🇮🇹", score: 2 },
+        status: "FT",
+        time: "Today"
+      },
+      {
+        group: "Semi-Final",
+        team1: { name: "Novak Djokovic", flag: "🇷🇸", score: 1 },
+        team2: { name: "Daniil Medvedev", flag: "🎾", score: 3 },
+        status: "FT",
+        time: "Yesterday"
+      }
+    ];
+    table = [
+      { rank: 1, flag: "🇪🇸", team: "Carlos Alcaraz", mp: 7, w: 7, d: 0, l: 0, gd: 14, pts: 2000 },
+      { rank: 2, flag: "🇮🇹", team: "Jannik Sinner", mp: 7, w: 6, d: 0, l: 1, gd: 11, pts: 1200 },
+      { rank: 3, flag: "🎾", team: "Daniil Medvedev", mp: 6, w: 5, d: 0, l: 1, gd: 8, pts: 720 },
+      { rank: 4, flag: "🇷🇸", team: "Novak Djokovic", mp: 6, w: 5, d: 0, l: 1, gd: 7, pts: 720 }
+    ];
+    news = {
+      source: "BBC Tennis",
+      headline: "Alcaraz defends Wimbledon crown in grueling five-set classic against Sinner",
+      time: "15 mins ago",
+      live: false
+    };
+  } else if (/\b(cricket|ipl|dhoni|kohli|t20|world cup\s+cricket)\b/i.test(cleanQ)) {
+    title = "Indian Premier League 2026";
+    matches = [
+      {
+        group: "IPL Final",
+        team1: { name: "Chennai Super Kings", flag: "🟡", score: 181 },
+        team2: { name: "Mumbai Indians", flag: "🔵", score: 180 },
+        status: "FT",
+        time: "Today"
+      },
+      {
+        group: "Qualifier 1",
+        team1: { name: "Royal Challengers", flag: "🔴", score: 215 },
+        team2: { name: "Kolkata Knight Riders", flag: "🟣", score: 218 },
+        status: "FT",
+        time: "Yesterday"
+      }
+    ];
+    table = [
+      { rank: 1, flag: "🟡", team: "Chennai Super Kings", mp: 14, w: 10, d: 0, l: 4, gd: 6, pts: 20 },
+      { rank: 2, flag: "🟣", team: "Kolkata Knight Riders", mp: 14, w: 9, d: 0, l: 5, gd: 4, pts: 18 },
+      { rank: 3, flag: "🔵", team: "Mumbai Indians", mp: 14, w: 8, d: 0, l: 6, gd: 2, pts: 16 },
+      { rank: 4, flag: "🔴", team: "Royal Challengers", mp: 14, w: 7, d: 0, l: 7, gd: 0, pts: 14 }
+    ];
+    news = {
+      source: "Cricinfo Feed",
+      headline: "CSK clinch IPL 2026 title in last-ball nail biter at Chepauk Stadium",
+      time: "1 hour ago",
+      live: false
+    };
+  } else if (/\b(nfl|super bowl|american football|chiefs|49ers|mahomes)\b/i.test(cleanQ)) {
+    title = "NFL Championship Season 2026";
+    matches = [
+      {
+        group: "Super Bowl LX",
+        team1: { name: "Kansas City Chiefs", flag: "🔴", score: 31 },
+        team2: { name: "San Francisco 49ers", flag: "🟡", score: 27 },
+        status: "FT",
+        time: "Today"
+      }
+    ];
+    table = [
+      { rank: 1, flag: "🔴", team: "Kansas City Chiefs", mp: 17, w: 14, d: 0, l: 3, gd: 144, pts: 14 },
+      { rank: 2, flag: "🟡", team: "San Francisco 49ers", mp: 17, w: 12, d: 0, l: 5, gd: 128, pts: 12 },
+      { rank: 3, flag: "🦅", team: "Philadelphia Eagles", mp: 17, w: 11, d: 0, l: 6, gd: 82, pts: 11 },
+      { rank: 4, flag: "🦁", team: "Detroit Lions", mp: 17, w: 11, d: 0, l: 6, gd: 78, pts: 11 }
+    ];
+    news = {
+      source: "NFL Network",
+      headline: "Mahomes leads Chiefs to historic three-peat Super Bowl championship",
+      time: "2 hours ago",
+      live: false
     };
   }
 
@@ -432,7 +552,7 @@ Return a valid JSON object matching this exact schema:
 If "${targetQuery}" is clearly NOT a movie or TV show, set "isSuccess" to false and empty other fields. Output ONLY valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -623,6 +743,7 @@ async function getPersonData(query: string, entityName?: string, entityType?: st
 // --- SERVERLESS OPTIMIZATION ---
 // Ensure Transformers.js uses a writable directory for models in production
 env.allowLocalModels = false;
+env.remoteHost = 'https://hf-mirror.com';
 if (process.env.NODE_ENV === 'production') {
   env.cacheDir = '/tmp';
 }
@@ -1211,27 +1332,32 @@ async function learnQueryIntent(queryText: string, clickedUrl: string, interacti
 
 // Scout Semantic Brain (mpnet-base)
 let text_pipe: any = null;
-let isModelLoading = false;
+let text_pipe_promise: Promise<any> | null = null;
 
 async function getPipes() {
   if (text_pipe) return { text_pipe };
-  if (isModelLoading) return null;
   
-  try {
-    isModelLoading = true;
+  if (!text_pipe_promise) {
     console.log("🚀 Warming Scout Semantic Brain (all-mpnet-base-v2)...");
-    
-    // Semantic Encoder (768-dim) with 8-bit quantization for 3x faster inference times
-    if (!text_pipe) text_pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2', { quantized: true });
-
-    console.log("✅ Scout Semantic Brain ready!");
-    return { text_pipe };
-  } catch (err: any) {
-    console.error("❌ Neural Engine failure:", err.message);
-    return null;
-  } finally {
-    isModelLoading = false;
+    text_pipe_promise = (async () => {
+      try {
+        // Enforce the mirror URL before loading the pipeline
+        env.remoteHost = 'https://hf-mirror.com';
+        
+        const pipe = await pipeline('feature-extraction', 'Xenova/all-mpnet-base-v2', { quantized: true });
+        text_pipe = pipe;
+        console.log("✅ Scout Semantic Brain ready!");
+        return pipe;
+      } catch (err: any) {
+        console.error("❌ Neural Engine failure:", err.message);
+        text_pipe_promise = null; // Unset to allow retry on subsequent requests
+        return null;
+      }
+    })();
   }
+  
+  const pipe = await text_pipe_promise;
+  return pipe ? { text_pipe: pipe } : null;
 }
 
 async function getEmbedding(text: string): Promise<number[] | null> {
@@ -1413,7 +1539,7 @@ async function detectAdvancedIntent(query: string) {
 
   try {
     const geminiPromise = ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: `Search query: "${query}"\n\nClassify if this query is a specific company, business, notable brand, organization, product/software, celebrity, historical figure, geographic place, or general knowledge concept that typically warrants an information card/knowledge panel on Scout. Respond strictly with JSON following this schema:\n{\n  "is_entity": boolean,\n  "entity_name": string (canonical display name of the entity, or null if not an entity),\n  "entity_type": string (short category representation, or null)\n}`,
       config: {
         responseMimeType: "application/json",
@@ -1671,7 +1797,19 @@ async function queryZilliz(vector: number[], limit: number): Promise<any[]> {
 
 function mapZillizToPineconeMatch(entity: any) {
   const id = entity.id || entity.primary_key || `zilliz_${Math.random().toString(36).substr(2, 9)}`;
-  const score = typeof entity.distance === 'number' ? entity.distance : (typeof entity.score === 'number' ? entity.score : 0.75);
+  let score = 0.75;
+  if (typeof entity.distance === 'number') {
+    const rawDist = entity.distance;
+    if (rawDist < 0) {
+      score = Math.min(1.0, Math.max(0.0, 1.0 + rawDist));
+    } else if (rawDist < 0.4) {
+      score = Math.max(0.0, 1.0 - rawDist);
+    } else {
+      score = 1.0 / (1.0 + rawDist);
+    }
+  } else if (typeof entity.score === 'number') {
+    score = entity.score;
+  }
   
   // High-fidelity defensive parsing supporting both flat and nested models
   const rawSnippet = entity.text || entity.snippet || entity.entity?.text || entity.entity?.snippet || entity.properties?.text || entity.properties?.snippet || entity.metadata?.text || entity.metadata?.snippet || "";
@@ -1713,6 +1851,11 @@ function mapZillizToPineconeMatch(entity: any) {
   const boost = typeof entity.boost === 'number' ? entity.boost : (typeof entity.entity?.boost === 'number' ? entity.entity.boost : 0.0);
   const is_image = entity.is_image || entity.entity?.is_image || false;
   const isEnglish = typeof entity.isEnglish === 'boolean' ? entity.isEnglish : (typeof entity.entity?.isEnglish === 'boolean' ? entity.entity.isEnglish : true);
+
+  const alt = entity.alt || entity.alt_text || entity.altText || entity.image_alt || entity.caption || 
+              entity.entity?.alt || entity.entity?.alt_text || entity.entity?.altText || entity.entity?.image_alt || entity.entity?.caption || 
+              entity.properties?.alt || entity.properties?.alt_text || entity.properties?.altText || entity.properties?.image_alt || entity.properties?.caption || 
+              entity.metadata?.alt || entity.metadata?.alt_text || entity.metadata?.altText || entity.metadata?.image_alt || entity.metadata?.caption || "";
 
   const card_type = entity.card_type || entity.entity?.card_type || entity.properties?.card_type || entity.metadata?.card_type || 'none';
   let card_details = entity.card_details || entity.entity?.card_details || entity.properties?.card_details || entity.metadata?.card_details || '';
@@ -1762,10 +1905,13 @@ function mapZillizToPineconeMatch(entity: any) {
       is_image,
       isEnglish,
       card_type,
-      card_details
+      card_details,
+      alt: String(alt)
     }
   };
 }
+
+const suggestionsCache = new Map<string, string[]>();
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -1775,17 +1921,44 @@ app.get('/api/suggestions', async (req, res) => {
   try {
     const { q } = req.query;
     if (!q) return res.json([]);
+    const queryStr = (q as string).trim().toLowerCase();
+    if (suggestionsCache.has(queryStr)) {
+      return res.json(suggestionsCache.get(queryStr));
+    }
     const response = await axios.get(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(q as string)}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0'
       },
-      timeout: 2000
+      timeout: 1200
     });
-    res.json(response.data[1] || []);
+    const results = response.data[1] || [];
+    suggestionsCache.set(queryStr, results);
+    if (suggestionsCache.size > 500) {
+      const firstKey = suggestionsCache.keys().next().value;
+      if (firstKey) suggestionsCache.delete(firstKey);
+    }
+    res.json(results);
   } catch (error) {
     console.error("Suggestions error:", error);
     res.json([]);
   }
+});
+
+app.get('/opensearch.xml', (req, res) => {
+  const host = req.get('host') || 'localhost:3000';
+  const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+  const baseUrl = `${protocol}://${host}`;
+  
+  res.header('Content-Type', 'application/opensearchdescription+xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>Scout</ShortName>
+  <Description>Smart AI-assisted search powered by Scout</Description>
+  <InputEncoding>UTF-8</InputEncoding>
+  <Image width="16" height="16" type="image/x-icon">${baseUrl}/favicon.ico</Image>
+  <Url type="text/html" template="${baseUrl}/?q={searchTerms}"/>
+  <Url type="application/x-suggestions+json" template="${baseUrl}/api/suggestions?q={searchTerms}"/>
+</OpenSearchDescription>`);
 });
 
 async function updateQueryIntent(queryText: string, docId: string, signal: 'success' | 'pogo') {
@@ -1837,6 +2010,12 @@ async function updateQueryIntent(queryText: string, docId: string, signal: 'succ
 }
 
 async function logClickstream(req: any, query: string, type: string, url: string = '', durationMs: number | null = null, position: number | null = null) {
+  const isPrivacyMode = req?.body?.isPrivacyMode || req?.headers?.['x-privacy-mode'] === 'true' || req?.query?.isPrivacyMode === 'true';
+  if (isPrivacyMode) {
+    console.log(`🔒 [Privacy Shield] Skipped clickstream logging for query: "${query}"`);
+    return;
+  }
+
   const reqSessionId = req?.body?.sessionId;
   const reqUid = req?.body?.uid;
 
@@ -2285,7 +2464,7 @@ Return strictly a JSON object:
   "longitude": number
 }`;
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -2652,7 +2831,7 @@ Respond strictly with a single JSON object matching this schema:
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -3042,7 +3221,7 @@ Return a valid JSON object matching this exact schema:
 Only output the valid JSON object, no wrappers or markdown formatting block other than JSON itself.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -3113,6 +3292,19 @@ function checkContentSafety(text: string): boolean {
   return false;
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timeoutId = setTimeout(() => {
+      resolve(fallback);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).then((res) => {
+    clearTimeout(timeoutId);
+    return res;
+  });
+}
+
 app.post('/api/search', async (req, res) => {
   try {
     const { query, vector: providedVector, page = 1, type = 'all', clickedUrls = [], imageQuery, safeSearch = 'strict', userLatitude, userLongitude } = req.body;
@@ -3155,27 +3347,40 @@ app.post('/api/search', async (req, res) => {
     }
 
     const pc = getPinecone();
-    if (!pc) return res.status(503).json({ error: 'Pinecone not configured' });
-    const index = pc.Index(process.env.PINECONE_INDEX || 'plex-index');
+    const pineconeConfigured = !!pc;
+    const index = pc ? pc.Index(process.env.PINECONE_INDEX || 'plex-index') : null;
     const namespace = process.env.PINECONE_NAMESPACE || 'default';
 
     const finalQuery = query;
 
-    if (page === 1 && finalQuery && typeof finalQuery === 'string') {
+    const isPrivacyMode = req.body?.isPrivacyMode || req.headers?.['x-privacy-mode'] === 'true' || req.query?.isPrivacyMode === 'true';
+
+    if (page === 1 && finalQuery && typeof finalQuery === 'string' && !isPrivacyMode) {
       // Run logging and query tracking completely asynchronously in the background so it never blocks search!
       logClickstream(req, finalQuery, 'search').catch(err => console.warn("⚠️ Background clickstream log failed:", err));
       logSearchToJSON(finalQuery).catch(err => console.warn("⚠️ Background logSearchToJSON failed:", err));
+    } else if (isPrivacyMode) {
+      console.log(`🔒 [Privacy Shield] Blocked all database logging for query: "${finalQuery}"`);
     }
 
+     const isPrimaryTab = type === 'all' || !type;
+
     // --- PARALLEL BLOCK 1: Start tasks that don't need the vector ---
-    const intentDataPromise = detectAdvancedIntent(finalQuery);
-    const dynamicBusinessPromise = getDynamicBusinessAndApps(finalQuery, userLatitude, userLongitude);
+    const intentDataPromise = isPrimaryTab ? detectAdvancedIntent(finalQuery) : Promise.resolve({
+      is_entity: false,
+      entity_name: null,
+      entity_type: null,
+      is_dictionary: false,
+      dictionary_word: null,
+      is_english_help: false
+    });
+    const dynamicBusinessPromise = isPrimaryTab ? getDynamicBusinessAndApps(finalQuery, userLatitude, userLongitude) : Promise.resolve(null);
     const embeddingPromise = providedVector 
       ? Promise.resolve(providedVector.length > 768 ? providedVector.slice(0, 768) : providedVector) 
-      : getEmbedding(finalQuery);
+      : withTimeout(getEmbedding(finalQuery), 800, null);
 
     // Lyrics query detection and look up via Gemini
-    const isLyricsQuery = finalQuery && /lyrics\b/i.test(finalQuery);
+    const isLyricsQuery = isPrimaryTab && finalQuery && /lyrics\b/i.test(finalQuery);
     const lyricsPromise = isLyricsQuery ? (async () => {
       const ai = getGenAI();
       if (!ai) return null;
@@ -3193,7 +3398,7 @@ Always return a valid JSON object matching this schema:
 If the query is NOT actually searching for a song or song lyrics, or if you are unable to find the actual song/lyrics, set "isSuccess" to false and empty strings for other fields. Only return the JSON.`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json"
@@ -3220,7 +3425,7 @@ If the query is NOT actually searching for a song or song lyrics, or if you are 
     })() : Promise.resolve(null);
 
     // Holidays calendar discovery and lookup via Gemini
-    const isHolidaysQuery = finalQuery && /holiday|holidays|new year|christmas|thanksgiving|easter|eid|diwali|festivals|national day|bank holiday|bank holidays/i.test(finalQuery);
+    const isHolidaysQuery = isPrimaryTab && finalQuery && /holiday|holidays|new year|christmas|thanksgiving|easter|eid|diwali|festivals|national day|bank holiday|bank holidays/i.test(finalQuery);
     const holidaysPromise = isHolidaysQuery ? (async () => {
       const ai = getGenAI();
       if (!ai) return null;
@@ -3246,7 +3451,7 @@ Always return a valid JSON object matching this schema:
 Ensure dates are historically and astronomically correct for 2026/specified year. Only return valid JSON.`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json"
@@ -3272,7 +3477,7 @@ Ensure dates are historically and astronomically correct for 2026/specified year
     })() : Promise.resolve(null);
 
     // Dictionary lookup can be parallelized with embeddings
-    const dictionaryPromise = intentDataPromise.then(async (intentData: any) => {
+    const dictionaryPromise = isPrimaryTab ? intentDataPromise.then(async (intentData: any) => {
       if (intentData?.is_dictionary && intentData.dictionary_word) {
         try {
           const word = intentData.dictionary_word.trim();
@@ -3294,10 +3499,10 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         } catch (err) {}
       }
       return null;
-    });
+    }) : Promise.resolve(null);
 
     // Movie & TV Database Search Integration (TMDB + fallback)
-    const moviePromise = (async () => {
+    const moviePromise = isPrimaryTab ? (async () => {
       if (!finalQuery) return null;
       
       const cleanQ = finalQuery.toLowerCase().trim();
@@ -3329,9 +3534,9 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         intentDataSolved?.entity_name, 
         intentDataSolved?.entity_type
       );
-    })();
+    })() : Promise.resolve(null);
 
-    const personPromise = (async () => {
+    const personPromise = isPrimaryTab ? (async () => {
       if (!finalQuery) return null;
       
       let intentDataSolved: any = null;
@@ -3344,20 +3549,27 @@ Ensure dates are historically and astronomically correct for 2026/specified year
 
       const maybePersonName = intentDataSolved?.entity_name || finalQuery;
       return getPersonData(finalQuery, maybePersonName, intentDataSolved?.entity_type);
-    })();
+    })() : Promise.resolve(null);
 
-    const sportsPromise = getSportsData(finalQuery);
+    const sportsPromise = isPrimaryTab ? getSportsData(finalQuery) : Promise.resolve(null);
 
     const [intentData, vector, dictionaryResult, dynamicBusiness, lyricsResult, holidaysResult, movieResult, sportsResult, personResult] = await Promise.all([
-      intentDataPromise,
+      withTimeout(intentDataPromise, 450, {
+        is_entity: false,
+        entity_name: null,
+        entity_type: null,
+        is_dictionary: false,
+        dictionary_word: null,
+        is_english_help: false
+      }),
       embeddingPromise,
-      dictionaryPromise,
-      dynamicBusinessPromise,
-      lyricsPromise,
-      holidaysPromise,
-      moviePromise,
-      sportsPromise,
-      personPromise
+      withTimeout(dictionaryPromise, 500, null),
+      withTimeout(dynamicBusinessPromise, 500, null),
+      withTimeout(lyricsPromise, 700, null),
+      withTimeout(holidaysPromise, 700, null),
+      withTimeout(moviePromise, 500, null),
+      withTimeout(sportsPromise, 400, null),
+      withTimeout(personPromise, 500, null)
     ]);
 
     let suggestKnowledgePanel = intentData?.is_entity || false;
@@ -3366,10 +3578,7 @@ Ensure dates are historically and astronomically correct for 2026/specified year
 
     if (!vector) {
       if (finalQuery) {
-        return res.status(503).json({ 
-          error: "Neural Engines Warming Up", 
-          message: "Wait while Scout warms up its brain." 
-        });
+        console.warn("⚠️ Neural Engine warming up, falling back to all-zeros vector representation.");
       }
     }
     
@@ -3389,13 +3598,9 @@ Ensure dates are historically and astronomically correct for 2026/specified year
 
     let filter: any = {};
     if (type === 'images') {
-      filter = {
-        "$or": [
-          { is_image: { "$eq": true } },
-          { is_image: { "$eq": "true" } },
-          { is_image: { "$eq": "yes" } }
-        ]
-      };
+      // Relaxed search: We do NOT use strict metadata filtration for images at DB level (which limits results severely).
+      // This allows retrieving the full corpus of semantically matching records and selecting/ranking matches containing images in-memory.
+      filter = {};
     }
     if (filterDomain) filter = { "$and": [filter, { domain: { "$in": domainVariations } }] };
     if (newsFilter) filter = { "$and": [filter, newsFilter] };
@@ -3410,52 +3615,60 @@ Ensure dates are historically and astronomically correct for 2026/specified year
     // This reduces Pinecone network payload size and HTTP concurrency, serving results in milliseconds!
     const searchTerms = qLower.split(/\s+/).filter(t => t.length > 2);
     
-    // Searcher 1: Intent Matcher Namespace Query (super lightweight, topK: 3)
-    const intentSearchPromise = index.namespace('intent').query({
-      vector: activeVector,
-      topK: 3,
-      includeMetadata: true
-    }).catch(() => ({ matches: [] }));
-
-    // Dynamically size Pinecone topK: 40 is plenty for page 1 under typical pagination, 80 for beyond, and 60 for images
+    let intentRes = { matches: [] };
+    let vRes = { matches: [] };
+    let zillizHits: any[] = [];
     const optimalTopK = type === 'images' ? 60 : (page === 1 ? 40 : 80);
 
-    // Searcher 2: Primary Semantic Searcher
-    const primarySemanticPromise = index.query({
-      vector: activeVector,
-      topK: optimalTopK,
-      filter: Object.keys(filter).length > 0 ? filter : undefined,
-      includeMetadata: true,
-      namespace
-    }).then(async (res) => {
-      // Fallback for image searches: if we are in 'images' tab and got < 10 results, Pinecone's metadata filter was too strict or wrong type.
-      // We fall back to querying without the metadata filter, to find any documents, and we will pull images from their properties afterwards!
-      if (type === 'images' && (!res || !res.matches || res.matches.length < 10)) {
-        console.log("ℹ️ [PINECONE fallback] Image search returned very few results. Retrying with relaxed search...");
-        try {
-          const relaxedRes = await index.query({
-            vector: activeVector,
-            topK: optimalTopK,
-            includeMetadata: true,
-            namespace
-          });
-          return relaxedRes;
-        } catch (e) {
-          console.error("⚠️ [PINECONE fallback] Relaxed query failed:", e);
+    if (pineconeConfigured && index) {
+      // Searcher 1: Intent Matcher Namespace Query (super lightweight, topK: 3)
+      const intentSearchPromise = index.namespace('intent').query({
+        vector: activeVector,
+        topK: 3,
+        includeMetadata: true
+      }).catch(() => ({ matches: [] }));
+
+      // Searcher 2: Primary Semantic Searcher
+      const primarySemanticPromise = index.query({
+        vector: activeVector,
+        topK: optimalTopK,
+        filter: Object.keys(filter).length > 0 ? filter : undefined,
+        includeMetadata: true,
+        namespace
+      }).then(async (res) => {
+        // Fallback for image searches: if we are in 'images' tab and got < 10 results, Pinecone's metadata filter was too strict or wrong type.
+        // We fall back to querying without the metadata filter, to find any documents, and we will pull images from their properties afterwards!
+        if (type === 'images' && (!res || !res.matches || res.matches.length < 10)) {
+          console.log("ℹ️ [PINECONE fallback] Image search returned very few results. Retrying with relaxed search...");
+          try {
+            const relaxedRes = await index.query({
+              vector: activeVector,
+              topK: optimalTopK,
+              includeMetadata: true,
+              namespace
+            });
+            return relaxedRes;
+          } catch (e) {
+            console.error("⚠️ [PINECONE fallback] Relaxed query failed:", e);
+          }
         }
-      }
-      return res;
-    }).catch(() => ({ matches: [] }));
+        return res;
+      }).catch(() => ({ matches: [] }));
 
-    // Searcher 3: Parallel Zilliz Index Searcher
-    const zillizSearchPromise = queryZilliz(activeVector, optimalTopK);
+      // Searcher 3: Parallel Zilliz Index Searcher
+      const zillizSearchPromise = queryZilliz(activeVector, optimalTopK);
 
-    // Execute optimized searchers in parallel over the network for ultra-low latency
-    const [intentRes, vRes, zillizHits] = await Promise.all([
-      intentSearchPromise,
-      primarySemanticPromise,
-      zillizSearchPromise
-    ]);
+      // Execute optimized searchers in parallel over the network for ultra-low latency with 1800ms fail-safe timeouts
+      const [iRes, valRes, zHits] = await Promise.all([
+        withTimeout(intentSearchPromise, 1800, { matches: [] }),
+        withTimeout(primarySemanticPromise, 1800, { matches: [] }),
+        withTimeout(zillizSearchPromise, 1800, [])
+      ]);
+
+      intentRes = iRes;
+      vRes = valRes;
+      zillizHits = zHits;
+    }
 
     let intentBoosts: Record<string, number> = {};
     intentRes.matches.forEach(match => {
@@ -3473,10 +3686,11 @@ Ensure dates are historically and astronomically correct for 2026/specified year
 
     const mappedZillizMatches = (zillizHits || []).map((hit: any) => mapZillizToPineconeMatch(hit));
 
-    const allMatches = [
+    let allMatches = [
       ...vRes.matches,
       ...mappedZillizMatches
     ];
+
     const seenIds = new Set();
     const seenUrls = new Set();
     const uniqueMatches = allMatches.filter(match => {
@@ -3542,6 +3756,8 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         finalIsImage = true;
       }
 
+      const altText = meta.alt || meta.alt_text || meta.altText || meta.image_alt || meta.caption || "";
+
       return {
         ...meta,
         id: match.id,
@@ -3553,6 +3769,7 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         isOfficialProperty,
         isEnglish,
         is_image: finalIsImage,
+        alt: String(altText),
         title: prettifyTitle(titleStr, url),
         url: url,
         displayUrl: dom,
@@ -3984,6 +4201,52 @@ Ensure dates are historically and astronomically correct for 2026/specified year
           date: "2026-06-09"
         });
       }
+    } else if (queryLower.includes('google') || queryLower.includes('gogole')) {
+      const hasMainGoogle = allResults.some(r => r.url && (r.url === 'https://www.google.com' || r.url === 'https://www.google.com/'));
+      if (!hasMainGoogle) {
+        allResults.push({
+          id: "google_official_homepage",
+          score: 1.0,
+          boost: 150.0,
+          isNavIntent: true,
+          isExactMatch: true,
+          isRootDomain: true,
+          isOfficialProperty: true,
+          isEnglish: true,
+          title: "Google",
+          url: "https://www.google.com",
+          displayUrl: "google.com",
+          domain: "google.com",
+          snippet: "Search the world's information, including webpages, images, videos and more. Google has many special features to help you find exactly what you're looking for.",
+          image: "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?q=80&w=600",
+          sourceIcon: "https://icons.duckduckgo.com/ip3/google.com.ico",
+          is_image: false,
+          date: "2026-06-09"
+        });
+      }
+    } else if (queryLower.includes('komumech')) {
+      const hasMainKomu = allResults.some(r => r.url && r.url.includes('komumech.vercel.app'));
+      if (!hasMainKomu) {
+        allResults.push({
+          id: "komumech_official_homepage",
+          score: 1.0,
+          boost: 150.0,
+          isNavIntent: true,
+          isExactMatch: true,
+          isRootDomain: true,
+          isOfficialProperty: true,
+          isEnglish: true,
+          title: "KomuMech Agency - Smarter Web Utilities",
+          url: "https://komumech.vercel.app",
+          displayUrl: "komumech.vercel.app",
+          domain: "komumech.vercel.app",
+          snippet: "Official homepage of KomuMech Agency. Delivering cutting-edge software engineering, custom search suites, and a smarter way to search the web with Scout.",
+          image: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=80&w=600",
+          sourceIcon: "https://icons.duckduckgo.com/ip3/komumech.vercel.app.ico",
+          is_image: false,
+          date: "2026-06-09"
+        });
+      }
     }
 
     // Rigid SafeSearch Filtering of Result Entries and Blocking of Unwanted Automated Junk/CDNs
@@ -4044,6 +4307,47 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         return false;
       }
 
+      // Modern Lexical/Keyword safety filter:
+      // If the query is non-empty, check if there's any lexical/keyword overlap
+      // unless the database returns a VERY high confidence matching score (>= 0.77).
+      // This prevents completely unrelated seeded documents (e.g. Google Fi, MTN, Facebook, Dashlane, Cloudflare)
+      // from leaking into unrelated search queries due to low-similarity embedding matches.
+      const queryTerms = qLower.split(/\s+/).filter(t => t.length > 1 && !['http', 'https', 'com', 'org', 'net', 'www', 'the', 'and', 'for', 'online'].includes(t));
+      if (queryTerms.length > 0) {
+        let hasKeywordMatch = queryTerms.some(term => {
+          return (r.title || '').toLowerCase().includes(term) ||
+                 (r.snippet || '').toLowerCase().includes(term) ||
+                 (r.url || '').toLowerCase().includes(term) ||
+                 (r.alt || '').toLowerCase().includes(term);
+        });
+        
+        // For image searches, separately search Zilliz for any images related to the query by alt text
+        if (!hasKeywordMatch && type === 'images') {
+          const potentialAltFields = [
+            r.alt, r.alt_text, r.altText, r.image_alt, r.caption, r.description,
+            r.card_details ? String(r.card_details) : ''
+          ];
+          hasKeywordMatch = queryTerms.some(term =>
+            potentialAltFields.some(field => field && String(field).toLowerCase().includes(term))
+          );
+        }
+        
+        const isHighlyConfidentSemanticMatch = (r.score || 0) >= 0.77;
+        const isVectorZero = !vector || vector.every(x => x === 0);
+        
+        if (isVectorZero) {
+          // If we are strictly on the zero-vector fallback, the semantic scores are completely static noise.
+          // In this case, we require a keyword match to serve a document.
+          if (!hasKeywordMatch) return false;
+        } else {
+          // Even with non-zero vector, if similarity is weak (< 0.77) and we have absolute 0 keyword matching,
+          // throw the generic document out as irrelevant database noise.
+          if (!hasKeywordMatch && !isHighlyConfidentSemanticMatch) {
+            return false;
+          }
+        }
+      }
+
       return true;
     });
 
@@ -4080,14 +4384,22 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         const urlA = (a.url || '').toLowerCase();
         const urlB = (b.url || '').toLowerCase();
 
-        // High priority: exact title matches whole query
+        const altA = (a.alt || '').toLowerCase();
+        const altB = (b.alt || '').toLowerCase();
+
+        // High priority: exact title or alt matches whole query
         if (titleA === qLower) scoreA += 50.0;
         if (titleB === qLower) scoreB += 50.0;
+        if (altA === qLower) scoreA += 40.0;
+        if (altB === qLower) scoreB += 40.0;
 
         // Individual keyword match boosts
         terms.forEach(term => {
           if (titleA.includes(term)) scoreA += 15.0;
           if (titleB.includes(term)) scoreB += 15.0;
+
+          if (altA.includes(term)) scoreA += 15.0; // Boost for image alt text!
+          if (altB.includes(term)) scoreB += 15.0;
 
           if (snippetA.includes(term)) scoreA += 5.0;
           if (snippetB.includes(term)) scoreB += 5.0;
@@ -4136,29 +4448,52 @@ Ensure dates are historically and astronomically correct for 2026/specified year
       // If a domain matches the user's search query, this should be the highest ranked match.
       const domainA = (a.domain || a.displayUrl || '').toLowerCase().trim();
       const domainB = (b.domain || b.displayUrl || '').toLowerCase().trim();
+      const urlA = (a.url || '').toLowerCase().trim();
+      const urlB = (b.url || '').toLowerCase().trim();
       
       const cleanDomA = domainA.replace(/^www\./, '');
       const cleanDomB = domainB.replace(/^www\./, '');
       const domWithoutTldA = cleanDomA.split('.')[0];
       const domWithoutTldB = cleanDomB.split('.')[0];
       
-      const queryWords = qLower.split(/\s+/).filter(w => w.length > 1);
+      const queryWords = qLower.split(/\s+/).filter(w => w.length > 1 && !['http', 'www', 'com', 'org', 'net', 'info', 'html', 'the', 'and', 'for', 'online'].includes(w));
       
       let isDomainPerfectMatchA = (cleanDomA === qLower || domWithoutTldA === qLower);
       let isDomainPerfectMatchB = (cleanDomB === qLower || domWithoutTldB === qLower);
       
       // Check if query words contain the domain exactly or vice versa
-      let isDomainPartialMatchA = queryWords.some(w => domWithoutTldA === w || cleanDomA.includes(w));
-      let isDomainPartialMatchB = queryWords.some(w => domWithoutTldB === w || cleanDomB.includes(w));
-
-      if (a.isExactUrlNav) sA += 1000.0; // Always anchor absolute direct URLs to the very top!
-      if (b.isExactUrlNav) sB += 1000.0;
-
-      if (isDomainPerfectMatchA) sA += 800.0;
-      if (isDomainPerfectMatchB) sB += 800.0;
+      let matchedDomWordsA = queryWords.filter(w => domWithoutTldA === w || cleanDomA.includes(w)).length;
+      let matchedDomWordsB = queryWords.filter(w => domWithoutTldB === w || cleanDomB.includes(w)).length;
       
-      if (isDomainPartialMatchA) sA += 400.0;
-      if (isDomainPartialMatchB) sB += 400.0;
+      let domRatioA = queryWords.length > 0 ? (matchedDomWordsA / queryWords.length) : 0;
+      let domRatioB = queryWords.length > 0 ? (matchedDomWordsB / queryWords.length) : 0;
+
+      if (a.isExactUrlNav) sA += 1500.0; // Always anchor absolute direct URLs to the very top!
+      if (b.isExactUrlNav) sB += 1500.0;
+
+      if (isDomainPerfectMatchA) sA += 2000.0; // Huge boost for perfect brand matches!
+      if (isDomainPerfectMatchB) sB += 2000.0;
+      
+      if (matchedDomWordsA > 0) sA += 1200.0 * domRatioA;
+      if (matchedDomWordsB > 0) sB += 1200.0 * domRatioB;
+
+      // Promote entries where the query or query words are a substring of the domain name or URL
+      let queryWordsInDomainA = 0;
+      let queryWordsInDomainB = 0;
+      queryWords.forEach(w => {
+        if (cleanDomA.includes(w)) queryWordsInDomainA += 1000.0;
+        if (cleanDomB.includes(w)) queryWordsInDomainB += 1000.0;
+        if (urlA.includes(w)) queryWordsInDomainA += 300.0;
+        if (urlB.includes(w)) queryWordsInDomainB += 300.0;
+      });
+      sA += queryWordsInDomainA;
+      sB += queryWordsInDomainB;
+
+      // Strongly promote homepages/root domains if they match the query words compared to deep sublinks
+      const isHomepageA = !urlA.replace(/^https?:\/\//i, '').replace(cleanDomA, '').replace(/^\/+$/, '').includes('/');
+      const isHomepageB = !urlB.replace(/^https?:\/\//i, '').replace(cleanDomB, '').replace(/^\/+$/, '').includes('/');
+      if (isHomepageA && (isDomainPerfectMatchA || queryWordsInDomainA > 0)) sA += 1500.0;
+      if (isHomepageB && (isDomainPerfectMatchB || queryWordsInDomainB > 0)) sB += 1500.0;
 
       // Prioritize English results and penalize non-English results for English queries
       const queryIsEnglish = isMostlyEnglish(qLower);
@@ -4175,22 +4510,113 @@ Ensure dates are historically and astronomically correct for 2026/specified year
       const nA = a.name?.toLowerCase().trim() || '';
       const nB = b.name?.toLowerCase().trim() || '';
 
-      if (tA === qLower || nA === qLower) sA += 50.0;
-      if (tB === qLower || nB === qLower) sB += 50.0;
+      if (tA === qLower || nA === qLower) sA += 150.0;
+      if (tB === qLower || nB === qLower) sB += 150.0;
       
       if (a.isExactMatch) sA += 100.0;
       if (b.isExactMatch) sB += 100.0;
       
-      if (a.isOfficialProperty) sA += 40.0;
-      if (b.isOfficialProperty) sB += 40.0;
+      if (a.isOfficialProperty) sA += 60.0;
+      if (b.isOfficialProperty) sB += 60.0;
 
       // 3. Navigational Strength
-      if (a.isNavIntent && a.isRootDomain) sA += 15.0;
-      if (b.isNavIntent && b.isRootDomain) sB += 15.0;
+      if (a.isNavIntent && a.isRootDomain) sA += 25.0;
+      if (b.isNavIntent && b.isRootDomain) sB += 25.0;
 
-      // 4. Content Relevance (Title inclusion)
-      if (tA.includes(qLower)) sA += 2.0;
-      if (tB.includes(qLower)) sB += 2.0;
+      // 4. Content Relevance (Aesthetic Hybrid keyword scorer & term frequency)
+      const keywordTerms = qLower.split(/\s+/).filter(t => t.length > 1);
+
+      // Document A Lexical Relevance Score
+      let scoreLexicalA = 0;
+      if (tA.includes(qLower)) scoreLexicalA += 180.0;
+      if (a.snippet.toLowerCase().includes(qLower)) scoreLexicalA += 80.0;
+
+      let matchedTermsCountA = 0;
+      keywordTerms.forEach(term => {
+        let termWeight = 1.0;
+        if (['google', 'http', 'com', 'www', 'html', 'the', 'and', 'for', 'online'].includes(term)) {
+          termWeight = 0.5;
+        } else {
+          termWeight = 1.8;
+        }
+
+        let termMatched = false;
+        if (tA.includes(term)) {
+          scoreLexicalA += 25.0 * termWeight;
+          termMatched = true;
+          const freq = (tA.split(term).length - 1);
+          scoreLexicalA += Math.min(3, freq) * 3.0 * termWeight;
+        }
+        if (a.url.toLowerCase().includes(term)) {
+          scoreLexicalA += 15.0 * termWeight;
+          termMatched = true;
+        }
+        if (a.snippet.toLowerCase().includes(term)) {
+          scoreLexicalA += 10.0 * termWeight;
+          termMatched = true;
+          const freq = (a.snippet.toLowerCase().split(term).length - 1);
+          scoreLexicalA += Math.min(4, freq) * 2.0 * termWeight;
+        }
+        if (termMatched) matchedTermsCountA++;
+      });
+
+      if (keywordTerms.length > 0) {
+        const coverageRatio = matchedTermsCountA / keywordTerms.length;
+        if (coverageRatio === 1.0) {
+          scoreLexicalA += 160.0;
+        } else if (coverageRatio >= 0.5) {
+          scoreLexicalA += 40.0 * coverageRatio;
+        } else {
+          scoreLexicalA -= 50.0 * (1.0 - coverageRatio);
+        }
+      }
+      sA += scoreLexicalA;
+
+      // Document B Lexical Relevance Score
+      let scoreLexicalB = 0;
+      if (tB.includes(qLower)) scoreLexicalB += 180.0;
+      if (b.snippet.toLowerCase().includes(qLower)) scoreLexicalB += 80.0;
+
+      let matchedTermsCountB = 0;
+      keywordTerms.forEach(term => {
+        let termWeight = 1.0;
+        if (['google', 'http', 'com', 'www', 'html', 'the', 'and', 'for', 'online'].includes(term)) {
+          termWeight = 0.5;
+        } else {
+          termWeight = 1.8;
+        }
+
+        let termMatched = false;
+        if (tB.includes(term)) {
+          scoreLexicalB += 25.0 * termWeight;
+          termMatched = true;
+          const freq = (tB.split(term).length - 1);
+          scoreLexicalB += Math.min(3, freq) * 3.0 * termWeight;
+        }
+        if (b.url.toLowerCase().includes(term)) {
+          scoreLexicalB += 15.0 * termWeight;
+          termMatched = true;
+        }
+        if (b.snippet.toLowerCase().includes(term)) {
+          scoreLexicalB += 10.0 * termWeight;
+          termMatched = true;
+          const freq = (b.snippet.toLowerCase().split(term).length - 1);
+          scoreLexicalB += Math.min(4, freq) * 2.0 * termWeight;
+        }
+        if (termMatched) matchedTermsCountB++;
+      });
+
+      if (keywordTerms.length > 0) {
+        const coverageRatio = matchedTermsCountB / keywordTerms.length;
+        if (coverageRatio === 1.0) {
+          scoreLexicalB += 160.0;
+        } else if (coverageRatio >= 0.5) {
+          scoreLexicalB += 40.0 * coverageRatio;
+        } else {
+          scoreLexicalB -= 50.0 * (1.0 - coverageRatio);
+        }
+      }
+      sB += scoreLexicalB;
 
       // 5. Intent Re-ranking (Collaborative IQ)
       const intentBoost = intentBoosts[a.id] || 0;
@@ -4222,8 +4648,17 @@ Ensure dates are historically and astronomically correct for 2026/specified year
     });
 
     // --- SEGREGATION FOR TAB-SPECIFIC PAGINATION ---
-    const webResults = reranked.filter(r => !r.is_image);
-    const imageResults = reranked.filter(r => r.is_image);
+    // Web results should include all web page documents, even if they contain helper images or thumbnails.
+    // They are only filtered out if the main result link itself is exclusively a raw image file.
+    const webResults = reranked.filter(r => {
+      const isRawImg = /\.(jpg|jpeg|png|webp|gif|svg)$/i.test((r.url || '').split('?')[0]);
+      return !isRawImg;
+    });
+
+    // Image results should contain any result that has a valid image representation
+    const imageResults = reranked.filter(r => {
+      return !!(r.image || r.thumbnail || r.ogImage || r.imageUrl || r.card_image || r.is_image || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test((r.url || '').split('?')[0]));
+    });
 
     // Decide which pool to paginate based on the tab
     let poolToPaginate = webResults;
@@ -4231,6 +4666,46 @@ Ensure dates are historically and astronomically correct for 2026/specified year
       poolToPaginate = imageResults;
     } else if (type === 'news') {
       poolToPaginate = webResults;
+    } else if (type === 'developer') {
+      const devKeywords = /\b(github|stackoverflow|developer|mdn|npmjs|npm|api|code|git|repo|rust|python|typescript|javascript|golang|docker|linux|shell|css|vibe|programming|compiler|db|cyber|hack|stackexchange|dev\.to|w3schools|geeksforgeeks)\b/i;
+      const devDomains = ['github.com', 'stackoverflow.com', 'developer.mozilla.org', 'npmjs.com', 'dev.to', 'w3schools.com', 'geeksforgeeks.org', 'stackexchange.com', 'coder', 'medium.com', 'wikipedia.org', 'reuters.com'];
+      let coderRes = webResults.filter(r => {
+        const dom = (r.displayUrl || '').toLowerCase();
+        return devDomains.some(d => dom.includes(d)) || devKeywords.test((r.title || '') + ' ' + (r.snippet || ''));
+      });
+      if (coderRes.length < 3) {
+        coderRes = webResults;
+      }
+      poolToPaginate = coderRes;
+    } else if (type === 'docs') {
+      const docsKeywords = /\b(documentation|manual|guide|pdf|specification|book|encyclopedia|archive|history|science|report|paper|thesis|reference|tutorial|learn|course|wiki)\b/i;
+      const docsDomains = ['wikipedia.org', 'britannica.com', 'w3schools.com', 'archive.org', '.gov', '.edu', 'medium.com', 'researchgate.net', 'nytimes.com', 'bbc.co.uk'];
+      let docRes = webResults.filter(r => {
+        const dom = (r.displayUrl || '').toLowerCase();
+        return docsDomains.some(d => dom.includes(d)) || 
+               /\.(pdf|doc|docx|epub|txt)$/i.test(r.url || '') || 
+               docsKeywords.test((r.title || '') + ' ' + (r.snippet || ''));
+      });
+      if (docRes.length < 3) {
+        docRes = webResults;
+      }
+      poolToPaginate = docRes;
+    } else if (type === 'memes') {
+      const memeKeywords = /\b(meme|joke|funny|humor|hilarious|lol|gif|parody|comedy|prank|gag|fun|webcomic|xkcd|comic)\b/i;
+      const memeDomains = ['knowyourmeme.com', 'giphy.com', 'imgur.com', 'reddit.com', 'tenor.com', 'pinterest.com', 'instagram.com', 'twitter.com', 'x.com', 'xkcd.com'];
+      let memeRes = webResults.filter(r => {
+        const dom = (r.displayUrl || '').toLowerCase();
+        return memeDomains.some(d => dom.includes(d)) || 
+               memeKeywords.test((r.title || '') + ' ' + (r.snippet || '')) || 
+               !!(r.image || r.thumbnail || r.card_image);
+      });
+      if (memeRes.length < 3) {
+        memeRes = reranked.filter(r => !!(r.image || r.thumbnail || r.ogImage || r.imageUrl));
+      }
+      if (memeRes.length === 0) {
+        memeRes = webResults;
+      }
+      poolToPaginate = memeRes;
     }
 
     // Step 5: Diversity & Nesting Limit for Web Results (only if in 'all' or 'news' tab)
@@ -4420,13 +4895,13 @@ Always return a valid JSON object matching this schema exactly:
   ]
 }
 
-If the query is a process-oriented question or contains 'how', 'recipe', 'guide', 'step', 'tutorial', 'can i', 'do i', or similar search queries, you MUST synthesize a step-by-step guided checklist! Do NOT set "howTo" to null under any circumstances for these queries. Instead, utilize your deep, high-fidelity knowledge of the topic to synthesize highly precise, practical, and accurate steps/stages so the user gets an outstanding Interactive Guided Steps card!
+If the query is a process-oriented question or contains 'how' (excluding quantitative/factual questions asking about cost, price, budget, "how much", "how many", "how old", "how far", "how tall", or "how long"), 'recipe', 'guide', 'step', 'tutorial', 'can i', 'do i', or similar search queries, you MUST synthesize a step-by-step guided checklist! Do NOT set "howTo" to null under any circumstances for these queries. Instead, utilize your deep, high-fidelity knowledge of the topic to synthesize highly precise, practical, and accurate steps/stages so the user gets an outstanding Interactive Guided Steps card!
 
-If the query is not process-oriented and no steps can be compiled, set "howTo" to null. If no faqs can be accurately compiled, set "organicFaqs" to [].
+If the query is not process-oriented (e.g., asking about price, cost, calculations, metrics, or factual info), or if no steps can be compiled, set "howTo" to null. If no faqs can be accurately compiled, set "organicFaqs" to [].
 Make sure all JSON keys are correct. Do NOT output anything other than raw, parsing-ready JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -4522,7 +4997,7 @@ Return a valid JSON object matching this schema:
 Ensure the episode titles, counts, and descriptions correspond to the actual real-world episodic listing for this season. Output only valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -4624,7 +5099,7 @@ app.post('/api/ai/generate', async (req, res) => {
       return res.status(503).json({ error: "Gemini API Key is not configured on the server." });
     }
     const response = await ai.models.generateContent({
-      model: model || "gemini-2.5-flash",
+      model: model || "gemini-3.5-flash",
       contents,
       config
     });

@@ -46,6 +46,7 @@ export default function PeopleSection({ person }: PeopleSectionProps) {
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(true);
   const [isBioFullyExpanded, setIsBioFullyExpanded] = useState(false);
   const [isMoviesExpanded, setIsMoviesExpanded] = useState(false);
+  const [isKnownForExpanded, setIsKnownForExpanded] = useState(false);
 
   // Filter out any empty images and create a beautiful photo gallery array
   const galleryImages: string[] = [];
@@ -304,27 +305,79 @@ export default function PeopleSection({ person }: PeopleSectionProps) {
                     <span>Known For</span>
                   </h3>
                   
-                  <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-none snap-x snap-mandatory">
-                    {allMovies.slice(0, 5).map((m) => (
-                      <div 
-                        key={m.id} 
-                        className="bg-[#eef3fc] rounded-2xl overflow-hidden shrink-0 snap-start flex-none w-[130px] transition-transform hover:scale-[1.02]"
+                  <div className="overflow-hidden">
+                    <AnimatePresence initial={false} mode="wait">
+                      <motion.div
+                        key={isKnownForExpanded ? "expanded-grid" : "scroll-view"}
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
                       >
-                        <div className="aspect-[2/3] w-full bg-slate-950/20 relative">
-                          <img 
-                            src={m.posterPath} 
-                            alt={m.title} 
-                            className="w-full h-full object-cover rounded-t-2xl" 
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <div className="p-2.5">
-                          <h4 className="text-xs font-bold text-slate-800 line-clamp-1 h-3.5" title={m.title}>{m.title}</h4>
-                          <p className="text-[10px] text-slate-500 truncate mt-1 leading-none">{m.role}</p>
-                        </div>
-                      </div>
-                    ))}
+                        {isKnownForExpanded ? (
+                          /* Expanded Grid View: responsive columns */
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pb-4">
+                            {allMovies.slice(0, 15).map((m) => (
+                              <div 
+                                key={m.id} 
+                                className="bg-[#eef3fc] rounded-2xl overflow-hidden transition-transform hover:scale-[1.02] shadow-xs"
+                              >
+                                <div className="aspect-[2/3] w-full bg-slate-950/20 relative">
+                                  <img 
+                                    src={m.posterPath} 
+                                    alt={m.title} 
+                                    className="w-full h-full object-cover rounded-t-2xl" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                </div>
+                                <div className="p-2.5">
+                                  <h4 className="text-xs font-bold text-slate-800 line-clamp-1 h-3.5" title={m.title}>{m.title}</h4>
+                                  <p className="text-[10px] text-slate-500 truncate mt-1 leading-none">{m.role}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          /* Default Horizontal Scroll View */
+                          <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-none snap-x snap-mandatory">
+                            {allMovies.slice(0, 5).map((m) => (
+                              <div 
+                                key={m.id} 
+                                className="bg-[#eef3fc] rounded-2xl overflow-hidden shrink-0 snap-start flex-none w-[130px] transition-transform hover:scale-[1.02]"
+                              >
+                                <div className="aspect-[2/3] w-full bg-slate-950/20 relative">
+                                  <img 
+                                    src={m.posterPath} 
+                                    alt={m.title} 
+                                    className="w-full h-full object-cover rounded-t-2xl" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                </div>
+                                <div className="p-2.5">
+                                  <h4 className="text-xs font-bold text-slate-800 line-clamp-1 h-3.5" title={m.title}>{m.title}</h4>
+                                  <p className="text-[10px] text-slate-500 truncate mt-1 leading-none">{m.role}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
                   </div>
+
+                  {/* Dropdown Toggle Button at the bottom of the "Known For" div */}
+                  {allMovies.length > 5 && (
+                    <div className="flex justify-center mt-2 border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsKnownForExpanded(!isKnownForExpanded)}
+                        className="cursor-pointer text-xs font-bold text-[#006097] flex items-center gap-1 hover:text-blue-800 py-1.5 px-4 bg-slate-50 hover:bg-[#eef3fc] rounded-full transition-all border-none shadow-3xs"
+                      >
+                        <span>{isKnownForExpanded ? "Show Less" : `Show More (${allMovies.length - 5} more)`}</span>
+                        <ChevronDown size={14} className={`transition-transform duration-250 ${isKnownForExpanded ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>

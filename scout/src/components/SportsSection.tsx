@@ -46,7 +46,17 @@ interface SportsSectionProps {
 export default function SportsSection({ sports }: SportsSectionProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'matches' | 'table' | 'knockout' | 'stats' | 'players'>('overview');
 
-  const { title, matches = [], table = [], news } = sports;
+  const rawTitle = sports?.title || '';
+  const cleanSportText = (txt: string) => {
+    if (!txt) return '';
+    return txt
+      .replace(/\s*\b(Live\s+)?Match\s+Cent(er|re)\b/gi, '')
+      .replace(/\s*\bLive\b/gi, '')
+      .replace(/\s*[|·-]\s*$/gi, '')
+      .trim();
+  };
+  const title = cleanSportText(rawTitle);
+  const { matches = [], table = [], news } = sports;
 
   // Render stats mock data
   const topScorers = [
@@ -80,20 +90,30 @@ export default function SportsSection({ sports }: SportsSectionProps) {
     final: { team1: "France 🇫🇷", score1: 3, team2: "Argentina 🇦🇷", score2: 1, winner: "France 🇫🇷", date: "Jul 12" }
   };
 
+  const getSportEmoji = (sportTitle: string) => {
+    const t = sportTitle.toLowerCase();
+    if (t.includes('basketball') || t.includes('nba') || t.includes('fiba')) return '🏀';
+    if (t.includes('tennis') || t.includes('wimbledon') || t.includes('us open')) return '🎾';
+    if (t.includes('cricket') || t.includes('ipl') || t.includes('t20')) return '🏏';
+    if (t.includes('baseball') || t.includes('mlb')) return '⚾';
+    if (t.includes('american football') || t.includes('nfl') || t.includes('super bowl')) return '🏈';
+    if (t.includes('rugby')) return '🏉';
+    if (t.includes('golf')) return '⛳';
+    if (t.includes('volleyball')) return '🏐';
+    return '⚽'; // Default
+  };
+
   return (
-    <div id="sports-tournament-card" className="bg-white rounded-[28px] p-2 md:p-3 mb-6 select-none overflow-hidden border-0">
+    <div id="sports-tournament-card" className="bg-white rounded-[28px] p-1 sm:p-2 md:p-3 mb-6 select-none overflow-hidden border-0">
       {/* 1. Header with Tournament Name */}
-      <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+      <div className="px-3.5 sm:px-5 pt-3.5 pb-1.5 flex items-center justify-between">
         <h2 className="text-xl md:text-2xl font-bold font-display text-slate-900 tracking-tight flex items-center gap-2">
-          ⚽ {title}
+          {getSportEmoji(title)} {title}
         </h2>
-        <span className="text-xs bg-[#eef3fc] text-blue-700 font-mono py-1 px-3.5 rounded-full uppercase tracking-wider font-bold border-0">
-          LIVE MATCH CENTRE
-        </span>
       </div>
 
       {/* 2. Google Search Style Sports Sub-Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none px-4 py-2">
+      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-3.5 sm:px-4 py-1.5">
         {[
           { id: 'overview', label: 'Overview' },
           { id: 'matches', label: 'Matches' },
@@ -105,7 +125,7 @@ export default function SportsSection({ sports }: SportsSectionProps) {
           <button
             key={subTab.id}
             onClick={() => setActiveSubTab(subTab.id as any)}
-            className={`cursor-pointer whitespace-nowrap text-sm font-semibold px-4.5 py-1.5 rounded-full transition-all border-0 bg-transparent ${
+            className={`cursor-pointer whitespace-nowrap text-xs sm:text-sm font-semibold px-3.5 py-1.5 rounded-full transition-all border-0 bg-transparent ${
               activeSubTab === subTab.id
                 ? 'bg-[#eef3fc] text-blue-700 font-bold shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -116,7 +136,7 @@ export default function SportsSection({ sports }: SportsSectionProps) {
         ))}
       </div>
 
-      <div className="p-4 md:p-5">
+      <div className="p-2 sm:p-4 md:p-5">
         {/* --- T1. OVERVIEW SCREEN --- */}
         {activeSubTab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 border-0">
@@ -199,33 +219,37 @@ export default function SportsSection({ sports }: SportsSectionProps) {
                 </div>
 
                 <div className="bg-[#eef3fc] text-slate-900 rounded-2xl overflow-hidden shadow-xs border-0">
-                  <table className="w-full text-left text-xs border-0">
-                    <thead>
-                      <tr className="bg-blue-100/40 text-blue-900 font-bold uppercase tracking-wider border-0">
-                        <th className="py-2.5 px-3 w-[6%] border-0">#</th>
-                        <th className="py-2.5 px-1 border-0">Team</th>
-                        <th className="py-2.5 px-2 text-center w-[10%] border-0">MP</th>
-                        <th className="py-2.5 px-2 text-center w-[10%] border-0">GD</th>
-                        <th className="py-2.5 px-3 text-right w-[15%] border-0">Pts</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-none border-0">
-                      {table.slice(0, 4).map((row) => (
-                        <tr key={row.rank} className="hover:bg-blue-100/30 transition-colors border-0">
-                          <td className="py-2.5 px-3 font-black text-blue-705 border-0">{row.rank}</td>
-                          <td className="py-2.5 px-1 font-bold border-0 text-slate-900">
-                            <span className="mr-1.5 text-base">{row.flag}</span>
-                            <span>{row.team}</span>
-                          </td>
-                          <td className="py-2.5 px-2 text-center text-slate-600 font-bold border-0">{row.mp}</td>
-                          <td className="py-2.5 px-2 text-center font-mono font-bold text-blue-750 border-0">
-                            {row.gd > 0 ? `+${row.gd}` : row.gd}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-black text-blue-900 border-0">{row.pts}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="overflow-x-auto w-full">
+                    <div className="min-w-[340px] md:min-w-full">
+                      <table className="w-full text-left text-xs border-0">
+                        <thead>
+                          <tr className="bg-blue-100/40 text-blue-900 font-bold uppercase tracking-wider border-0">
+                            <th className="py-2.5 px-3 w-[6%] border-0">#</th>
+                            <th className="py-2.5 px-1 border-0">{title.toLowerCase().includes('tennis') || title.toLowerCase().includes('wimbledon') ? 'Player' : 'Team'}</th>
+                            <th className="py-2.5 px-2 text-center w-[10%] border-0">MP</th>
+                            <th className="py-2.5 px-2 text-center w-[10%] border-0">{title.toLowerCase().includes('tennis') || title.toLowerCase().includes('wimbledon') ? 'Sets' : 'GD'}</th>
+                            <th className="py-2.5 px-3 text-right w-[15%] border-0">{title.toLowerCase().includes('basketball') || title.toLowerCase().includes('nba') ? 'Wins' : 'Pts'}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-none border-0">
+                          {table.slice(0, 4).map((row) => (
+                            <tr key={row.rank} className="hover:bg-blue-100/30 transition-colors border-0">
+                              <td className="py-2.5 px-3 font-black text-blue-705 border-0">{row.rank}</td>
+                              <td className="py-2.5 px-1 font-bold border-0 text-slate-900">
+                                <span className="mr-1.5 text-base">{row.flag}</span>
+                                <span>{row.team}</span>
+                              </td>
+                              <td className="py-2.5 px-2 text-center text-slate-600 font-bold border-0">{row.mp}</td>
+                              <td className="py-2.5 px-2 text-center font-mono font-bold text-blue-750 border-0">
+                                {row.gd > 0 ? `+${row.gd}` : row.gd}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-black text-blue-900 border-0">{row.pts}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -321,39 +345,43 @@ export default function SportsSection({ sports }: SportsSectionProps) {
               <Trophy size={16} /> Tournament Group Stage Standings
             </h3>
             <div className="bg-[#eef3fc] text-slate-900 rounded-3xl overflow-hidden shadow-xs border-0">
-              <table className="w-full text-left border-collapse border-0">
-                <thead>
-                  <tr className="bg-blue-100/40 text-blue-900 font-bold text-xs uppercase tracking-wider border-0">
-                    <th className="py-3 px-4 w-[6%] text-center border-0">Rank</th>
-                    <th className="py-3 px-2 border-0">Team</th>
-                    <th className="py-3 px-3 text-center border-0">Played</th>
-                    <th className="py-3 px-3 text-center border-0">Won</th>
-                    <th className="py-3 px-3 text-center border-0">Draw</th>
-                    <th className="py-3 px-3 text-center border-0">Lost</th>
-                    <th className="py-3 px-3 text-center border-0">GD</th>
-                    <th className="py-3 px-4 text-right border-0">Points</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm border-0">
-                  {table.map((row) => (
-                    <tr key={row.rank} className="hover:bg-blue-100/30 transition-colors border-0">
-                      <td className="py-3 px-4 text-center font-bold text-blue-700 border-0">{row.rank}</td>
-                      <td className="py-3 px-2 font-bold border-0 text-slate-900">
-                        <span className="mr-2.5 text-lg">{row.flag}</span>
-                        <span>{row.team}</span>
-                      </td>
-                      <td className="py-3 px-3 text-center text-slate-600 font-bold border-0">{row.mp}</td>
-                      <td className="py-3 px-3 text-center text-slate-500 font-semibold border-0">{row.w}</td>
-                      <td className="py-3 px-3 text-center text-slate-500 font-semibold border-0">{row.d}</td>
-                      <td className="py-3 px-3 text-center text-slate-500 font-semibold border-0">{row.l}</td>
-                      <td className="py-3 px-3 text-center font-mono font-bold text-blue-800 border-0">
-                        {row.gd > 0 ? `+${row.gd}` : row.gd}
-                      </td>
-                      <td className="py-3 px-4 text-right font-black bg-blue-100/30 text-blue-900 border-0">{row.pts}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto w-full">
+                <div className="min-w-[550px] md:min-w-full">
+                  <table className="w-full text-left border-collapse border-0">
+                    <thead>
+                      <tr className="bg-blue-100/40 text-blue-900 font-bold text-xs uppercase tracking-wider border-0">
+                        <th className="py-3 px-4 w-[6%] text-center border-0">Rank</th>
+                        <th className="py-3 px-2 border-0">Team</th>
+                        <th className="py-3 px-3 text-center border-0">Played</th>
+                        <th className="py-3 px-3 text-center border-0">Won</th>
+                        <th className="py-3 px-3 text-center border-0">Draw</th>
+                        <th className="py-3 px-3 text-center border-0">Lost</th>
+                        <th className="py-3 px-3 text-center border-0">GD</th>
+                        <th className="py-3 px-4 text-right border-0">Points</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm border-0">
+                      {table.map((row) => (
+                        <tr key={row.rank} className="hover:bg-blue-100/30 transition-colors border-0">
+                          <td className="py-3 px-4 text-center font-bold text-blue-700 border-0">{row.rank}</td>
+                          <td className="py-3 px-2 font-bold border-0 text-slate-900">
+                            <span className="mr-2.5 text-lg">{row.flag}</span>
+                            <span>{row.team}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center text-slate-600 font-bold border-0">{row.mp}</td>
+                          <td className="py-3 px-3 text-center text-slate-500 font-semibold border-0">{row.w}</td>
+                          <td className="py-3 px-3 text-center text-slate-500 font-semibold border-0">{row.d}</td>
+                          <td className="py-3 px-3 text-center text-slate-500 font-semibold border-0">{row.l}</td>
+                          <td className="py-3 px-3 text-center font-mono font-bold text-blue-800 border-0">
+                            {row.gd > 0 ? `+${row.gd}` : row.gd}
+                          </td>
+                          <td className="py-3 px-4 text-right font-black bg-blue-100/30 text-blue-900 border-0">{row.pts}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
             <p className="text-[11px] text-slate-400 italic border-0">
               * Top two teams from each group stage bracket qualify directly to the Knockout Bracket phase.
@@ -441,30 +469,34 @@ export default function SportsSection({ sports }: SportsSectionProps) {
             </h3>
             
             <div className="bg-[#eef3fc] text-slate-900 rounded-3xl overflow-hidden shadow-xs border-0">
-              <table className="w-full text-left border-0">
-                <thead>
-                  <tr className="bg-blue-100/40 text-blue-900 font-bold text-xs uppercase tracking-wider border-0">
-                    <th className="py-3 px-4 text-center w-[10%] border-0">Rank</th>
-                    <th className="py-3 px-2 border-0">Player</th>
-                    <th className="py-3 px-3 border-0">Representing</th>
-                    <th className="py-3 px-3 text-center border-0">Matches</th>
-                    <th className="py-3 px-3 text-center border-0">Assists</th>
-                    <th className="py-3 px-4 text-right border-0">Goals Scored</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm border-0">
-                  {topScorers.map((scorer, i) => (
-                    <tr key={i} className="hover:bg-blue-100/30 transition-colors border-0">
-                      <td className="py-3 px-4 text-center font-bold text-blue-700 border-0">{i + 1}</td>
-                      <td className="py-3 px-2 font-black text-slate-900 border-0">{scorer.name}</td>
-                      <td className="py-3 px-3 font-semibold text-slate-650 border-0">{scorer.team}</td>
-                      <td className="py-3 px-3 text-center text-slate-650 border-0">{scorer.matches}</td>
-                      <td className="py-3 px-3 text-center text-slate-650 border-0">{scorer.assists}</td>
-                      <td className="py-3 px-4 text-right font-black bg-blue-100/30 text-blue-900 border-0">{scorer.goals}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto w-full">
+                <div className="min-w-[500px] md:min-w-full">
+                  <table className="w-full text-left border-0">
+                    <thead>
+                      <tr className="bg-blue-100/40 text-blue-900 font-bold text-xs uppercase tracking-wider border-0">
+                        <th className="py-3 px-4 text-center w-[10%] border-0">Rank</th>
+                        <th className="py-3 px-2 border-0">Player</th>
+                        <th className="py-3 px-3 border-0">Representing</th>
+                        <th className="py-3 px-3 text-center border-0">Matches</th>
+                        <th className="py-3 px-3 text-center border-0">Assists</th>
+                        <th className="py-3 px-4 text-right border-0">Goals Scored</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm border-0">
+                      {topScorers.map((scorer, i) => (
+                        <tr key={i} className="hover:bg-blue-100/30 transition-colors border-0">
+                          <td className="py-3 px-4 text-center font-bold text-blue-700 border-0">{i + 1}</td>
+                          <td className="py-3 px-2 font-black text-slate-900 border-0">{scorer.name}</td>
+                          <td className="py-3 px-3 font-semibold text-slate-650 border-0">{scorer.team}</td>
+                          <td className="py-3 px-3 text-center text-slate-650 border-0">{scorer.matches}</td>
+                          <td className="py-3 px-3 text-center text-slate-650 border-0">{scorer.assists}</td>
+                          <td className="py-3 px-4 text-right font-black bg-blue-100/30 text-blue-900 border-0">{scorer.goals}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         )}

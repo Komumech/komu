@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation, ArrowUpLeft, History, Bookmark, Settings, ChevronDown, ChevronUp, MoreVertical, Plus, Share2, Printer } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation, ArrowUpLeft, ArrowUp, History, Bookmark, Settings, ChevronDown, ChevronUp, MoreVertical, Plus, Share2, Printer, Glasses } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -143,7 +143,47 @@ export default function App() {
     return typeof window !== 'undefined' ? (localStorage.getItem('safe_search') as 'strict' | 'moderate' | 'off') || 'strict' : 'strict';
   });
   const [isSafeSearchIntercepted, setIsSafeSearchIntercepted] = useState(false);
+  const [isSearchEngineModalOpen, setIsSearchEngineModalOpen] = useState(false);
+  const [showDefaultToast, setShowDefaultToast] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('scout_default_prompt_dismissed') !== 'true';
+    }
+    return true;
+  });
+  const [isPrivacyMode, setIsPrivacyMode] = useState<boolean>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('privacy_mode') === 'true' : false;
+  });
+
   const lastQueryRef = useRef<string>('');
+
+  // Synchronize dynamic Axios headers for unified client tracking privacy
+  useEffect(() => {
+    axios.defaults.headers.common['X-Privacy-Mode'] = isPrivacyMode ? 'true' : 'false';
+  }, [isPrivacyMode]);
+
+  // Dynamic Google Analytics 4 (GA4) tracker auto-injector
+  useEffect(() => {
+    const gaId = (import.meta as any).env.VITE_GA_ID || 'G-SCOUTTEST99';
+    if (typeof window !== 'undefined' && gaId) {
+      const script1 = document.createElement('script');
+      script1.async = true;
+      script1.src = `https://www.googletagmanager.com/gtag/js?id=${gaId}`;
+      document.head.appendChild(script1);
+
+      const script2 = document.createElement('script');
+      script2.innerHTML = `
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', '${gaId}', {
+          page_path: window.location.pathname + window.location.search,
+          send_page_view: true
+        });
+      `;
+      document.head.appendChild(script2);
+      console.log(`📊 [GA4 Integration] Initialized tracker with ID: ${gaId}`);
+    }
+  }, []);
   const lastClickRef = useRef<{ id: string; url: string; time: number; query: string } | null>(null);
   const appsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -532,6 +572,10 @@ export default function App() {
     setAppsData(null);
     setBusinessProfileState(null);
     setKnowledgePanel(null);
+    setMovie(null);
+    setSports(null);
+    setPerson(null);
+    setLyrics(null);
     setIsEnglishHelp(false);
     setFaq([]);
     setShowSuggestions(false);
@@ -554,11 +598,17 @@ export default function App() {
       Be conservative. Only correct if you are 95% certain.`;
       
       generateContentViaProxy({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash",
         contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
       }).then((r: any) => {
-        const text = r.text?.trim() || "";
-        if (text && text.toLowerCase() !== queryToCheck.toLowerCase() && text.length < 100) {
+        let text = r.text?.trim() || "";
+        // Strip leading/trailing quotes that may be returned by LLM
+        text = text.replace(/^["'`]+|["'`]+$/g, '').trim();
+        
+        const normA = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normB = queryToCheck.toLowerCase().replace(/[^a-z0-9]/g, '');
+        
+        if (text && normA !== normB && text.length < 100) {
           setCorrection(text);
           setOriginalQuery(queryToCheck);
         }
@@ -753,7 +803,7 @@ export default function App() {
         if (currentParamQ !== finalQuery.trim() || currentParamTab !== activeTab) {
           url.searchParams.set('q', finalQuery.trim());
           url.searchParams.set('tab', activeTab);
-          window.history.pushState({ q: finalQuery.trim(), tab: activeTab }, '', url.toString());
+          window.history.pushState({ path: url.toString() }, '', url.toString());
         }
       }
 
@@ -796,39 +846,51 @@ export default function App() {
           generateFAQ(finalQuery, rawResults);
         }
         
-        // Intelligent triggering for Knowledge Panel (Entity card)
-        const topResultIsEntity = rawResults[0]?.displayUrl.includes('wikipedia.org') || 
-                                 rawResults[0]?.displayUrl.includes('britannica.com');
-        
-        // Check if there is a Wikipedia details page anywhere in the top 8 results
-        const wikiResult = rawResults.slice(0, 8).find(r => 
-          r.url.toLowerCase().includes('wikipedia.org/wiki/') && 
-          !r.url.toLowerCase().includes('/wiki/special:') && 
-          !r.url.toLowerCase().includes('/wiki/category:') &&
-          !r.url.toLowerCase().includes('/wiki/help:') &&
-          !r.url.toLowerCase().includes('/wiki/talk:')
-        );
-        
+        // Strict, Google-compliant triggering for Knowledge Panel (Entity Card)
+        // Identify if the query is a long-tail phrase, calculation, pricing question, conversational, or educational query.
+        // Google NEVER displays a sidebar entity card for complex questions (such as roofing bungalow estimation) even if Wikipedia links are in the organic results.
+        const cleanQ = finalQuery.toLowerCase().trim();
+        const isQuestionOrLongPhrase = 
+          /^(how|why|what|where|when|who|which|is|can|do|does|did|show|find|cost|price|roof|buying|sell|hire|build|calculate|compute|steps|recipe)\b/i.test(cleanQ) || 
+          cleanQ.split(/\s+/).length > 3 ||
+          cleanQ.includes('?') || 
+          cleanQ.includes(' vs ') || 
+          cleanQ.includes(' or ');
+
         if (data.suggestKnowledgePanel && data.detectedEntity) {
+          // Trusted AI classification detects a real entity in the query
           generateKnowledgePanel(data.detectedEntity.name, data.detectedEntity.type);
-        } else if (topResultIsEntity && !data.isEnglishHelp && !data.dictionary) {
-          // Trigger KP for top authoritative entities even if intent didn't catch it
-          generateKnowledgePanel(rawResults[0].title);
-        } else if (wikiResult && !data.isEnglishHelp && !data.dictionary) {
-          try {
-            const urlParts = wikiResult.url.split('/wiki/');
-            if (urlParts.length > 1) {
-              const entityFromUrl = decodeURIComponent(urlParts[1].split('#')[0]).replace(/_/g, ' ');
-              if (entityFromUrl) {
-                generateKnowledgePanel(entityFromUrl);
+        } else if (!isQuestionOrLongPhrase && !data.isEnglishHelp && !data.dictionary) {
+          // For short, specific noun terms, trigger elegant fallbacks if there's high confidence:
+          const topResultIsEntity = rawResults[0]?.displayUrl.includes('wikipedia.org') || 
+                                   rawResults[0]?.displayUrl.includes('britannica.com');
+          
+          const wikiResult = rawResults.slice(0, 3).find(r => 
+            r.url.toLowerCase().includes('wikipedia.org/wiki/') && 
+            !r.url.toLowerCase().includes('/wiki/special:') && 
+            !r.url.toLowerCase().includes('/wiki/category:') &&
+            !r.url.toLowerCase().includes('/wiki/help:') &&
+            !r.url.toLowerCase().includes('/wiki/talk:')
+          );
+
+          if (topResultIsEntity) {
+            generateKnowledgePanel(rawResults[0].title);
+          } else if (wikiResult) {
+            try {
+              const urlParts = wikiResult.url.split('/wiki/');
+              if (urlParts.length > 1) {
+                const entityFromUrl = decodeURIComponent(urlParts[1].split('#')[0]).replace(/_/g, ' ');
+                if (entityFromUrl) {
+                  generateKnowledgePanel(entityFromUrl);
+                } else {
+                  generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
+                }
               } else {
                 generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
               }
-            } else {
+            } catch (e) {
               generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
             }
-          } catch (e) {
-            generateKnowledgePanel(wikiResult.title.replace(/\s*-\s*Wikipedia/i, ''));
           }
         }
       }
@@ -927,14 +989,14 @@ export default function App() {
            ${context}
            
            Instructions:
-           1. Start directly with the factual search summary answer. Do NOT start your response with headers or titles like "AI Overview", "AI Overview: [Topic/Query]", "Topic: [Topic]", etc. Jump straight into the content.
+           1. Start directly with the factual search summary answer. If the query asks for a cost, price, how much, budget, or other financial estimation, provide a direct answer or average estimate range immediately in your first sentence or paragraph, then format any cost breakdown using a clean, professional, high-contrast Markdown table with columns (Item/Slab, Estimated Cost, Details) if applicable. Do NOT start your response with headers or titles like "AI Overview", "AI Overview: [Topic/Query]", "Topic: [Topic]", etc. Jump straight into the content.
            2. Use bullet points for key facts.
            3. INTEGRATE REFERENCE CITATIONS: At the end of key statements or facts, search to see which of the 5 sources context results the fact came from. Add standard Markdown link citations in the format "[1](URL)", "[2](URL)", "[3](URL)" citing the source URL of that corresponding source index. Always use numbers (1, 2, 3...) corresponding to the context index.
            4. INTEGRATE IMAGES: If a search result has an "Image_URL", you MAY include it using standard Markdown ![title](Image_URL) if it is highly relevant. Use at most 2-3 images.
            5. Be objective and professional. Use Markdown formatting.`;
 
       const result = await generateContentViaProxy({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
@@ -985,7 +1047,7 @@ export default function App() {
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
       const response = await generateContentViaProxy({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -1108,34 +1170,15 @@ export default function App() {
 
       // Step 2: Fetch any extra images from Wikipedia page media-list for beautiful collage
       if (wikiContent) {
-        try {
-          const mediaUrl = `https://en.wikipedia.org/api/rest_v1/page/media-list/${encodeURIComponent(matchedTitle)}`;
-          const mediaRes = await axios.get(mediaUrl);
-          const items = mediaRes.data?.items || [];
-          const imagesFound = items
-            .filter((item: any) => item.type === 'image' && item.srcset && item.srcset.length > 0)
-            .map((item: any) => {
-              const bestSrc = item.srcset[item.srcset.length - 1]?.src || item.srcset[0]?.src;
-              if (bestSrc) {
-                return bestSrc.startsWith('http') ? bestSrc : `https:${bestSrc}`;
-              }
-              return null;
-            })
-            .filter(Boolean)
-            .filter((img: string) => !isUnsuitedImage(img, matchedTitle)) as string[];
-
-          extraImages = imagesFound.slice(0, 3);
-        } catch (mediaErr: any) {
-          console.warn("Wikipedia media fetch failed:", mediaErr.message);
-        }
-
         const defaultImage = wikiImage || `https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=600`;
+        const initialImages = wikiImage ? [wikiImage] : [defaultImage];
+        
         const directData = {
           title: wikiTitle,
           subtitle: wikiDesc || (entityType || "Entity Information"),
           description: wikiContent,
           image: defaultImage,
-          images: extraImages.length > 0 ? extraImages : (wikiImage ? [wikiImage] : [defaultImage]),
+          images: initialImages,
           details: [
             ...(wikiDesc ? [{ label: "Type", value: wikiDesc }] : []),
             { label: "Source", value: "Wikipedia" }
@@ -1144,8 +1187,49 @@ export default function App() {
           peopleAlsoSearchFor: [],
           wikipediaUrl: wikiUrl
         };
+        
+        // Instantly write to cache & update UI so the Wikipedia card renders at lightspeed!
         clientKnowledgePanelCache[cacheKey] = directData;
         setKnowledgePanel(directData);
+
+        // Fetch extra images in the background asynchronously without blocking primary card rendering (highly optimized)
+        axios.get(`https://en.wikipedia.org/api/rest_v1/page/media-list/${encodeURIComponent(matchedTitle)}`)
+          .then(mediaRes => {
+            const items = mediaRes.data?.items || [];
+            const imagesFound = items
+              .filter((item: any) => item.type === 'image' && item.srcset && item.srcset.length > 0)
+              .map((item: any) => {
+                const bestSrc = item.srcset[item.srcset.length - 1]?.src || item.srcset[0]?.src;
+                if (bestSrc) {
+                  return bestSrc.startsWith('http') ? bestSrc : `https:${bestSrc}`;
+                }
+                return null;
+              })
+              .filter(Boolean)
+              .filter((img: string) => !isUnsuitedImage(img, matchedTitle)) as string[];
+
+            if (imagesFound.length > 0) {
+              const updatedImages = imagesFound.slice(0, 3);
+              const updatedData = {
+                ...directData,
+                images: updatedImages
+              };
+              clientKnowledgePanelCache[cacheKey] = updatedData;
+              setKnowledgePanel(prev => {
+                if (prev && prev.title === wikiTitle) {
+                  return {
+                    ...prev,
+                    images: updatedImages
+                  };
+                }
+                return prev;
+              });
+            }
+          })
+          .catch(mediaErr => {
+            console.warn("Wikipedia background media fetch failed:", mediaErr.message);
+          });
+
         return;
       }
 
@@ -1179,7 +1263,7 @@ export default function App() {
       Make sure to return valid JSON following the schema perfectly.`;
 
       const response = await generateContentViaProxy({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -1414,10 +1498,18 @@ export default function App() {
             bgRotationMode={bgRotationMode}
             setBgRotationMode={setBgRotationMode}
             setIsMobileSearchOpen={setIsMobileSearchOpen}
+            isPrivacyMode={isPrivacyMode}
+            setIsPrivacyMode={setIsPrivacyMode}
+            setIsSearchEngineModalOpen={setIsSearchEngineModalOpen}
+            setActiveTab={setActiveTab}
+            setIsSearching={setIsSearching}
+            activeTab={activeTab}
           />
         ) : (
           <ResultsView 
             key="results"
+            isPrivacyMode={isPrivacyMode}
+            setIsPrivacyMode={setIsPrivacyMode}
             query={query}
             setQuery={setQuery}
             onSearch={handleSearch}
@@ -1485,6 +1577,7 @@ export default function App() {
             organicFaqs={organicFaqs}
             isSemanticLoading={isSemanticLoading}
             detectedIntent={detectedIntent}
+            setIsSearchEngineModalOpen={setIsSearchEngineModalOpen}
           />
         )}
         {isAnalyticsOpen && (
@@ -1522,14 +1615,79 @@ export default function App() {
             onMicClick={toggleListening}
             fileInputRef={fileInputRef}
             imageQuery={imageQuery}
+            isPrivacyMode={isPrivacyMode}
           />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {isSearchEngineModalOpen && (
+          <SearchEngineGuideModal 
+            isOpen={isSearchEngineModalOpen} 
+            onClose={() => setIsSearchEngineModalOpen(false)} 
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDefaultToast && isSearching && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ delay: 1.0, duration: 0.4 }}
+            className="fixed bottom-6 right-6 z-[999] max-w-sm bg-white border-none rounded-[24px] shadow-2xl p-4 sm:p-5 flex flex-col gap-3.5 select-none"
+          >
+            <div className="flex items-start justify-between gap-3 text-left">
+              <div className="flex gap-2.5">
+                <span className="p-1.5 bg-blue-50 text-blue-600 rounded-lg shrink-0 h-8 w-8 flex items-center justify-center">
+                  <Navigation size={15} className="rotate-45" />
+                </span>
+                <div>
+                  <h5 className="font-bold text-[13px] text-slate-800 leading-tight">Search faster with Scout</h5>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                    Set Scout as your default search engine to ask questions directly from Chrome or Firefox's address bar.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDefaultToast(false);
+                  localStorage.setItem('scout_default_prompt_dismissed', 'true');
+                }}
+                className="p-1 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors shrink-0 cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex items-center justify-end gap-2 text-[11px]">
+              <button
+                onClick={() => {
+                  setShowDefaultToast(false);
+                  localStorage.setItem('scout_default_prompt_dismissed', 'true');
+                }}
+                className="px-3.5 py-1.5 hover:bg-slate-50 text-slate-500 font-bold rounded-full transition-colors cursor-pointer"
+              >
+                No thanks
+              </button>
+              <button
+                onClick={() => {
+                  setIsSearchEngineModalOpen(true);
+                  setShowDefaultToast(false);
+                  localStorage.setItem('scout_default_prompt_dismissed', 'true');
+                }}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-full transition-colors cursor-pointer shadow-3xs"
+              >
+                Set Default
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, suggestions, onSearch, onClose, onMicClick, fileInputRef, imageQuery }: any) {
+function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, suggestions, onSearch, onClose, onMicClick, fileInputRef, imageQuery, isPrivacyMode }: any) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1623,7 +1781,7 @@ function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, 
         <button 
           onClick={onClose} 
           type="button"
-          className="p-1 hover:bg-slate-50 rounded-full active:scale-95 transition-all shrink-0"
+          className="p-1 text-slate-800 transition-all shrink-0 border-none bg-transparent cursor-pointer active:scale-95"
         >
           <Plus size={24} className="text-slate-800 stroke-[2.5]" />
         </button>
@@ -1640,13 +1798,13 @@ function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, 
             }
           }}
           className="flex-1 bg-transparent border-none outline-none text-[15.5px] sm:text-[16.5px] text-slate-900 placeholder:text-slate-400 font-sans font-neutral p-0 focus:ring-0 focus:outline-none min-w-0"
-          placeholder="Search Scout or type URL"
+          placeholder={isPrivacyMode ? "Search incognito..." : "Search Scout or type URL"}
         />
 
         <button 
           type="button" 
           onClick={query ? () => { setQuery(''); inputRef.current?.focus(); } : onClose} 
-          className="p-1 hover:bg-slate-50 rounded-full text-slate-800 transition-colors focus:outline-none shrink-0"
+          className="p-1 text-slate-800 transition-colors focus:outline-none shrink-0 border-none bg-transparent cursor-pointer active:scale-95"
         >
           <X size={24} className="stroke-[2.5]" />
         </button>
@@ -1681,9 +1839,22 @@ function MobileSearchOverlay({ query, setQuery, userHistory, removeHistoryItem, 
   );
 }
 
-function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics, bgRotationMode, setBgRotationMode, setIsMobileSearchOpen }: any) {
+function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, setShowSuggestions, inputRef, searchContainerRef, user, onLogin, onLogout, onMicClick, bg, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, imageQuery, onImageUpload, removeImageQuery, fileInputRef, userHistory, onOpenAnalytics, bgRotationMode, setBgRotationMode, setIsMobileSearchOpen, isPrivacyMode, setIsPrivacyMode, setIsSearchEngineModalOpen, setActiveTab, setIsSearching, activeTab }: any) {
   const [glowVisible, setGlowVisible] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showPurpleTrail, setShowPurpleTrail] = useState(false);
+  
+  const prevPrivacyRef = useRef(isPrivacyMode);
+  useEffect(() => {
+    if (isPrivacyMode && !prevPrivacyRef.current) {
+      setShowPurpleTrail(true);
+      const timer = setTimeout(() => {
+        setShowPurpleTrail(false);
+      }, 1600);
+      return () => clearTimeout(timer);
+    }
+    prevPrivacyRef.current = isPrivacyMode;
+  }, [isPrivacyMode]);
 
   useEffect(() => {
     const t = setTimeout(() => setGlowVisible(false), 3000);
@@ -1728,7 +1899,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
         <div className="flex items-center gap-4">
            <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-white drop-shadow-lg select-none">Scout</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} isHome={true} onOpenAnalytics={onOpenAnalytics} />
           <div ref={appsRef}>
             <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} isWhite={true} />
@@ -1751,7 +1922,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.4 }}
-          className="relative px-4 w-full max-w-2xl mx-auto"
+          className="relative px-2 xs:px-4 w-full max-w-2xl mx-auto"
         >
           {/* MOBILE SEARCH BAR TRIGGER (Replaces wrapping textarea with a clean, static, non-wrapping Google-like search bar on mobile) */}
           <div 
@@ -1761,7 +1932,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
             <div className="flex items-center gap-3.5 flex-1 min-w-0 pr-2">
               <Search size={20} className="text-slate-500 shrink-0" />
               <span className="flex-1 text-[16px] font-normal text-slate-800 placeholder:text-slate-400 truncate">
-                {query || "Ask Scout anything..."}
+                {query || (isPrivacyMode ? "Search incognito..." : "Ask Scout anything...")}
               </span>
               {query && (
                 <button 
@@ -1813,7 +1984,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
             }`} />
 
-            <Search className="text-slate-400 group-focus-within:text-blue-500 transition-colors shrink-0 relative z-10" size={22} />
+            <Search className="text-slate-900 transition-colors shrink-0 relative z-10" size={20} />
             
             {imageQuery && (
               <div className="relative group/img ml-2 h-8 w-8 shrink-0 rounded overflow-hidden shadow-sm border border-slate-200 z-10">
@@ -1881,7 +2052,27 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                     }
                   }
                 }}
-                placeholder={imageQuery ? "Visual Search Active" : "Ask Scout anything..."} 
+                placeholder={
+                  imageQuery 
+                    ? "Visual Search Active" 
+                    : isPrivacyMode 
+                      ? "Search incognito..." 
+                      : activeTab === 'ai' 
+                        ? "Ask Scout AI..." 
+                        : activeTab === 'images' 
+                          ? "Search Scout Images..." 
+                          : activeTab === 'videos' 
+                            ? "Search Scout Videos..." 
+                            : activeTab === 'news' 
+                              ? "Search Scout News..." 
+                              : activeTab === 'developer' 
+                                ? "Search Developer Docs..." 
+                                : activeTab === 'docs' 
+                                  ? "Search Documentation..." 
+                                  : activeTab === 'memes' 
+                                    ? "Search Memes..." 
+                                    : "Search Scout or type URL"
+                } 
                 style={{
                   resize: 'none',
                   height: 'auto',
@@ -1903,37 +2094,120 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
               <button 
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
-                className={`p-2.5 bg-slate-50 hover:bg-white hover:shadow-md rounded-full transition-all active:scale-95 ${imageQuery ? 'text-blue-600 bg-blue-50' : 'text-blue-500'}`}
+                className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
                 title="Visual Search (Scout Vision)"
               >
-                <Camera size={20} />
+                <Camera size={20} className="text-slate-950" />
               </button>
               <button 
                 onClick={onMicClick} 
                 type="button" 
-                className="p-2.5 bg-slate-50 hover:bg-white hover:shadow-md rounded-full text-purple-600 transition-all active:scale-95"
+                className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                title="Search by voice"
               >
-                <Mic size={20} />
+                <Mic size={20} className="text-slate-950" />
+              </button>
+
+              {/* AI Mode Pillar Pill Button inside search bar */}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('ai');
+                  if (query.trim()) {
+                    onSearch(query);
+                  } else {
+                    setIsSearching(true);
+                  }
+                }}
+                className="flex items-center gap-1 px-3.5 h-9 text-slate-900 text-xs font-bold hover:scale-105 transition-all border-none bg-transparent cursor-pointer select-none shrink-0"
+              >
+                <span>AI Mode</span>
               </button>
             </div>
+
+            <AnimatePresence>
+              {showSuggestions && suggestions.length > 0 && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="absolute top-full left-0 right-0 rounded-b-[1.75rem] border border-slate-200 border-t-0 bg-white py-3 shadow-2xl z-50 text-left overflow-hidden"
+                >
+                  {suggestions.map((s: string, i: number) => (
+                    <button key={i} onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }} className="w-full px-8 py-3 flex items-center gap-4 text-slate-700 hover:bg-slate-50 transition-colors">
+                      <Search size={18} className="text-slate-300" /> <span className="font-medium truncate">{s}</span>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </form>
-          
-          <AnimatePresence>
-            {showSuggestions && suggestions.length > 0 && (
-              <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="absolute top-[3.5rem] left-4 right-4 rounded-b-[1.75rem] shadow-2xl border-t border-slate-100 py-4 z-50 text-left overflow-hidden glass"
-              >
-                {suggestions.map((s: string, i: number) => (
-                  <button key={i} onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }} className="w-full px-8 py-3 flex items-center gap-4 text-slate-700 hover:bg-slate-50 transition-colors">
-                    <Search size={18} className="text-slate-300" /> <span className="font-medium truncate">{s}</span>
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
+        </motion.div>
+
+        {/* Google-like Sub-Search Buttons (AI Mode & Incognito) */}
+        <motion.div
+          initial={{ y: 15, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="flex items-center justify-center gap-2 sm:gap-4 w-full max-w-[340px] xs:max-w-sm mx-auto px-1.5 xs:px-4"
+        >
+          {/* AI Mode with solid thick border wrapping layout */}
+          <div className="flex-1 relative p-[1.5px] rounded-full overflow-hidden bg-white/20 hover:bg-white/40 transition-all duration-300">
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("Explain quantum computing in simple terms");
+                if (inputRef && inputRef.current) {
+                  inputRef.current.focus();
+                }
+              }}
+              className="w-full py-2.5 px-3 sm:px-5 rounded-full text-[13px] sm:text-[14px] font-semibold bg-slate-950/45 text-slate-200 hover:bg-slate-950/65 flex items-center justify-center gap-1.5 sm:gap-2 select-none shadow-md backdrop-blur-md cursor-pointer duration-200 relative z-10 whitespace-nowrap"
+            >
+              <span>AI Mode</span>
+            </button>
+          </div>
+
+          {/* Incognito button with custom orbital purple trail transition */}
+          <div
+            className={`flex-1 relative p-[1.5px] rounded-full overflow-hidden transition-all duration-300 ${
+              isPrivacyMode 
+                ? 'bg-white' 
+                : 'bg-white/20 hover:bg-white/40'
+            }`}
+          >
+            {/* The rotating purple light trail */}
+            <AnimatePresence>
+              {showPurpleTrail && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="absolute inset-[0.5px] pointer-events-none rounded-full overflow-hidden z-0"
+                >
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ ease: "linear", duration: 1.2, repeat: Infinity }}
+                    className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_55%,#c084fc_80%,#a855f7_100%)]"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Injected mask for the button context */}
+            <button
+              type="button"
+              onClick={() => setIsPrivacyMode(!isPrivacyMode)}
+              className={`w-full py-2.5 px-3 sm:px-5 rounded-full text-[13px] sm:text-[14px] font-semibold flex items-center justify-center gap-1.5 sm:gap-2 select-none shadow-md backdrop-blur-md cursor-pointer duration-200 relative z-10 whitespace-nowrap ${
+                isPrivacyMode 
+                  ? 'bg-slate-900 text-white' 
+                  : 'bg-slate-950/45 text-slate-200 hover:bg-slate-950/65'
+              }`}
+            >
+              <Glasses size={16} className={isPrivacyMode ? 'text-white' : 'text-slate-300'} />
+              <span>Incognito</span>
+            </button>
+          </div>
         </motion.div>
 
         {/* Recently Searched Shelf */}
@@ -1944,7 +2218,6 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
             className="flex flex-col items-center gap-4 pt-4"
           >
             <div className="flex items-center gap-2 text-white/50 text-[11px] font-bold uppercase tracking-widest">
-              <Sparkles size={12} />
               <span>Recently Searched</span>
             </div>
             <div className="flex flex-wrap justify-center gap-2 max-w-xl">
@@ -2977,10 +3250,11 @@ function RecipeIntegrationBox({ recipes, onResultClick, onImageError }: { recipe
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, sports, person, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, sports, person, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent, isPrivacyMode, setIsPrivacyMode, setIsSearchEngineModalOpen }: any) {
   const [isResInputFocused, setIsResInputFocused] = useState(false);
   const [aiOverviewCopied, setAiOverviewCopied] = useState(false);
   const [aiOverviewRating, setAiOverviewRating] = useState<'up' | 'down' | null>(null);
+  const [chatInputText, setChatInputText] = useState('');
 
   // Keep track of broken image URLs to automatically filter them from results
   const [brokenUrls, setBrokenUrls] = useState<string[]>([]);
@@ -3118,9 +3392,44 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
   const ghostText = ghostSuggestion ? ghostSuggestion.slice(query.length) : '';
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col min-h-screen bg-white">
-      <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
-      <header className="bg-white select-none font-sans">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex min-h-screen bg-white w-full">
+      {/* GEMINI LAPTOP SIDEBAR */}
+      {activeTab === 'ai' && (
+        <div className="hidden md:flex flex-col w-[68px] shrink-0 border-r border-[#ececec] bg-[#f0f4f9] h-screen sticky top-0 items-center justify-between py-6 z-40 select-none animate-in slide-in-from-left duration-300">
+          <div className="flex flex-col items-center gap-6 w-full">
+            <div onClick={goHome} className="h-11 w-11 rounded-full bg-linear-to-tr from-[#4285F4] via-[#a855f7] via-[#ea4335] to-[#f9ab00] bg-[length:200%_auto] text-white flex items-center justify-center font-black text-lg cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.3)] hover:scale-105 active:scale-95 transition-all">
+              G
+            </div>
+            <button
+              type="button"
+              className="p-2.5 text-slate-600 hover:bg-slate-200/60 rounded-full transition-all border-none bg-transparent cursor-pointer"
+              title="Menu"
+            >
+              <Menu size={20} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+              }}
+              className="p-2.5 text-slate-600 hover:bg-slate-200/60 rounded-full transition-all border-none bg-transparent cursor-pointer"
+              title="New Chat"
+            >
+              <CheckSquare size={20} />
+            </button>
+          </div>
+          <div className="w-full h-8 flex items-center justify-center">
+            <div className="h-7 w-7 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-550 text-[11px] border border-slate-350">
+              {user?.email ? user.email.charAt(0).toUpperCase() : 'K'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Column */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
+        <header className="bg-white select-none font-sans">
         {/* MOBILE LAYOUT HEADER (Replicating user's requested Google mobile-style layout) */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3 md:hidden">
           {/* Beaker Lab Flask Icon on Left (Replicates Google Flask - No Bounce) */}
@@ -3135,7 +3444,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
           {/* Centered purple-gradient Scout logo */}
           <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0 select-none">
-             <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
+             <span className={`font-display font-black text-2xl tracking-tighter ${activeTab === 'ai' ? 'bg-clip-text text-transparent bg-gradient-to-tr from-[#4285F4] via-[#a855f7] via-[#ea4335] to-[#f9ab00] animate-pulse' : 'bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]'}`}>
+               {activeTab === 'ai' ? 'S' : 'Scout'}
+             </span>
           </div>
 
           {/* User profile on Right */}
@@ -3145,126 +3456,174 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
         </div>
 
         {/* Mobile Search input bar (Static, non-wrapping clickable pill) */}
-        <div className="px-6 pt-2 pb-4 md:hidden">
-          <div className="relative w-full">
-            <div 
-              onClick={() => setIsMobileSearchOpen(true)}
-              className="relative flex items-center justify-between pl-4.5 pr-4 py-2.5 bg-white border border-slate-200/90 shadow-md rounded-full w-full cursor-pointer select-none"
-            >
-              <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
-                <Search size={20} className="text-slate-500 shrink-0" />
-                <span className="flex-1 text-[16px] font-normal text-slate-800 placeholder:text-slate-450 truncate">
-                  {query || "Search Scout..."}
-                </span>
-                {query && (
+        {activeTab !== 'ai' && (
+          <div className="px-6 pt-2 pb-4 md:hidden">
+            <div className="relative w-full">
+              <div 
+                onClick={() => setIsMobileSearchOpen(true)}
+                className="relative flex items-center justify-between pl-4.5 pr-4 py-2.5 bg-white border border-slate-200/90 shadow-md rounded-full w-full cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+                  <Search size={20} className="text-slate-500 shrink-0" />
+                  <span className="flex-1 text-[16px] font-normal text-slate-800 placeholder:text-slate-450 truncate">
+                    {query || "Search Scout..."}
+                  </span>
+                  {query && (
+                    <button 
+                      type="button" 
+                      onClick={(e) => { e.stopPropagation(); setQuery(''); }} 
+                      className="p-1 text-slate-500 hover:text-slate-700 focus:outline-none shrink-0"
+                    >
+                      <X size={20} />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0 pl-1">
+                  <div className="h-5 w-[1px] bg-slate-200 shrink-0" />
                   <button 
                     type="button" 
-                    onClick={(e) => { e.stopPropagation(); setQuery(''); }} 
-                    className="p-1 text-slate-500 hover:text-slate-700 focus:outline-none shrink-0"
+                    onClick={(e) => { e.stopPropagation(); onMicClick(); }}
+                    className="p-1 text-slate-600 active:scale-95 hover:scale-110 transition-all focus:outline-none bg-transparent border-none shrink-0 cursor-pointer"
                   >
-                    <X size={20} />
+                    <Mic size={20} />
                   </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2.5 shrink-0 pl-1">
-                <div className="h-5 w-[1px] bg-slate-200 shrink-0" />
-                <button 
-                  type="button" 
-                  onClick={(e) => { e.stopPropagation(); onMicClick(); }}
-                  className="p-1 hover:bg-slate-100 rounded-full text-slate-600 active:scale-95 transition-all focus:outline-none bg-transparent border-none shrink-0"
-                >
-                  <Mic size={20} />
-                </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* DESKTOP LAYOUT HEADER */}
-        <div className="hidden md:flex items-center justify-between px-6 lg:px-12 py-5 max-w-[1700px] mx-auto gap-8">
-          <div className="flex items-center gap-8 flex-1 max-w-3xl">
+        <div className="hidden md:flex items-center justify-between px-6 lg:px-12 py-5 max-w-[1700px] mx-auto gap-12">
+          <div className="flex items-center gap-14 lg:gap-20 flex-1 max-w-4xl pl-2">
             {/* Logo on Left */}
             <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0 select-none">
-               <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">Scout</span>
+              {activeTab === 'ai' ? (
+                <div className="w-10 h-10 flex items-center justify-center bg-white rounded-none border-none select-none">
+                  <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">
+                    S
+                  </span>
+                </div>
+              ) : (
+                <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">
+                  Scout
+                </span>
+              )}
             </div>
 
-            {/* Double Search Bar on Desktop */}
-            <div className="flex-1 max-w-2xl relative" ref={searchContainerRef}>
-              <form 
-                onSubmit={(e) => { e.preventDefault(); onSearch(); }}
-                className="relative flex items-center gap-3 px-5 py-2 bg-white border border-slate-200/90 shadow-sm hover:shadow-md focus-within:shadow-md rounded-full transition-all duration-200"
-              >
-                {imageQuery && (
-                  <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100 relative z-10">
-                    <img src={imageQuery} className="w-full h-full object-cover blur-[1.5px]" />
+            {/* Double Search Bar on Desktop / Inline Tabs in AI mode */}
+            {activeTab !== 'ai' ? (
+              <div className="flex-1 max-w-2xl relative" ref={searchContainerRef}>
+                <form 
+                  onSubmit={(e) => { e.preventDefault(); onSearch(); }}
+                  className="relative flex items-center gap-3.5 pl-6 pr-3.5 py-2.5 bg-white border border-slate-200/90 shadow-sm hover:shadow-md focus-within:shadow-md rounded-full transition-all duration-200"
+                >
+                  {imageQuery && (
+                    <div className="relative group/resimg mr-2 h-6 w-6 shrink-0 rounded overflow-hidden shadow-xs border border-slate-100 relative z-10">
+                      <img src={imageQuery} className="w-full h-full object-cover blur-[1.5px]" />
+                    </div>
+                  )}
+                  
+                  {/* Sleek dynamic URL indicator showing what tab/category they are searching on */}
+                  <div className="hidden lg:flex items-center text-slate-400 text-sm font-medium tracking-tight font-mono select-none mr-0.5 shrink-0 relative z-10">
+                    <span className="text-slate-900 font-semibold">scout.ai</span>
+                    <span className="text-slate-400 mx-0.5">/</span>
+                    <span className="text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded text-[11px] uppercase tracking-wider">
+                      {activeTab === 'ai' ? 'ai-mode' : activeTab}
+                    </span>
+                    <span className="text-slate-400 ml-0.5">/</span>
                   </div>
-                )}
-                
-                <textarea 
-                  ref={resInputRef}
-                  value={query} 
-                  rows={1}
-                  onFocus={() => { setIsResInputFocused(true); setShowSuggestions(true); }}
-                  onBlur={() => { setTimeout(() => setIsResInputFocused(false), 200); }}
-                  onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      onSearch();
-                      setShowSuggestions(false);
-                    }
-                  }}
-                  placeholder="Search Scout..."
-                  style={{
-                    resize: 'none',
-                    height: 'auto',
-                    maxHeight: '100px'
-                  }}
-                  className="w-full flex-1 bg-transparent border-none outline-none text-slate-900 font-normal py-1 h-auto resize-none leading-normal font-sans"
-                />
-                
-                {query && (
-                  <button 
-                    type="button" 
-                    onClick={() => setQuery('')} 
-                    className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
 
-                <div className="flex items-center gap-2 shrink-0 border-l border-slate-200 pl-3">
-                  <button 
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`p-1.5 hover:bg-slate-50 rounded-full transition-all ${imageQuery ? 'text-blue-500 bg-blue-50' : 'text-slate-400'}`}
-                  >
-                    <Camera size={16} />
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={onMicClick}
-                    className="p-1.5 hover:bg-slate-50 rounded-full text-slate-500 transition-all active:scale-95"
-                  >
-                    <Mic size={16} />
-                  </button>
-                  <button type="submit" className="p-1.5 text-slate-400 hover:text-slate-600 hover:scale-105 transition-all" onClick={() => onSearch()}>
-                    <Search size={18} />
-                  </button>
-                </div>
-              </form>
-              <AnimatePresence>
-                {showSuggestions && suggestions.length > 0 && (
-                  <motion.div 
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="absolute top-[48px] left-0 right-0 border border-slate-200 rounded-2xl shadow-xl z-[2100] overflow-hidden bg-white mt-1"
-                  >
-                    {suggestions.map((s: string, i: number) => (
-                      <button 
-                        key={i} 
-                        onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }}
+                  <textarea 
+                    ref={resInputRef}
+                    value={query} 
+                    rows={1}
+                    onFocus={() => { setIsResInputFocused(true); setShowSuggestions(true); }}
+                    onBlur={() => { setTimeout(() => setIsResInputFocused(false), 200); }}
+                    onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); }} 
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        onSearch();
+                        setShowSuggestions(false);
+                      }
+                    }}
+                  placeholder={
+                    isPrivacyMode 
+                      ? "Search incognito..." 
+                      : activeTab === 'ai' 
+                        ? "Ask Scout AI..." 
+                        : activeTab === 'images' 
+                          ? "Search Scout Images..." 
+                          : activeTab === 'videos' 
+                            ? "Search Scout Videos..." 
+                            : activeTab === 'news' 
+                              ? "Search Scout News..." 
+                              : activeTab === 'developer' 
+                                ? "Search Developer Docs..." 
+                                : activeTab === 'docs' 
+                                  ? "Search Documentation..." 
+                                  : activeTab === 'memes' 
+                                    ? "Search Memes..." 
+                                    : "Search Scout or type URL"
+                  }
+                    style={{
+                      resize: 'none',
+                      height: 'auto',
+                      maxHeight: '100px'
+                    }}
+                    className="w-full flex-1 bg-transparent border-none outline-none text-slate-900 font-normal py-1 h-auto resize-none leading-normal font-sans"
+                  />
+                  
+                  {query && (
+                    <button 
+                      type="button" 
+                      onClick={() => setQuery('')} 
+                      className="p-1 text-slate-400 hover:text-slate-600 focus:outline-none shrink-0"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+
+                  <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-3.5">
+                    <button 
+                      type="button" 
+                      onClick={onMicClick}
+                      className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                      title="Search by voice"
+                    >
+                      <Mic size={17} className="text-slate-950 animate-pulse-slow" />
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                      title="Search by image"
+                    >
+                      <Camera size={17} className="text-slate-950" />
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0" 
+                      onClick={() => onSearch()}
+                      title="Search"
+                    >
+                      <Search size={17} className="text-slate-950" />
+                    </button>
+                  </div>
+                </form>
+                <AnimatePresence>
+                  {showSuggestions && suggestions.length > 0 && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="absolute top-[48px] left-0 right-0 border border-slate-200 rounded-2xl shadow-xl z-[2100] overflow-hidden bg-white mt-1"
+                    >
+                      {suggestions.map((s: string, i: number) => (
+                        <button 
+                          key={i} 
+                          onClick={() => { setQuery(s); onSearch(s); setShowSuggestions(false); }}
                         className="w-full px-5 py-3 flex items-center gap-3 text-slate-700 hover:bg-slate-50 transition-colors text-left"
                       >
                         <Search size={14} className="text-slate-400" />
@@ -3275,6 +3634,29 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 )}
               </AnimatePresence>
             </div>
+            ) : (
+              <div className="flex items-center gap-6 md:gap-7 select-none pl-2 h-10">
+                {['AI Mode', 'All', 'Images', 'News', 'Developer', 'Docs', 'Memes'].map(tab => {
+                  const tabLower = tab === 'AI Mode' ? 'ai' : tab.toLowerCase();
+                  const isActive = activeTab === tabLower;
+                  return (
+                    <button 
+                      key={tab} 
+                      className={`h-full text-[14px] border-b-2 transition-all whitespace-nowrap shrink-0 relative flex items-center px-1 font-sans ${
+                        isActive 
+                          ? 'text-purple-600 font-bold border-purple-600' 
+                          : 'text-slate-500 border-transparent hover:text-slate-900 font-medium'
+                      }`} 
+                      onClick={() => {
+                        setActiveTab(tabLower);
+                      }}
+                    >
+                      {tab}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="hidden md:flex items-center gap-4 shrink-0">
@@ -3289,38 +3671,61 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             <div ref={appsRef}>
               <AppsLauncher isOpen={isAppsOpen} setIsOpen={setIsAppsOpen} />
             </div>
+            <button
+              onClick={() => setIsPrivacyMode(!isPrivacyMode)}
+              className={`flex items-center justify-center p-2 rounded-full transition-all border select-none duration-200 cursor-pointer shadow-3xs hover:scale-105 shrink-0 ${
+                isPrivacyMode 
+                  ? 'bg-slate-900 border-slate-950 text-slate-100 shadow-sm hover:bg-slate-800 gap-1 px-2.5' 
+                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+              }`}
+              title={isPrivacyMode ? "Incognito Mode Active" : "Incognito Mode Disabled"}
+            >
+              {isPrivacyMode ? (
+                <div className="flex items-center gap-1">
+                  <Glasses size={14} className="text-violet-400 shrink-0" />
+                  <span className="text-[10px] font-bold text-violet-400 leading-none">on</span>
+                </div>
+              ) : (
+                <div className="relative w-4 h-4 shrink-0 flex items-center justify-center">
+                  <Glasses size={14} className="text-slate-400" />
+                  <div className="absolute w-[18px] h-[1.5px] bg-slate-400 -rotate-45 transform origin-center" />
+                </div>
+              )}
+            </button>
             <UserProfile user={user} onLogin={onLogin} onLogout={onLogout} isSignoutOpen={isSignoutOpen} setIsSignoutOpen={setIsSignoutOpen} onOpenAnalytics={onOpenAnalytics} />
           </div>
         </div>
 
         {/* TAB NAVIGATION RIBBON (Replicates exact look of Google sub-tab bar with equalized spacing) */}
-        <div className="md:sticky md:top-0 z-40 bg-white border-t border-b border-slate-100 select-none">
-          <div className="px-6 md:px-12 max-w-[1700px] bg-white mx-auto">
-            <div className="flex items-center gap-5 sm:gap-8 overflow-x-auto scrollbar-hide md:pl-[145px]">
-              {/* AI Mode tab + original tabs */}
-              {['AI Mode', 'All', 'Images', 'News'].map(tab => {
-                const tabLower = tab === 'AI Mode' ? 'ai' : tab.toLowerCase();
-                const isActive = activeTab === tabLower;
-                
-                return (
-                  <button 
-                    key={tab} 
-                    className={`pb-3 pt-2.5 px-0.5 text-[14px] border-b-[3px] transition-all whitespace-nowrap shrink-0 relative ${
-                      isActive 
-                        ? 'text-slate-900 font-semibold border-slate-900' 
-                        : 'text-slate-600 border-transparent hover:text-slate-800'
-                    }`} 
-                    onClick={() => {
-                      setActiveTab(tabLower);
-                    }}
-                  >
-                    {tab}
-                  </button>
-                );
-              })}
+        {activeTab !== 'ai' && (
+          <div className="md:sticky md:top-0 z-40 bg-white border-t border-b border-slate-100 select-none">
+            <div className="px-6 md:px-12 max-w-[1700px] bg-white mx-auto">
+              <div className="flex items-center gap-5 sm:gap-8 overflow-x-auto scrollbar-hide md:pl-[145px]">
+                {/* AI Mode tab + original tabs */}
+                {['AI Mode', 'All', 'Images', 'News', 'Developer', 'Docs', 'Memes'].map(tab => {
+                  const tabLower = tab === 'AI Mode' ? 'ai' : tab.toLowerCase();
+                  const isActive = activeTab === tabLower;
+                  
+                  return (
+                    <button 
+                      key={tab} 
+                      className={`pb-3 pt-2.5 px-0.5 text-[14px] border-b-[3px] transition-all whitespace-nowrap shrink-0 relative ${
+                        isActive 
+                          ? 'text-slate-950 font-black border-slate-950 border-black' 
+                          : 'text-slate-600 border-transparent hover:text-slate-900'
+                      }`} 
+                      onClick={() => {
+                        setActiveTab(tabLower);
+                      }}
+                    >
+                      {tab}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </header>
 
       <main ref={mainRef} className="flex-1">
@@ -3542,148 +3947,252 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             )}
           </div>
         ) : activeTab === 'ai' ? (
-          <div className="w-full px-4 sm:px-10 md:px-12 py-6 max-w-[1700px] mx-auto select-none">
-            {aiLoading ? (
-              <div className="py-8 animate-pulse max-w-4xl">
-                <div className="flex items-center gap-2.5 mb-6 select-none">
-                  <div className="p-1.5 bg-gradient-to-tr from-blue-500 via-indigo-500 to-purple-500 rounded-lg text-white shadow-xs">
-                    <Sparkles size={15} className="fill-white stroke-none" />
+          <div className="w-full px-4 sm:px-6 py-6 max-w-4xl lg:pl-20 xl:pl-24 select-none font-sans">
+            {!query || query.trim() === '' ? (
+              <div className="flex flex-col items-center justify-center min-h-[calc(100vh-270px)] w-full max-w-3xl mx-auto px-4 select-none animate-in fade-in duration-700">
+                <h1 className="font-display font-medium text-4xl sm:text-5xl text-slate-800 tracking-tight text-center mb-10">
+                  Hi {user?.displayName || (user?.email ? user.email.split('@')[0] : '') || 'Komu'}, what's on your mind?
+                </h1>
+                <form 
+                  onSubmit={(e: any) => {
+                    e.preventDefault();
+                    if (chatInputText.trim()) {
+                      setQuery(chatInputText);
+                      onSearch(chatInputText);
+                      setChatInputText('');
+                    }
+                  }}
+                  className="w-full relative shadow-[0_4px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_30px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_30px_rgba(0,0,0,0.08)] transition-all duration-200 border border-slate-200 rounded-[32px] bg-white pl-5 pr-2.5 py-3 flex items-center gap-3"
+                >
+                  <button 
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-full font-black flex items-center justify-center shrink-0 w-10 h-10 cursor-pointer border-none"
+                    title="Add image"
+                  >
+                    <span className="text-xl leading-none">+</span>
+                  </button>
+                  <input 
+                    name="chatInput"
+                    type="text"
+                    value={chatInputText}
+                    onChange={(e) => setChatInputText(e.target.value)}
+                    placeholder="Ask anything"
+                    className="flex-1 w-full bg-transparent border-none outline-none font-sans text-slate-800 text-[17px] placeholder:text-slate-400 py-2 focus:ring-0 leading-normal"
+                  />
+                  
+                  <div className="flex items-center justify-center shrink-0 w-11 h-11 relative overflow-hidden">
+                    <AnimatePresence mode="wait">
+                      {chatInputText.trim().length === 0 ? (
+                        <motion.button
+                          key="voice-landing"
+                          initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                          animate={{ opacity: 1, scale: 1, x: 0 }}
+                          exit={{ opacity: 0, scale: 0.8, x: -20 }}
+                          transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                          type="button" 
+                          onClick={onMicClick}
+                          className="p-2.5 bg-slate-50 hover:bg-slate-100/90 text-slate-600 rounded-full active:scale-95 transition-all border-none bg-transparent shrink-0 cursor-pointer flex items-center justify-center"
+                          title="Search by voice"
+                        >
+                          <Mic size={19} className="text-slate-600" />
+                        </motion.button>
+                      ) : (
+                        <motion.button
+                          key="send-landing"
+                          initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                          animate={{ opacity: 1, scale: 1, x: 0 }}
+                          exit={{ opacity: 0, scale: 0.8, x: -20 }}
+                          transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                          type="submit"
+                          className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full hover:shadow-lg active:scale-95 border-none cursor-pointer flex items-center justify-center shadow-[0_2px_8px_rgba(37,99,235,0.3)] duration-150"
+                          title="Send request"
+                        >
+                          <ArrowUp size={19} className="stroke-[2.5]" />
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <span className="text-[16px] font-bold text-slate-800">
-                    {isEnglishHelp ? 'English Spelling Help' : 'AI Overview'}
-                  </span>
-                </div>
-                <div className="space-y-3.5 pl-0.5 max-w-3xl">
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-full" />
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[95%]" />
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[85%]" />
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[60%]" />
+                </form>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+              {/* User message block - representing original search query */}
+              <div className="flex justify-end px-2">
+                <div className="flex flex-col items-end gap-1 max-w-[85%]">
+                  <div className="bg-slate-100 text-slate-800 text-[14px] sm:text-[14.5px] font-normal leading-relaxed px-5 py-3 rounded-[24px]">
+                    {query}
+                  </div>
                 </div>
               </div>
-            ) : aiOverview ? (
-              <div className="glass rounded-[24px] sm:rounded-[32px] p-5 sm:p-7 md:p-9 mb-8 overflow-hidden shadow-none border border-white/40">
-                <div className="flex items-center justify-between mb-5 select-none">
-                  <div className="flex items-center gap-2 opacity-70">
-                    <Sparkles size={14} className="text-blue-500 fill-blue-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                      {isEnglishHelp ? 'English Help' : 'AI Overview'}
-                    </span>
-                  </div>
-                </div>
-                
-                {(() => {
-                  const imageSources = (aiOverview.sources || []).filter((s: any) => s.image);
-                  const backupImages = results ? results.filter((r: any) => r.image).map((r: any) => ({
-                    url: r.url,
-                    title: r.title,
-                    snippet: r.snippet,
-                    image: r.image
-                  })) : [];
-                  const displayImages = [...imageSources, ...backupImages].filter((item, idx, self) => 
-                    self.findIndex(t => t.image === item.image) === idx
-                  ).slice(0, 4);
 
-                  return (
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                      {/* Left: Main synthesized answers prose section */}
-                      <div className="lg:col-span-8 flex flex-col justify-between">
-                        <div className="relative">
-                          <div 
-                            className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[260px] md:max-h-[480px]' : 'max-h-none'}`} 
-                            style={{ 
-                              maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', 
-                              WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' 
-                            }}
-                          >
-                            <Markdown 
-                              remarkPlugins={[remarkGfm]} 
-                              components={{
-                                img: ({ ...props }) => (
-                                  <img 
-                                    {...props} 
-                                    className="w-full max-w-md aspect-video object-cover rounded-2xl border border-slate-100 shadow-sm my-4 mx-auto" 
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ),
-                                a: ({ href, children }) => {
-                                  const text = String(children || '');
-                                  const isNumericRef = /^\d+$/.test(text) || text.startsWith('Source') || text.startsWith('[');
-                                  const cleanIndexText = text.replace(/[\[\]]/g, '');
-                                  const indexVal = parseInt(cleanIndexText, 10);
-                                  
-                                  const sourceItem = (aiOverview && aiOverview.sources) 
-                                    ? aiOverview.sources[indexVal - 1] || aiOverview.sources.find((s: any) => s.url === href)
-                                    : null;
-                                  
-                                  if (isNumericRef && sourceItem) {
-                                    const hostname = (() => {
-                                      try { return new URL(sourceItem.url).hostname.replace('www.', ''); } catch(_) { return 'source'; }
-                                    })();
-                                    
-                                    return (
-                                      <span className="relative inline-block group mx-0.5 align-middle select-none">
-                                        <a
-                                          href={sourceItem.url}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="no-underline inline-flex items-center justify-center gap-0.5 bg-slate-200/60 hover:bg-indigo-100 hover:text-indigo-700 text-slate-700 rounded-full font-bold text-[9.5px] px-1.5 py-0.5 transition-all h-[17px] leading-none mb-[2px]"
-                                          title={sourceItem.title}
-                                        >
-                                          <ExternalLink size={8} className="shrink-0 text-slate-500" />
-                                          <span>{cleanIndexText}</span>
-                                        </a>
+              {/* AI Response Block - Google Gemini/Neural gradient style chatbot response */}
+              <div className="flex-1 min-w-0 flex flex-col gap-1.5 animate-in fade-in duration-500">
+                <div className="relative bg-white p-0 flex flex-col gap-6 overflow-hidden">
+                  
+                  {aiLoading ? (
+                    <div className="animate-pulse space-y-3.5 py-2">
+                      <div className="flex items-center gap-2 text-[12px] opacity-75 font-semibold text-slate-400">
+                        <Loader2 size={13} className="animate-spin text-slate-500" />
+                        <span>Scout AI is thinking...</span>
+                      </div>
+                      <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/50 to-slate-100 rounded-full w-full" />
+                      <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/50 to-slate-100 rounded-full w-[95%]" />
+                      <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/50 to-slate-100 rounded-full w-[85%]" />
+                      <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/50 to-slate-100 rounded-full w-[60%]" />
+                    </div>
+                  ) : aiOverview ? (
+                    <div>
+                      {/* Shimmer header status */}
+                      <div className="flex items-center justify-between mb-4.5 select-none border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">
+                            {isEnglishHelp ? 'English Help Summary' : 'AI Overview'}
+                          </span>
+                        </div>
+                      </div>
+
+                        {/* Markdown prose element */}
+                        <div className="text-slate-800 text-[15.5px] font-normal leading-relaxed prose prose-slate max-w-none">
+                          {(() => {
+                            const imageSources = (aiOverview.sources || []).filter((s: any) => s.image);
+                            const backupImages = results ? results.filter((r: any) => r.image).map((r: any) => ({
+                              url: r.url,
+                              title: r.title,
+                              snippet: r.snippet,
+                              image: r.image
+                            })) : [];
+                            const displayImages = [...imageSources, ...backupImages].filter((item, idx, self) => 
+                              self.findIndex(t => t.image === item.image) === idx
+                            ).slice(0, 4);
+
+                            return (
+                              <div className="space-y-6">
+                                <div 
+                                  className={`prose prose-slate prose-p:my-4 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-1.5 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-150 prose-th:p-2.5 prose-td:p-2.5 prose-td:border prose-td:border-slate-100 transition-all duration-300 overflow-hidden ${!isOverviewExpanded ? 'max-h-[300px] md:max-h-[450px]' : 'max-h-none'}`}
+                                  style={{ 
+                                    maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 85%, transparent 100%)' : 'none', 
+                                    WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 85%, transparent 100%)' : 'none' 
+                                  }}
+                                >
+                                  <Markdown 
+                                    remarkPlugins={[remarkGfm]} 
+                                    components={{
+                                      img: ({ ...props }) => (
+                                        <img 
+                                          {...props} 
+                                          className="w-full max-w-sm aspect-video object-cover rounded-xl border border-slate-100 shadow-2xs my-4 mx-auto" 
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      ),
+                                      a: ({ href, children }) => {
+                                        const text = String(children || '');
+                                        const isNumericRef = /^\d+$/.test(text) || text.startsWith('Source') || text.startsWith('[');
+                                        const cleanIndexText = text.replace(/[\[\]]/g, '');
+                                        const indexVal = parseInt(cleanIndexText, 10);
                                         
-                                        {/* Hover Details Card (Simple Details on hover popover like Google) */}
-                                        <span className="hidden group-hover:block transition-all absolute bottom-[115%] left-1/2 transform -translate-x-1/2 p-3 bg-white text-slate-800 text-xs rounded-xl shadow-xl w-[260px] sm:w-[290px] z-50 text-left cursor-default leading-relaxed border border-slate-200">
-                                          <span className="flex items-center gap-1.5 mb-1.5 border-b border-slate-100 pb-1.5">
-                                            <img 
-                                              src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
-                                              className="w-3.5 h-3.5 rounded-full shrink-0" 
-                                              referrerPolicy="no-referrer"
-                                              onError={(e: any) => { (e.target as any).style.display = 'none'; }}
-                                            />
-                                            <span className="font-extrabold text-slate-800 truncate block text-[11px] flex-1">{sourceItem.title || 'Source Reference'}</span>
-                                            <span className="text-[8.5px] font-mono text-slate-400 shrink-0">{hostname}</span>
-                                          </span>
-                                          <span className="text-[10.5px] text-slate-500 block line-clamp-3 mb-1.5 font-medium leading-snug">
-                                            {sourceItem.snippet || 'Excerpt reference content from matching verified source for search context.'}
-                                          </span>
-                                          <span className="text-[9.5px] text-indigo-600 font-bold hover:underline block text-right">
-                                            Visit Website ↗
-                                          </span>
-                                        </span>
-                                      </span>
-                                    );
-                                  }
-                                  
-                                  return (
-                                    <a href={href} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline font-semibold">
-                                      {children}
-                                    </a>
-                                  );
-                                }
-                              }}
-                            >
-                              {aiOverview.summary}
-                            </Markdown>
-                          </div>
+                                        const sourceItem = (aiOverview && aiOverview.sources) 
+                                          ? aiOverview.sources[indexVal - 1] || aiOverview.sources.find((s: any) => s.url === href)
+                                          : null;
+                                        
+                                        if (isNumericRef && sourceItem) {
+                                          const hostname = (() => {
+                                            try { return new URL(sourceItem.url).hostname.replace('www.', ''); } catch(_) { return 'source'; }
+                                          })();
+                                          
+                                          return (
+                                            <span className="relative inline-block group mx-0.5 align-middle select-none">
+                                              <a
+                                                href={sourceItem.url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="no-underline inline-flex items-center justify-center gap-0.5 bg-slate-150 hover:bg-violet-105 hover:text-violet-700 text-slate-700 rounded-full font-bold text-[9.5px] px-1.5 py-0.5 transition-all h-[17px] leading-none mb-[2px]"
+                                                title={sourceItem.title}
+                                              >
+                                                <ExternalLink size={8} className="shrink-0 text-slate-500" />
+                                                <span>{cleanIndexText}</span>
+                                              </a>
+                                              <span className="hidden group-hover:block transition-all absolute bottom-[115%] left-1/2 transform -translate-x-1/2 p-3 bg-white text-slate-800 text-xs rounded-xl shadow-xl w-[260px] sm:w-[290px] z-50 text-left cursor-default leading-relaxed border border-slate-200">
+                                                <span className="flex items-center gap-1.5 mb-1.5 border-b border-slate-100 pb-1.5">
+                                                  <img 
+                                                    src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+                                                    className="w-3.5 h-3.5 rounded-full shrink-0" 
+                                                    referrerPolicy="no-referrer"
+                                                    onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                                                  />
+                                                  <span className="font-extrabold text-slate-800 truncate block text-[11px] flex-1">{sourceItem.title || 'Source Reference'}</span>
+                                                  <span className="text-[8.5px] font-mono text-slate-400 shrink-0">{hostname}</span>
+                                                </span>
+                                                <span className="text-[10.5px] text-slate-500 block line-clamp-3 mb-1.5 font-medium leading-snug">
+                                                  {sourceItem.snippet || 'Excerpt reference content from matching verified source for search context.'}
+                                                </span>
+                                                <span className="text-[9.5px] text-violet-600 font-bold hover:underline block text-right">
+                                                  Visit Website ↗
+                                                </span>
+                                              </span>
+                                            </span>
+                                          );
+                                        }
+                                        
+                                        return (
+                                          <a href={href} target="_blank" rel="noreferrer" className="text-violet-600 hover:underline font-semibold">
+                                            {children}
+                                          </a>
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    {aiOverview.summary}
+                                  </Markdown>
+                                </div>
+
+                                {/* Shimmer toggle button */}
+                                <div className="flex items-center justify-center mt-3 mb-1">
+                                  <button 
+                                    type="button"
+                                    onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
+                                    className="text-[12.5px] font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 px-5 py-1.5 bg-violet-50 hover:bg-violet-100 rounded-full transition-all active:scale-95 shadow-2xs border-none cursor-pointer"
+                                  >
+                                    {isOverviewExpanded ? 'Read less' : 'Read more'}
+                                    <ChevronRight size={13} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
+                                  </button>
+                                </div>
+
+                                {/* Compact Scrolling Multimedia Images if any */}
+                                {displayImages.length > 0 && (
+                                  <div className="mt-4 border-t border-slate-100 pt-4">
+                                    <div className="text-[10.5px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
+                                      Referenced Visuals
+                                    </div>
+                                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none scrollbar-hide">
+                                      {displayImages.map((imgItem: any, idx: number) => {
+                                        const imgHost = (() => {
+                                          try { return new URL(imgItem.url).hostname.replace('www.', ''); } catch(_) { return 'link'; }
+                                        })();
+                                        return (
+                                          <div 
+                                            key={idx} 
+                                            className="bg-slate-50 rounded-xl overflow-hidden p-2 shadow-3xs border border-slate-150 shrink-0 w-[160px] snap-start flex flex-col justify-between"
+                                          >
+                                            <div className="h-[80px] w-full rounded-lg overflow-hidden bg-slate-105 mb-1.5 relative animate-fade-in">
+                                              <img src={imgItem.image} alt={imgItem.title} className="w-full h-full object-cover select-none" referrerPolicy="no-referrer" />
+                                            </div>
+                                            <a href={imgItem.url} target="_blank" rel="noreferrer" className="truncate text-[10px] font-extrabold text-slate-700 hover:text-violet-600 block">
+                                              {imgItem.title}
+                                            </a>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
 
-                        {/* Collapsing Toggler - Beautiful blue chip */}
-                        <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-4`}>
-                          <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
-                          <button 
-                            type="button"
-                            onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
-                            className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm cursor-pointer border-none pb-2 pt-2"
-                          >
-                            {isOverviewExpanded ? 'Read less' : 'Read more'}
-                            <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
-                          </button>
-                        </div>
-
-                        {/* Bottom Utility Bar - copy, rating controls */}
-                        <div className="flex items-center gap-2 select-none border-t border-slate-200/50 mt-6 pt-4">
+                        {/* Bottom Utility controls */}
+                        <div className="flex items-center gap-3 border-t border-slate-100 mt-5 pt-3.5 text-slate-500">
                           <button 
                             type="button"
                             onClick={() => {
@@ -3691,144 +4200,82 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                               setAiOverviewCopied(true);
                               setTimeout(() => setAiOverviewCopied(false), 2000);
                             }}
-                            className={`p-2 hover:bg-slate-200/50 rounded-lg transition-all cursor-pointer border-none bg-transparent flex items-center gap-1.5 ${aiOverviewCopied ? 'text-green-600 font-bold' : 'text-slate-500'}`}
-                            title="Copy overview"
+                            className={`p-1.5 hover:bg-slate-50 rounded-lg transition-all cursor-pointer border-none bg-transparent flex items-center gap-1 shrink-0 ${aiOverviewCopied ? 'text-green-600 font-bold' : 'text-slate-450'}`}
+                            title="Copy response"
                           >
-                            <Copy size={14} />
+                            <Copy size={13.5} />
                             {aiOverviewCopied && <span className="text-[10px]">Copied!</span>}
                           </button>
                           
                           <button 
                             type="button"
                             onClick={() => setAiOverviewRating(aiOverviewRating === 'up' ? null : 'up')}
-                            className={`p-2 hover:bg-slate-200/50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'up' ? 'text-green-600' : 'text-slate-500'}`}
+                            className={`p-1.5 hover:bg-slate-50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'up' ? 'text-green-600' : 'text-slate-450'}`}
                             title="Helpful"
                           >
-                            <ThumbsUp size={14} className={aiOverviewRating === 'up' ? 'fill-green-200' : ''} />
+                            <ThumbsUp size={13.5} className={aiOverviewRating === 'up' ? 'fill-green-105' : ''} />
                           </button>
                           
                           <button 
                             type="button"
                             onClick={() => setAiOverviewRating(aiOverviewRating === 'down' ? null : 'down')}
-                            className={`p-2 hover:bg-slate-200/50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'down' ? 'text-red-500' : 'text-slate-500'}`}
+                            className={`p-1.5 hover:bg-slate-50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'down' ? 'text-red-500' : 'text-slate-450'}`}
                             title="Not helpful"
                           >
-                            <ThumbsDown size={14} className={aiOverviewRating === 'down' ? 'fill-red-200' : ''} />
+                            <ThumbsDown size={13.5} className={aiOverviewRating === 'down' ? 'fill-red-105' : ''} />
                           </button>
                         </div>
                       </div>
-
-                      {/* Right Column: site cards showing where the images came from */}
-                      {displayImages.length > 0 && (
-                        <div className="lg:col-span-4 flex flex-col gap-3.5">
-                          <div className="text-[11px] font-bold tracking-wider text-slate-400 uppercase select-none pb-1 border-b border-slate-200/50">
-                            Images & Sources
-                          </div>
-                          
-                          {/* Scrollbar-less Image Carousel on mobile and vertical strip on desktop */}
-                          <div className="flex lg:flex-col gap-4 overflow-x-auto pb-3 lg:pb-0 scrollbar-none scrollbar-hide snap-x select-none">
-                            {displayImages.map((imgItem: any, idx: number) => {
-                              const imgHost = (() => {
-                                try { return new URL(imgItem.url).hostname.replace('www.', ''); } catch(_) { return 'link'; }
-                              })();
-                              
-                              return (
-                                <div 
-                                  key={idx} 
-                                  className="bg-white rounded-2xl overflow-hidden p-2.5 shadow-2xs border border-slate-150 hover:shadow-xs transition-shadow shrink-0 w-[210px] lg:w-full snap-start flex flex-col justify-between"
-                                >
-                                  {/* Site card Image - Scrollbar-less carousel aspect */}
-                                  <div className="h-[110px] w-full rounded-xl overflow-hidden bg-slate-100 mb-2.5 relative">
-                                    <img 
-                                      src={imgItem.image} 
-                                      alt={imgItem.title} 
-                                      className="w-full h-full object-cover select-none"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  </div>
-                                  
-                                  {/* Bottom site card snippet linking straight back to original URL */}
-                                  <a 
-                                    href={imgItem.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex items-center gap-2 group/imgcard hover:no-underline"
-                                  >
-                                    <img 
-                                      src={`https://www.google.com/s2/favicons?domain=${imgHost}&sz=32`} 
-                                      className="w-4 h-4 rounded-full shrink-0" 
-                                      referrerPolicy="no-referrer"
-                                      onError={(e: any) => { (e.target as any).style.display = 'none'; }}
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                      <span className="text-[11px] font-extrabold text-slate-700 block truncate group-hover/imgcard:text-indigo-600 leading-snug">
-                                        {imgItem.title}
-                                      </span>
-                                      <span className="text-[9.5px] text-slate-400 block truncate font-medium">
-                                        {imgHost}
-                                      </span>
-                                    </div>
-                                  </a>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Larger Height and high-contrast sources scrollbarless list */}
-                {aiOverview.sources && aiOverview.sources.length > 0 && (
-                  <div className="mt-8 border-t border-slate-200/50 pt-5 animate-in fade-in duration-350">
-                    <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-3 select-none">
-                      Sources & Citations
-                    </div>
-                    <div className="flex gap-3 overflow-x-auto pb-2.5 snap-x scrollbar-none scrollbar-hide">
-                      {aiOverview.sources.map((source: any, i: number) => {
-                        let hostname = 'link';
-                        try {
-                          hostname = new URL(source.url).hostname.replace('www.', '');
-                        } catch (_) {}
-                        return (
-                          <a 
-                            key={i} 
-                            href={source.url} 
-                            target="_blank" 
-                            rel="noreferrer" 
-                            className="flex items-start gap-2.5 p-3.5 bg-white hover:bg-slate-50 border border-slate-150 rounded-xl transition-all shrink-0 snap-start w-[240px] h-[85px] shadow-2xs hover:shadow-xs"
-                          >
-                            <img 
-                              src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
-                              className="w-[18px] h-[18px] rounded-full shrink-0 mt-0.5" 
-                              referrerPolicy="no-referrer"
-                              onError={(e: any) => { (e.target as any).style.display = 'none'; }}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <h4 className="text-[12.5px] font-extrabold text-[#1a0dab] leading-tight line-clamp-1">{source.title || 'Source'}</h4>
-                              <p className="text-[10px] text-slate-400 truncate block mt-0.5">{hostname}</p>
-                              <p className="text-[9.5px] text-slate-500 line-clamp-1 truncate block mt-0.5 font-normal">{source.snippet}</p>
-                            </div>
-                          </a>
-                        );
-                      })}
-                    </div>
+                    ) : aiRateLimited ? (
+                      <div className="py-8 text-center text-slate-450 font-medium italic">
+                        AI Overview is temporarily unavailable. Please try again soon.
+                      </div>
+                    ) : (
+                      <div className="py-8 text-center text-slate-450 font-medium italic">
+                        AI Mode is only generated for informational search queries. Try asking a question!
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* Sources Citation Bar underneath AI bubble */}
+                  {aiOverview && aiOverview.sources && aiOverview.sources.length > 0 &&
+                    <div className="px-1.5 mt-2 animate-in fade-in duration-300">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                        Trusted Citations
+                      </div>
+                      <div className="flex gap-2 pb-2 overflow-x-auto scrollbar-none scrollbar-hide snap-x">
+                        {aiOverview.sources.map((source: any, i: number) => {
+                          let hostname = 'link';
+                          try { hostname = new URL(source.url).hostname.replace('www.', ''); } catch (_) {}
+                          return (
+                            <a 
+                              key={i} href={source.url} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-150 rounded-full transition-colors shrink-0 text-slate-600 text-[11px] font-bold"
+                            >
+                              <img 
+                                src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+                                className="w-3.5 h-3.5 rounded-full shrink-0" 
+                                referrerPolicy="no-referrer"
+                                onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                              />
+                              <span className="truncate max-w-[130px]">{source.title || hostname}</span>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  }
+                </div>
+
+              {/* Chat-focused Interactive Capsule Input bar inside AI tab */}
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <AIConversationalInput onSearch={onSearch} setQuery={setQuery} onMicClick={onMicClick} />
               </div>
-            ) : aiRateLimited ? (
-              <div className="py-20 text-center text-slate-400 font-medium italic">
-                AI Overview is temporarily unavailable. Please try again soon.
-              </div>
-            ) : (
-              <div className="py-20 text-center text-slate-400 font-medium italic">
-                AI Mode is only generated for informational search queries. Try asking a question!
-              </div>
+            </div>
             )}
           </div>
         ) : (
-          <div className={`flex flex-col lg:flex-row gap-4 sm:gap-6 md:gap-8 lg:gap-10 xl:gap-12 px-6 sm:px-10 md:px-12 py-2 md:py-6 lg:pl-20 xl:pl-24 lg:pr-10 xl:pr-12 max-w-[1700px] mx-auto`}>
+          <div className={`flex flex-col lg:flex-row ${sports ? 'gap-3 md:gap-6 px-1.5 sm:px-4 md:px-6 lg:pl-10 xl:pl-12 lg:pr-6 xl:pr-8' : 'gap-4 sm:gap-6 md:gap-8 lg:gap-10 xl:gap-12 px-2.5 sm:px-6 md:px-12 lg:pl-20 xl:pl-24 lg:pr-10 xl:pr-12'} py-2 md:py-6 max-w-[1700px] mx-auto`}>
           {activeTab === 'all' && (knowledgePanel || businessProfile || movie) && (
             <aside className="order-1 lg:order-2 space-y-8 w-full lg:w-[368px] shrink-0">
                {businessProfile && (
@@ -3900,7 +4347,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
                             {/* Dropdown Menu for 3 Dots */}
                             {isThreeDotsOpen && (
-                              <div className="absolute top-[110%] right-0 bg-white border border-slate-150 rounded-xl shadow-lg p-1.5 z-50 min-w-[150px] animate-in fade-in slide-in-from-top-1 duration-150 text-left">
+                              <div className="absolute top-[110%] right-0 bg-white border-none outline-none rounded-xl shadow-xl p-1.5 z-50 min-w-[150px] animate-in fade-in slide-in-from-top-1 duration-150 text-left">
                                 <a
                                   href={knowledgePanel.wikipediaUrl || `https://en.wikipedia.org/wiki/${encodeURIComponent(knowledgePanel.title || '')}`}
                                   target="_blank"
@@ -3956,7 +4403,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                                  <div key={i} className="h-full shrink-0 snap-start bg-slate-50 rounded-2xl overflow-hidden shadow-2xs border border-slate-100">
                                    <img 
                                      src={img} 
-                                     className="h-full w-auto object-cover hover:opacity-95 transition-all" 
+                                     className="max-h-full max-w-full object-contain hover:opacity-95 transition-all" 
                                      referrerPolicy="no-referrer" 
                                      alt={`${knowledgePanel.title || 'Wikipedia image'} ${i + 1}`} 
                                    />
@@ -3966,27 +4413,16 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                            )}
 
                            {/* Desktop collage/mosaic view OR mobile single image view */}
-                           <div className={panelImages.length > 1 ? "hidden md:block" : "block"}>
-                             {panelImages.length === 1 ? (
-                               <div className="aspect-[16/10] w-full rounded-2xl overflow-hidden hover:opacity-95 transition-opacity">
-                                 <img src={panelImages[0]} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                               </div>
-                             ) : panelImages.length === 2 ? (
-                               <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden h-[140px]">
-                                 <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                                 <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                               </div>
-                             ) : (
-                               <div className="grid grid-cols-3 gap-1.5 rounded-xl overflow-hidden h-[140px]">
-                                 <div className="col-span-2 h-full">
-                                   <img src={panelImages[0]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                                 </div>
-                                 <div className="grid grid-rows-2 gap-1.5 h-full">
-                                   <img src={panelImages[1]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                                   <img src={panelImages[2]} className="w-full h-full object-cover hover:opacity-95 transition-opacity" referrerPolicy="no-referrer" alt={knowledgePanel.title} />
-                                 </div>
-                               </div>
-                             )}
+                           <div className="flex items-center justify-center gap-2 hover:opacity-100 transition-opacity bg-slate-50/50 p-1.5 rounded-2xl h-[160px] w-full overflow-hidden select-none">
+                             {panelImages.slice(0, 3).map((img, i) => (
+                               <img 
+                                 key={i}
+                                 src={img} 
+                                 className="h-full w-auto max-w-[48%] object-contain rounded-xl hover:scale-[1.02] transition-transform duration-300 border border-slate-100" 
+                                 referrerPolicy="no-referrer" 
+                                 alt={`${knowledgePanel.title || 'Wikipedia image'} ${i + 1}`} 
+                                />
+                             ))}
                            </div>
                          </div>
                        )}
@@ -4102,7 +4538,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             </aside>
           )}
 
-          <div className="w-full max-w-[650px] md:max-w-[850px] lg:max-w-[900px] xl:max-w-[980px] space-y-6 order-2 lg:order-1 lg:pl-0">
+          <div className={`w-full ${sports ? 'max-w-full lg:max-w-[1100px] xl:max-w-[1200px]' : 'max-w-[650px] md:max-w-[850px] lg:max-w-[900px] xl:max-w-[980px]'} space-y-6 order-2 lg:order-1 lg:pl-0`}>
             {/* Interactive Search Tool Widgets */}
             {activeTab === 'all' && shouldShowColorPicker(query) && (
               <ColorPickerWidget query={query} />
@@ -4231,8 +4667,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {activeTab === 'all' && aiLoading && (
               <div className="mb-6 py-4 animate-pulse">
                 <div className="flex items-center gap-2.5 mb-4 select-none">
-                  <div className="p-1.5 bg-gradient-to-tr from-blue-500 via-indigo-500 to-purple-550 rounded-lg text-white shadow-xs">
-                    <Sparkles size={15} className="fill-white stroke-none" />
+                  <div className="p-1.5 bg-slate-900 rounded-lg text-white">
+                    <Loader2 size={15} className="animate-spin text-white" />
                   </div>
                   <span className="text-[15px] font-semibold text-slate-800">
                     {isEnglishHelp ? 'English Spelling Help' : 'AI Overview'}
@@ -4250,9 +4686,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {activeTab === 'all' && !aiLoading && aiOverview && !aiRateLimited && (
               <div id="ai-overview-simple" className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
                 <div className="flex items-center justify-between mb-5 select-none">
-                  <div className="flex items-center gap-2 opacity-70">
-                    <Sparkles size={14} className="text-blue-500 fill-blue-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  <div className="flex items-center gap-2 opacity-75">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">
                       {isEnglishHelp ? 'English Help' : 'AI Overview'}
                     </span>
                   </div>
@@ -4669,6 +5104,28 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </div>
             ) : <div className="py-20 text-center text-slate-400 font-medium italic">No results found for your query.</div>}
 
+            {/* Elegant Default Search Promotion Box at the bottom of the results */}
+            {!loading && (
+              <div className="mt-12 mb-6 p-5 rounded-[24px] bg-slate-50 border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-50 text-blue-600 rounded-xl shrink-0">
+                    <Navigation size={18} className="rotate-45" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-[13.5px]">Make Scout your default search engine</h4>
+                    <p className="text-[12px] text-slate-500">Get instant AI highlights and smart tools on every search directly from your address bar.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSearchEngineModalOpen(true)}
+                  className="px-4.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-full transition-colors shrink-0 shadow-2xs cursor-pointer"
+                >
+                  Get Started
+                </button>
+              </div>
+            )}
+
             {totalPages > 1 && !loading && (
               <div className="flex flex-col sm:flex-row items-center justify-center gap-6 py-12 border-t border-slate-100 mt-8 mb-10 overflow-hidden">
                 <div className="flex items-center gap-1.5 order-2 sm:order-1">
@@ -4720,6 +5177,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
         </div>
       )}
       </main>
+      </div>
     </motion.div>
   );
 }
@@ -4738,7 +5196,7 @@ function QuickSummary({ text }: { text: string }) {
       try {
         const prompt = `Summarize precisely in one short sentence (max 15 words): "${text}"`;
         const res = await generateContentViaProxy({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash",
           contents: [{ role: 'user', parts: [{ text: prompt }] }]
         });
         if (isMounted) setSummary(res.text || text);
@@ -5995,7 +6453,6 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             {/* Site Summary for specific sources */}
             {(res.displayUrl.includes('wikipedia.org') || res.isNews || res.displayUrl.includes('medium.com') || res.displayUrl.includes('nytimes.com') || res.displayUrl.includes('bbc.com') || res.displayUrl.includes('theguardian.com')) && (
                <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                  <Sparkles size={11} className="text-blue-400" />
                   AI Summary Available
                </div>
             )}
@@ -6481,5 +6938,162 @@ function AnalyticsDashboard({ events, onClose, loading, refresh }: { events: any
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+function SearchEngineGuideModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [activeSubTab, setActiveSubTab] = useState<'chrome' | 'firefox' | 'safari'>('chrome');
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[10000] flex items-center justify-center p-4">
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="bg-white rounded-[32px] w-full max-w-lg shadow-2xl border border-slate-100 overflow-hidden text-slate-800"
+      >
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="p-1.5 bg-blue-50 text-blue-600 rounded-xl">
+              <Navigation size={18} className="rotate-45" />
+            </span>
+            <h3 className="font-display font-black text-lg text-slate-900">Set Scout as Default Search</h3>
+          </div>
+          <button onClick={onClose} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Browser selection sub-tabs */}
+        <div className="px-6 pt-4 flex gap-2 border-b border-slate-100">
+          {(['chrome', 'firefox', 'safari'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveSubTab(tab)}
+              className={`pb-3 px-2 text-sm font-bold capitalize border-b-2 transition-all ${
+                activeSubTab === tab 
+                  ? 'border-blue-600 text-blue-600' 
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {tab === 'safari' ? 'Safari / iOS' : tab}
+            </button>
+          ))}
+        </div>
+
+        {/* Content instructions list depending on active browser tab */}
+        <div className="p-6">
+          {activeSubTab === 'chrome' && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Chrome supports automatic search engine registration through OpenSearch. Follow these quick steps:</p>
+              <ol className="space-y-3 text-sm text-slate-700 list-decimal pl-5 font-medium">
+                <li>Perform any search using the search bar above at least once.</li>
+                <li>Open Chrome Settings and search for <strong className="text-slate-900 font-bold">Search engine</strong> (or enter <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">chrome://settings/search</code>).</li>
+                <li>Click <strong className="text-slate-900 font-bold">Manage search engines and site search</strong>.</li>
+                <li>Find <strong className="text-slate-900 font-bold">Scout</strong> under <strong className="text-slate-900 font-bold">Site search</strong> (or "Inactive search engines").</li>
+                <li>Click the three dots next to Scout, select <strong className="text-blue-600 font-bold">Activate</strong>, and then click <strong className="text-blue-600 font-bold">Make default</strong>!</li>
+              </ol>
+            </div>
+          )}
+
+          {activeSubTab === 'firefox' && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Firefox makes it extremely simple to add search engines. Follow these steps:</p>
+              <ol className="space-y-3 text-sm text-slate-700 list-decimal pl-5 font-medium">
+                <li>Click the search settings icon (the magnifying glass with a green plus icon) in the address bar or search bar when on Scout.</li>
+                <li>Select <strong className="text-slate-900 font-bold">Add "Scout Search"</strong>!</li>
+                <li>Open Firefox Settings, navigate to the <strong className="text-slate-900 font-bold">Search</strong> panel, and choose <strong className="text-blue-600 font-bold">Scout Search</strong> as your Default Search Engine.</li>
+              </ol>
+            </div>
+          )}
+
+          {activeSubTab === 'safari' && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">For iOS and macOS devices, you can add Scout directly to your Dock or Home Screen for a completely standalone default search experience:</p>
+              <ol className="space-y-3 text-sm text-slate-700 list-decimal pl-5 font-medium">
+                <li>Tap the <strong className="text-slate-900 font-bold">Share</strong> button (the box with an up arrow) in Safari.</li>
+                <li>Scroll down and tap <strong className="text-blue-600 font-bold">Add to Home Screen</strong> (or <strong className="text-blue-600 font-bold">Add to Dock</strong> on macOS).</li>
+                <li>Launch Scout directly from your home screen just like a native application with lightning-fast startups!</li>
+              </ol>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-full text-sm transition-colors cursor-pointer"
+          >
+            Got It!
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function AIConversationalInput({ onSearch, setQuery, onMicClick }: { onSearch: any; setQuery: any; onMicClick: any }) {
+  const [text, setText] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setQuery(text);
+    onSearch(text);
+    setText('');
+  };
+
+  const hasTyped = text.trim().length > 0;
+
+  return (
+    <form 
+      onSubmit={handleSubmit} 
+      className="relative max-w-2xl mx-auto flex items-center bg-white border border-slate-200 rounded-[28px] pl-5 pr-2 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)] transition-all duration-200"
+    >
+      <input
+        type="text"
+        placeholder="Ask a follow-up or a new question..."
+        className="w-full bg-transparent border-none outline-none text-slate-800 text-[15.5px] px-1 py-1.5 focus:ring-0 leading-normal font-sans"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      
+      <div className="flex items-center justify-center shrink-0 w-11 h-11 relative overflow-hidden">
+        <AnimatePresence mode="wait">
+          {!hasTyped ? (
+            <motion.button
+              key="voice"
+              initial={{ opacity: 0, scale: 0.8, x: 20 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.8, x: -20 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              type="button"
+              onClick={onMicClick}
+              className="p-2.5 bg-slate-50 hover:bg-slate-100/90 text-slate-600 rounded-full active:scale-95 transition-all border-none bg-transparent cursor-pointer flex items-center justify-center"
+              title="Search by voice"
+            >
+              <Mic size={19} className="text-slate-600" />
+            </motion.button>
+          ) : (
+            <motion.button
+              key="send"
+              initial={{ opacity: 0, scale: 0.8, x: 20 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.8, x: -20 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              type="submit"
+              className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full hover:shadow-lg active:scale-95 border-none cursor-pointer flex items-center justify-center shadow-[0_2px_8px_rgba(37,99,235,0.3)] duration-150"
+              title="Send legacy"
+            >
+              <ArrowUp size={19} className="stroke-[2.5]" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+    </form>
   );
 }
