@@ -1,0 +1,7 @@
+<OpenSearchDescription xmlns="http://a9.com">
+  <ShortName>Scout Search</ShortName>
+  <Description>Search Scout directly from your browser</Description>
+  <InputEncoding>UTF-8</InputEncoding>
+  <Image width="16" height="16" type="image/x-icon">https://vercel.app</Image>
+  <Url type="text/html" method="GET" template="https://vercel.app{searchTerms}&amp;tab=all"/>
+</OpenSearchDescription>
