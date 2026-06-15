@@ -2090,25 +2090,28 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                   onClick={() => { setQuery(''); removeImageQuery(); }} 
                 />
               )}
-              <div className="w-px h-5 bg-slate-200 hidden sm:block" />
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-                className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
-                title="Visual Search (Scout Vision)"
-              >
-                <Camera size={20} className="text-slate-950" />
-              </button>
-              <button 
-                onClick={onMicClick} 
-                type="button" 
-                className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
-                title="Search by voice"
-              >
-                <Mic size={20} className="text-slate-950" />
-              </button>
+              {!query && (
+                <>
+                  <div className="w-px h-5 bg-slate-200 hidden sm:block" />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    type="button"
+                    className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                    title="Visual Search (Scout Vision)"
+                  >
+                    <Camera size={20} className="text-slate-950" />
+                  </button>
+                  <button 
+                    onClick={onMicClick} 
+                    type="button" 
+                    className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                    title="Search by voice"
+                  >
+                    <Mic size={20} className="text-slate-950" />
+                  </button>
+                </>
+              )}
 
-              {/* AI Mode Pillar Pill Button inside search bar */}
               <button
                 type="button"
                 onClick={() => {
@@ -2119,9 +2122,9 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                     setIsSearching(true);
                   }
                 }}
-                className="flex items-center gap-1 px-3.5 h-9 text-slate-900 text-xs font-bold hover:scale-105 transition-all border-none bg-transparent cursor-pointer select-none shrink-0"
+                className={`flex items-center gap-1 px-4.5 h-9 text-slate-900 text-[12.5px] font-black hover:bg-slate-200 transition-all border-none bg-[#f1f3f4] rounded-full cursor-pointer select-none shrink-0 self-end mb-0.5 ${query ? 'ml-auto' : ''}`}
               >
-                <span>AI Mode</span>
+                <span>See AI Mode</span>
               </button>
             </div>
 
@@ -3396,9 +3399,9 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       {/* GEMINI LAPTOP SIDEBAR */}
       {activeTab === 'ai' && (
         <div className="hidden md:flex flex-col w-[68px] shrink-0 border-r border-[#ececec] bg-[#f0f4f9] h-screen sticky top-0 items-center justify-between py-6 z-40 select-none animate-in slide-in-from-left duration-300">
-          <div className="flex flex-col items-center gap-6 w-full">
-            <div onClick={goHome} className="h-11 w-11 rounded-full bg-linear-to-tr from-[#4285F4] via-[#a855f7] via-[#ea4335] to-[#f9ab00] bg-[length:200%_auto] text-white flex items-center justify-center font-black text-lg cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.3)] hover:scale-105 active:scale-95 transition-all">
-              G
+          <div className="flex flex-col items-center gap-8 w-full">
+            <div onClick={goHome} className="text-slate-900 font-display font-black text-3xl cursor-pointer hover:scale-110 active:scale-95 transition-all select-none">
+              S
             </div>
             <button
               type="button"
@@ -3418,11 +3421,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <CheckSquare size={20} />
             </button>
           </div>
-          <div className="w-full h-8 flex items-center justify-center">
-            <div className="h-7 w-7 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-550 text-[11px] border border-slate-350">
-              {user?.email ? user.email.charAt(0).toUpperCase() : 'K'}
-            </div>
-          </div>
+          <div className="w-full" />
         </div>
       )}
 
@@ -3524,16 +3523,6 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     </div>
                   )}
                   
-                  {/* Sleek dynamic URL indicator showing what tab/category they are searching on */}
-                  <div className="hidden lg:flex items-center text-slate-400 text-sm font-medium tracking-tight font-mono select-none mr-0.5 shrink-0 relative z-10">
-                    <span className="text-slate-900 font-semibold">scout.ai</span>
-                    <span className="text-slate-400 mx-0.5">/</span>
-                    <span className="text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded text-[11px] uppercase tracking-wider">
-                      {activeTab === 'ai' ? 'ai-mode' : activeTab}
-                    </span>
-                    <span className="text-slate-400 ml-0.5">/</span>
-                  </div>
-
                   <textarea 
                     ref={resInputRef}
                     value={query} 
@@ -3586,22 +3575,26 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   )}
 
                   <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-3.5">
-                    <button 
-                      type="button" 
-                      onClick={onMicClick}
-                      className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
-                      title="Search by voice"
-                    >
-                      <Mic size={17} className="text-slate-950 animate-pulse-slow" />
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
-                      title="Search by image"
-                    >
-                      <Camera size={17} className="text-slate-950" />
-                    </button>
+                    {!query && (
+                      <>
+                        <button 
+                          type="button" 
+                          onClick={onMicClick}
+                          className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                          title="Search by voice"
+                        >
+                          <Mic size={17} className="text-slate-950 animate-pulse-slow" />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0"
+                          title="Search by image"
+                        >
+                          <Camera size={17} className="text-slate-950" />
+                        </button>
+                      </>
+                    )}
                     <button 
                       type="submit" 
                       className="p-1 px-1.5 flex items-center justify-center text-slate-900 hover:scale-110 active:scale-95 transition-all border-none bg-transparent cursor-pointer shrink-0" 
@@ -3644,8 +3637,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       key={tab} 
                       className={`h-full text-[14px] border-b-2 transition-all whitespace-nowrap shrink-0 relative flex items-center px-1 font-sans ${
                         isActive 
-                          ? 'text-purple-600 font-bold border-purple-600' 
-                          : 'text-slate-500 border-transparent hover:text-slate-900 font-medium'
+                          ? 'text-slate-950 font-black border-slate-950' 
+                          : 'text-slate-500 border-transparent hover:text-slate-900 font-bold'
                       }`} 
                       onClick={() => {
                         setActiveTab(tabLower);
@@ -3951,7 +3944,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {!query || query.trim() === '' ? (
               <div className="flex flex-col items-center justify-center min-h-[calc(100vh-270px)] w-full max-w-3xl mx-auto px-4 select-none animate-in fade-in duration-700">
                 <h1 className="font-display font-medium text-4xl sm:text-5xl text-slate-800 tracking-tight text-center mb-10">
-                  Hi {user?.displayName || (user?.email ? user.email.split('@')[0] : '') || 'Komu'}, what's on your mind?
+                  Hi {user?.displayName || (user?.email ? user.email.split('@')[0] : '') || 'there'}, what's on your mind?
                 </h1>
                 <form 
                   onSubmit={(e: any) => {
