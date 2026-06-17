@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation, ArrowUpLeft, ArrowUp, History, Bookmark, Settings, ChevronDown, ChevronUp, MoreVertical, Plus, Share2, Printer, Glasses } from 'lucide-react';
+import { Search, Mic, Image as ImageIcon, Video, MapPin, Newspaper, X, LayoutGrid, User, Trophy, Menu, ArrowRight, ArrowLeft, ExternalLink, Sparkles, Loader2, LogOut, ChevronLeft, ChevronRight, Camera, Check, Zap, BarChart3, TrendingUp, Target, MousePointer2, Clock, Play, ShoppingBag, BookOpen, Cpu, Shield, FlaskConical, AlertTriangle, CheckSquare, Copy, HelpCircle, ThumbsUp, ThumbsDown, Navigation, ArrowUpLeft, ArrowUp, History, Bookmark, Settings, ChevronDown, ChevronUp, MoreVertical, Plus, Share2, Printer, Glasses } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, AreaChart, Area } from 'recharts';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -39,7 +39,10 @@ async function generateContentViaProxy({ model, contents, config }: { model: str
   });
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error || `Gemini proxy failed with status ${response.status}`);
+    const errorText = errData.error || `Gemini proxy failed with status ${response.status}`;
+    const err: any = new Error(errorText);
+    err.status = response.status;
+    throw err;
   }
   const data = await response.json();
   return { text: data.text };
@@ -60,7 +63,25 @@ const WALLPAPERS = [
   'https://images.unsplash.com/photo-1486873249359-2731bd6dafc7?q=80&w=1920&auto=format&fit=crop', // frozen winter peak
   'https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1920&auto=format&fit=crop', // lavender field hills
   'https://images.unsplash.com/photo-1474511320723-9a56873867b5?q=80&w=1920&auto=format&fit=crop', // canyon rivers
-  'https://images.unsplash.com/photo-1511497584788-876760111969?q=80&w=1920&auto=format&fit=crop'  // deep pine trees
+  'https://images.unsplash.com/photo-1511497584788-876760111969?q=80&w=1920&auto=format&fit=crop', // deep pine trees
+  'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?q=80&w=1920&auto=format&fit=crop', // wooden bridge sunbeams
+  'https://images.unsplash.com/photo-1472214222541-d510753a8707?q=80&w=1920&auto=format&fit=crop', // green field sunset
+  'https://images.unsplash.com/photo-1518495973542-4542c06a5843?q=80&w=1920&auto=format&fit=crop', // enchanted forest rays
+  'https://images.unsplash.com/photo-1502082553048-f009c37129b9?q=80&w=1920&auto=format&fit=crop', // autumn path
+  'https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?q=80&w=1920&auto=format&fit=crop', // tropical beach sunset
+  'https://images.unsplash.com/photo-1501854140801-50d01698950b?q=80&w=1920&auto=format&fit=crop', // valley landscape view
+  'https://images.unsplash.com/photo-1418065460487-3e41a6c84dc5?q=80&w=1920&auto=format&fit=crop', // misty pine mountains
+  'https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?q=80&w=1920&auto=format&fit=crop', // ethereal sunlit canopy
+  'https://images.unsplash.com/photo-1532274402911-5a369e4c4bb5?q=80&w=1920&auto=format&fit=crop', // golden hour farm
+  'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?q=80&w=1920&auto=format&fit=crop', // campfire starry night
+  'https://images.unsplash.com/photo-1518837695005-2083093ee35b?q=80&w=1920&auto=format&fit=crop', // calm ocean shore
+  'https://images.unsplash.com/photo-1505761671935-60b3a7424bab?q=80&w=1920&auto=format&fit=crop', // misty city london
+  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=1920&auto=format&fit=crop', // yosemite valley stream
+  'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1920&auto=format&fit=crop', // starry peak alps
+  'https://images.unsplash.com/photo-1433832597046-4f10e10ac764?q=80&w=1920&auto=format&fit=crop', // misty hot air balloons
+  'https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1920&auto=format&fit=crop', // italian coast rowboats
+  'https://images.unsplash.com/photo-1444464666168-49d633b86797?q=80&w=1920&auto=format&fit=crop', // tropical bird forest
+  'https://images.unsplash.com/photo-1426604966848-d7adac402bff?q=80&w=1920&auto=format&fit=crop'  // mountain lake clouds
 ];
 
 const getSessionId = () => {
@@ -89,6 +110,7 @@ export default function App() {
   const [aiOverview, setAiOverview] = useState<AIOverview | null>(null);
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(false);
   const [aiRateLimited, setAiRateLimited] = useState(false);
+  const [geminiKeyMissing, setGeminiKeyMissing] = useState(false);
   const [faq, setFaq] = useState<{ question: string; answer: string }[]>([]);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -99,7 +121,9 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [isAiListening, setIsAiListening] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [micError, setMicError] = useState<string | null>(null);
   const [homeBg, setHomeBg] = useState<string>('');
@@ -273,13 +297,23 @@ export default function App() {
     }
   }, [activeTab]);
 
-  // Deterministic hourly / daily backgrounds
+  // Deterministic hourly / daily backgrounds with brand new Picsum dynamic seeds and reliable Unsplash fallbacks
   useEffect(() => {
     const updateWallpaper = () => {
-      if (WALLPAPERS && WALLPAPERS.length > 0) {
-        const timeDivisor = bgRotationMode === 'hourly' ? 3600000 : 86400000;
-        const index = Math.floor(Date.now() / timeDivisor) % WALLPAPERS.length;
-        setHomeBg(WALLPAPERS[index]);
+      const timeDivisor = bgRotationMode === 'hourly' ? 3600000 : 86400000;
+      const index = Math.floor(Date.now() / timeDivisor) % WALLPAPERS.length;
+      
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const hourStr = new Date().toISOString().slice(0, 13).replace('T', '-');
+      const seedKey = bgRotationMode === 'hourly' ? hourStr : dateStr;
+      
+      // Dual-link setup: homeBg is the dynamic "new photo everyday" URL
+      const dynamicUrl = `https://picsum.photos/seed/scout-day-${seedKey}/1920/1080`;
+      setHomeBg(dynamicUrl);
+      
+      // Store current fallback index in sessionStorage or pass it implicitly
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('scout_fallback_bg_index', String(index));
       }
     };
     updateWallpaper();
@@ -289,13 +323,17 @@ export default function App() {
 
   // SPEECH RECOGNITION SETUP - Dynamically initialized on demand to ensure seamless access
   const toggleListening = () => {
-    if (isListening) {
+    const isAi = activeTab === 'ai';
+    const currentlyListening = isAi ? isAiListening : isListening;
+
+    if (currentlyListening) {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
         } catch (e) {}
       }
       setIsListening(false);
+      setIsAiListening(false);
     } else {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
@@ -311,7 +349,13 @@ export default function App() {
         recognition.interimResults = true;
         
         recognition.onstart = () => {
-          setIsListening(true);
+          if (isAi) {
+            setIsAiListening(true);
+            setIsListening(false);
+          } else {
+            setIsListening(true);
+            setIsAiListening(false);
+          }
         };
 
         recognition.onresult = (event: any) => {
@@ -335,6 +379,7 @@ export default function App() {
               recognition.stop();
             } catch (e) {}
             setIsListening(false);
+            setIsAiListening(false);
             setTimeout(() => {
               handleSearchRef.current(finalTranscript);
             }, 500);
@@ -343,6 +388,7 @@ export default function App() {
 
         recognition.onend = () => {
           setIsListening(false);
+          setIsAiListening(false);
         };
 
         recognition.onerror = (event: any) => {
@@ -355,6 +401,7 @@ export default function App() {
             setTimeout(() => setMicError(null), 4000);
           }
           setIsListening(false);
+          setIsAiListening(false);
         };
 
         recognitionRef.current = recognition;
@@ -364,6 +411,7 @@ export default function App() {
         setMicError("Unable to open speech recognition interface.");
         setTimeout(() => setMicError(null), 4500);
         setIsListening(false);
+        setIsAiListening(false);
       }
     }
   };
@@ -553,6 +601,13 @@ export default function App() {
     
     if (!finalQuery.trim() && !currentVisualQuery) return;
 
+    // Reset tab to default 'all' if searching freshly from Home page (unless we specifically requested 'ai')
+    let queryActiveTab = activeTab;
+    if (!isSearching && queryActiveTab !== 'ai') {
+      queryActiveTab = 'all';
+      setActiveTab('all');
+    }
+
     setLoading(true);
     setIsSearching(true);
     setIsSafeSearchIntercepted(false);
@@ -561,11 +616,13 @@ export default function App() {
     setVisualMathProblem(null);
     setVisualAnalysis(null);
     setAiOverview(null);
+    setAiRateLimited(false);
+    setGeminiKeyMissing(false);
     setDictionary(null);
     setHolidays(null);
     setHowTo(null);
     setOrganicFaqs([]);
-    setIsSemanticLoading(requestedPage === 1 && activeTab === 'all');
+    setIsSemanticLoading(requestedPage === 1 && queryActiveTab === 'all');
     setDetectedIntent('general');
     setYoutubeVideos(null);
     setVideosLoading(false);
@@ -580,6 +637,7 @@ export default function App() {
     setFaq([]);
     setShowSuggestions(false);
     setError(null);
+    setAiError(null);
     setPage(requestedPage);
     setCorrection(null);
     setOriginalQuery(null);
@@ -598,7 +656,7 @@ export default function App() {
       Be conservative. Only correct if you are 95% certain.`;
       
       generateContentViaProxy({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: autocorrectPrompt }] }]
       }).then((r: any) => {
         let text = r.text?.trim() || "";
@@ -669,7 +727,7 @@ export default function App() {
         body: JSON.stringify({ 
           query: finalQuery, 
           page: requestedPage,
-          type: activeTab,
+          type: queryActiveTab,
           clickedUrls,
           imageQuery: currentVisualQuery,
           vector,
@@ -732,7 +790,7 @@ export default function App() {
       setOrganicFaqs(data.organicFaqs || []);
       setDetectedIntent(data.detectedIntent || 'general');
 
-      if (requestedPage === 1 && activeTab === 'all' && pineconeResults.length > 0) {
+      if (requestedPage === 1 && queryActiveTab === 'all' && pineconeResults.length > 0) {
         setIsSemanticLoading(true);
         fetch('/api/search/semantic-details', {
           method: 'POST',
@@ -800,9 +858,9 @@ export default function App() {
         const url = new URL(window.location.href);
         const currentParamQ = url.searchParams.get('q');
         const currentParamTab = url.searchParams.get('tab') || 'all';
-        if (currentParamQ !== finalQuery.trim() || currentParamTab !== activeTab) {
+        if (currentParamQ !== finalQuery.trim() || currentParamTab !== queryActiveTab) {
           url.searchParams.set('q', finalQuery.trim());
-          url.searchParams.set('tab', activeTab);
+          url.searchParams.set('tab', queryActiveTab);
           window.history.pushState({ path: url.toString() }, '', url.toString());
         }
       }
@@ -940,7 +998,10 @@ export default function App() {
         setIsSafeSearchIntercepted(false);
         setQuery('');
         setResults([]);
+        setActiveTab('all');
         setAiOverview(null);
+        setAiRateLimited(false);
+        setGeminiKeyMissing(false);
         setDictionary(null);
         setLyrics(null);
         setHolidays(null);
@@ -963,7 +1024,16 @@ export default function App() {
   }, [handleSearch]);
 
   const generateAIOverview = async (queryText: string, contextResults: SearchResult[], linguisticHelp = false) => {
-    if (!API_KEY || API_KEY === 'AI-NOT-SET' || aiRateLimited) return;
+    setAiError(null);
+    if (!API_KEY || API_KEY === 'AI-NOT-SET') {
+      setGeminiKeyMissing(true);
+      setAiError("Gemini API Key is not configured on the server. Please check your env parameters.");
+      return;
+    }
+    if (aiRateLimited) {
+      setAiError("AI Overview is temporarily rate limited. Please try again soon.");
+      return;
+    }
     
     const cacheKey = (queryText || '').toLowerCase().trim();
     if (clientAiOverviewCache[cacheKey]) {
@@ -996,7 +1066,7 @@ export default function App() {
            5. Be objective and professional. Use Markdown formatting.`;
 
       const result = await generateContentViaProxy({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }]
       });
       
@@ -1025,8 +1095,18 @@ export default function App() {
       setAiOverview(resData);
     } catch (e: any) {
       console.error("AI Overview failed:", e);
-      if (e.message?.includes('429') || e.status === 429) {
+      const errMsg = e.message || String(e);
+      setAiError(errMsg);
+      if (e.status === 503 || e.message?.includes('not configured')) {
+        setGeminiKeyMissing(true);
+      } else if (e.message?.includes('429') || e.status === 429) {
         setAiRateLimited(true);
+      } else {
+        if (e.status === 400 || e.status === 401 || e.status === 403) {
+          setGeminiKeyMissing(true);
+        } else {
+          setAiRateLimited(true);
+        }
       }
     } finally {
       setAiLoading(false);
@@ -1047,7 +1127,7 @@ export default function App() {
       const prompt = `Query: "${queryText}"\nContext: ${context}\nGenerate 3 relevant frequently asked questions as a JSON array: [{"question": "...", "answer": "..."}]`;
       
       const response = await generateContentViaProxy({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -1071,7 +1151,9 @@ export default function App() {
       setFaq(cleanFaq);
     } catch (e: any) {
       console.error("FAQ generation failed:", e);
-      if (e.message?.includes('429') || e.status === 429) {
+      if (e.status === 503 || e.message?.includes('not configured')) {
+        setGeminiKeyMissing(true);
+      } else if (e.message?.includes('429') || e.status === 429) {
         setAiRateLimited(true);
       }
     }
@@ -1263,7 +1345,7 @@ export default function App() {
       Make sure to return valid JSON following the schema perfectly.`;
 
       const response = await generateContentViaProxy({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { 
           responseMimeType: "application/json",
@@ -1370,7 +1452,10 @@ export default function App() {
     setIsSafeSearchIntercepted(false);
     setQuery('');
     setResults([]);
+    setActiveTab('all');
     setAiOverview(null);
+    setAiRateLimited(false);
+    setGeminiKeyMissing(false);
     setDictionary(null);
     setLyrics(null);
     setHolidays(null);
@@ -1546,6 +1631,7 @@ export default function App() {
             clickedUrls={clickedUrls}
             isSignoutOpen={isSignoutOpen}
             setIsSignoutOpen={setIsSignoutOpen}
+            aiError={aiError}
             appsRef={appsRef}
             isAppsOpen={isAppsOpen}
             setIsAppsOpen={setIsAppsOpen}
@@ -1562,6 +1648,7 @@ export default function App() {
             selectedImage={selectedImage}
             setSelectedImage={setSelectedImage}
             aiRateLimited={aiRateLimited}
+            geminiKeyMissing={geminiKeyMissing}
             onOpenAnalytics={() => { setIsAnalyticsOpen(true); fetchAnalytics(); }}
             appsData={appsData}
             businessProfile={businessProfileState}
@@ -1578,6 +1665,10 @@ export default function App() {
             isSemanticLoading={isSemanticLoading}
             detectedIntent={detectedIntent}
             setIsSearchEngineModalOpen={setIsSearchEngineModalOpen}
+            toggleListening={toggleListening}
+            isAiListening={isAiListening}
+            setIsAiListening={setIsAiListening}
+            recognitionRef={recognitionRef}
           />
         )}
         {isAnalyticsOpen && (
@@ -1843,7 +1934,26 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
   const [glowVisible, setGlowVisible] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showPurpleTrail, setShowPurpleTrail] = useState(false);
+  const [bgSrc, setBgSrc] = useState(bg || "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1920&auto=format&fit=crop");
   
+  // Sync bg Src whenever the bg prop updates
+  useEffect(() => {
+    if (bg) {
+      setBgSrc(bg);
+    }
+  }, [bg]);
+
+  const handleBgError = () => {
+    let fallbackIndex = 0;
+    if (typeof window !== 'undefined') {
+      const idx = window.sessionStorage.getItem('scout_fallback_bg_index');
+      if (idx) fallbackIndex = parseInt(idx, 10);
+    }
+    const fallbackUrl = WALLPAPERS[fallbackIndex % WALLPAPERS.length];
+    console.warn("⚠️ [BG_LOAD] Dynamic daily photo failed or timed out. Graceful fallback activated:", fallbackUrl);
+    setBgSrc(fallbackUrl);
+  };
+
   const prevPrivacyRef = useRef(isPrivacyMode);
   useEffect(() => {
     if (isPrivacyMode && !prevPrivacyRef.current) {
@@ -1891,7 +2001,12 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
     >
       <input type="file" ref={fileInputRef} onChange={onImageUpload} className="hidden" accept="image/*" />
       <div className="absolute inset-0 z-0 opacity-60">
-        <img src={bg || "https://picsum.photos/seed/scout-vibe/1920/1080?blur=1"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        <img 
+          src={bgSrc} 
+          onError={handleBgError} 
+          className="w-full h-full object-cover transition-all duration-700" 
+          referrerPolicy="no-referrer" 
+        />
         <div className="absolute inset-0 bg-linear-to-b from-black/20 via-transparent to-black/80" />
       </div>
 
@@ -1960,7 +2075,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
           {/* DESKTOP SEARCH BAR */}
           <form 
             onSubmit={(e) => { e.preventDefault(); onSearch(); }}
-            className={`hidden md:flex relative items-center gap-3 px-5 py-3 transition-all duration-300 bg-white shadow-2xl ${
+            className={`hidden md:flex relative items-end gap-3 px-5 pt-3 pb-2.5 transition-all duration-300 bg-white shadow-2xl ${
               showSuggestions && suggestions.length > 0 
                 ? (isExpanded ? 'rounded-t-2xl' : 'rounded-t-[1.75rem]') 
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
@@ -1984,7 +2099,7 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 : (isExpanded ? 'rounded-2xl' : 'rounded-full')
             }`} />
 
-            <Search className="text-slate-900 transition-colors shrink-0 relative z-10" size={20} />
+            <Search className="text-slate-900 transition-colors shrink-0 relative z-10 mb-1.5" size={20} />
             
             {imageQuery && (
               <div className="relative group/img ml-2 h-8 w-8 shrink-0 rounded overflow-hidden shadow-sm border border-slate-200 z-10">
@@ -2082,13 +2197,15 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
               />
             </div>
 
-            <div className="flex items-center gap-2 relative z-10 shrink-0">
+            <div className="flex items-center gap-2 relative z-10 shrink-0 mb-0.5">
               {(query || imageQuery) && (
-                <X 
-                  size={18} 
-                  className="text-slate-400 cursor-pointer hover:text-slate-600 transition-colors" 
-                  onClick={() => { setQuery(''); removeImageQuery(); }} 
-                />
+                <button
+                  type="button"
+                  onClick={() => { setQuery(''); removeImageQuery(); }}
+                  className="p-1 text-slate-400 hover:text-slate-600 transition-colors border-none bg-transparent cursor-pointer shrink-0"
+                >
+                  <X size={18} />
+                </button>
               )}
               {!query && (
                 <>
@@ -2112,19 +2229,17 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
                 </>
               )}
 
+              {/* AI Mode Pillar Pill Button inside search bar styled with grey background capsule style */}
               <button
                 type="button"
                 onClick={() => {
+                  setQuery('');
                   setActiveTab('ai');
-                  if (query.trim()) {
-                    onSearch(query);
-                  } else {
-                    setIsSearching(true);
-                  }
+                  setIsSearching(true);
                 }}
-                className={`flex items-center gap-1 px-4.5 h-9 text-slate-900 text-[12.5px] font-black hover:bg-slate-200 transition-all border-none bg-[#f1f3f4] rounded-full cursor-pointer select-none shrink-0 self-end mb-0.5 ${query ? 'ml-auto' : ''}`}
+                className="flex items-center gap-1 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-bold justify-center rounded-full hover:scale-105 transition-all border-none cursor-pointer select-none shrink-0"
               >
-                <span>See AI Mode</span>
+                <span>AI Mode</span>
               </button>
             </div>
 
@@ -2159,10 +2274,9 @@ function HomeView({ query, setQuery, onSearch, suggestions, showSuggestions, set
             <button
               type="button"
               onClick={() => {
-                setQuery("Explain quantum computing in simple terms");
-                if (inputRef && inputRef.current) {
-                  inputRef.current.focus();
-                }
+                setQuery('');
+                setActiveTab('ai');
+                setIsSearching(true);
               }}
               className="w-full py-2.5 px-3 sm:px-5 rounded-full text-[13px] sm:text-[14px] font-semibold bg-slate-950/45 text-slate-200 hover:bg-slate-950/65 flex items-center justify-center gap-1.5 sm:gap-2 select-none shadow-md backdrop-blur-md cursor-pointer duration-200 relative z-10 whitespace-nowrap"
             >
@@ -3253,10 +3367,15 @@ function RecipeIntegrationBox({ recipes, onResultClick, onImageError }: { recipe
   );
 }
 
-function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, sports, person, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent, isPrivacyMode, setIsPrivacyMode, setIsSearchEngineModalOpen }: any) {
+function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOverview, dictionary, knowledgePanel, isEnglishHelp, isOverviewExpanded, setIsOverviewExpanded, faq, openFaqIndex, setOpenFaqIndex, aiLoading, activeTab, setActiveTab, page, totalPages, goHome, user, onLogin, onLogout, onMicClick, suggestions, showSuggestions, setShowSuggestions, searchContainerRef, safeSearch, setSafeSearch, isSafeSearchIntercepted, onResultClick, clickedUrls, isSignoutOpen, setIsSignoutOpen, aiError, appsRef, isAppsOpen, setIsAppsOpen, correction, originalQuery, imageQuery, onImageUpload, removeImageQuery, fileInputRef, visualMathProblem, searchStage, visualAnalysis, setImageQuery, selectedImage, setSelectedImage, aiRateLimited, geminiKeyMissing, onOpenAnalytics, appsData, businessProfile, lyrics, holidays, movie, sports, person, youtubeVideos, videosLoading, setIsMobileSearchOpen, howTo, organicFaqs, isSemanticLoading, detectedIntent, isPrivacyMode, setIsPrivacyMode, setIsSearchEngineModalOpen, toggleListening, isAiListening, setIsAiListening, recognitionRef }: any) {
   const [isResInputFocused, setIsResInputFocused] = useState(false);
   const [aiOverviewCopied, setAiOverviewCopied] = useState(false);
   const [aiOverviewRating, setAiOverviewRating] = useState<'up' | 'down' | null>(null);
+  const [showDefaultPromo, setShowDefaultPromo] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    if (localStorage.getItem('scout_default_promo_dismissed') === 'true') return false;
+    return Math.random() < 0.25;
+  });
   const [chatInputText, setChatInputText] = useState('');
 
   // Keep track of broken image URLs to automatically filter them from results
@@ -3399,9 +3518,25 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
       {/* GEMINI LAPTOP SIDEBAR */}
       {activeTab === 'ai' && (
         <div className="hidden md:flex flex-col w-[68px] shrink-0 border-r border-[#ececec] bg-[#f0f4f9] h-screen sticky top-0 items-center justify-between py-6 z-40 select-none animate-in slide-in-from-left duration-300">
-          <div className="flex flex-col items-center gap-8 w-full">
-            <div onClick={goHome} className="text-slate-900 font-display font-black text-3xl cursor-pointer hover:scale-110 active:scale-95 transition-all select-none">
-              S
+          <div className="flex flex-col items-center gap-6 w-full">
+            <div onClick={goHome} className="h-11 w-11 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 transition-all">
+              <img 
+                src="/logo.png" 
+                alt="Logo" 
+                className="h-10 w-10 object-contain" 
+                referrerPolicy="no-referrer" 
+                onError={(e: any) => { 
+                  e.target.style.display = 'none'; 
+                  const fb = e.target.nextSibling;
+                  if (fb) {
+                    fb.classList.remove('hidden');
+                    fb.classList.add('flex');
+                  }
+                }} 
+              />
+              <span className="font-display font-black text-2.5xl tracking-tighter text-slate-800 hidden h-11 w-11 items-center justify-center">
+                S
+              </span>
             </div>
             <button
               type="button"
@@ -3421,7 +3556,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               <CheckSquare size={20} />
             </button>
           </div>
-          <div className="w-full" />
+          <div className="w-full h-8" />
         </div>
       )}
 
@@ -3443,9 +3578,31 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
 
           {/* Centered purple-gradient Scout logo */}
           <div onClick={goHome} className="flex items-center gap-2 cursor-pointer shrink-0 select-none">
-             <span className={`font-display font-black text-2xl tracking-tighter ${activeTab === 'ai' ? 'bg-clip-text text-transparent bg-gradient-to-tr from-[#4285F4] via-[#a855f7] via-[#ea4335] to-[#f9ab00] animate-pulse' : 'bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]'}`}>
-               {activeTab === 'ai' ? 'S' : 'Scout'}
-             </span>
+            {activeTab === 'ai' ? (
+              <div className="flex items-center justify-center">
+                <img 
+                  src="/logo.png" 
+                  alt="Scout Logo" 
+                  className="h-10 w-10 object-contain" 
+                  referrerPolicy="no-referrer" 
+                  onError={(e: any) => { 
+                    e.target.style.display = 'none'; 
+                    const fb = e.target.nextSibling;
+                    if (fb) {
+                      fb.classList.remove('hidden');
+                      fb.classList.add('inline');
+                    }
+                  }} 
+                />
+                <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-tr from-[#4285F4] via-[#a855f7] via-[#ea4335] to-[#f9ab00] hidden">
+                  S
+                </span>
+              </div>
+            ) : (
+              <span className="font-display font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-linear-to-t from-[#9333ea] to-[#3b0764]">
+                Scout
+              </span>
+            )}
           </div>
 
           {/* User profile on Right */}
@@ -3523,6 +3680,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     </div>
                   )}
                   
+
+
                   <textarea 
                     ref={resInputRef}
                     value={query} 
@@ -3574,7 +3733,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                     </button>
                   )}
 
-                  <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-3.5">
+                  <div className={`flex items-center gap-1.5 shrink-0 ${!query ? 'border-l border-slate-200 pl-3.5' : ''}`}>
                     {!query && (
                       <>
                         <button 
@@ -3637,8 +3796,8 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       key={tab} 
                       className={`h-full text-[14px] border-b-2 transition-all whitespace-nowrap shrink-0 relative flex items-center px-1 font-sans ${
                         isActive 
-                          ? 'text-slate-950 font-black border-slate-950' 
-                          : 'text-slate-500 border-transparent hover:text-slate-900 font-bold'
+                          ? 'text-slate-950 font-bold border-slate-950' 
+                          : 'text-slate-500 border-transparent hover:text-slate-900 font-medium'
                       }`} 
                       onClick={() => {
                         setActiveTab(tabLower);
@@ -3690,7 +3849,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
         </div>
 
         {/* TAB NAVIGATION RIBBON (Replicates exact look of Google sub-tab bar with equalized spacing) */}
-        {activeTab !== 'ai' && (
+        {(activeTab !== 'ai' || true) && (
           <div className="md:sticky md:top-0 z-40 bg-white border-t border-b border-slate-100 select-none">
             <div className="px-6 md:px-12 max-w-[1700px] bg-white mx-auto">
               <div className="flex items-center gap-5 sm:gap-8 overflow-x-auto scrollbar-hide md:pl-[145px]">
@@ -3944,68 +4103,128 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             {!query || query.trim() === '' ? (
               <div className="flex flex-col items-center justify-center min-h-[calc(100vh-270px)] w-full max-w-3xl mx-auto px-4 select-none animate-in fade-in duration-700">
                 <h1 className="font-display font-medium text-4xl sm:text-5xl text-slate-800 tracking-tight text-center mb-10">
-                  Hi {user?.displayName || (user?.email ? user.email.split('@')[0] : '') || 'there'}, what's on your mind?
+                  {user ? `Hi ${user.displayName || user.email?.split('@')[0] || ''}, what's on your mind?` : "Hi, what's on your mind?"}
                 </h1>
                 <form 
                   onSubmit={(e: any) => {
                     e.preventDefault();
+                    if (isAiListening) {
+                      if (query) {
+                        onSearch(query);
+                        setIsAiListening(false);
+                      }
+                      return;
+                    }
                     if (chatInputText.trim()) {
                       setQuery(chatInputText);
                       onSearch(chatInputText);
                       setChatInputText('');
                     }
                   }}
-                  className="w-full relative shadow-[0_4px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_30px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_30px_rgba(0,0,0,0.08)] transition-all duration-200 border border-slate-200 rounded-[32px] bg-white pl-5 pr-2.5 py-3 flex items-center gap-3"
+                  className="w-full relative shadow-[0_4px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_30px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_30px_rgba(0,0,0,0.08)] transition-all duration-200 border border-slate-200 rounded-[32px] bg-white pl-5 pr-2.5 py-3 flex items-center justify-between gap-3 min-h-[64px]"
                 >
-                  <button 
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-full font-black flex items-center justify-center shrink-0 w-10 h-10 cursor-pointer border-none"
-                    title="Add image"
-                  >
-                    <span className="text-xl leading-none">+</span>
-                  </button>
-                  <input 
-                    name="chatInput"
-                    type="text"
-                    value={chatInputText}
-                    onChange={(e) => setChatInputText(e.target.value)}
-                    placeholder="Ask anything"
-                    className="flex-1 w-full bg-transparent border-none outline-none font-sans text-slate-800 text-[17px] placeholder:text-slate-400 py-2 focus:ring-0 leading-normal"
-                  />
-                  
-                  <div className="flex items-center justify-center shrink-0 w-11 h-11 relative overflow-hidden">
-                    <AnimatePresence mode="wait">
-                      {chatInputText.trim().length === 0 ? (
-                        <motion.button
-                          key="voice-landing"
-                          initial={{ opacity: 0, scale: 0.8, x: 20 }}
-                          animate={{ opacity: 1, scale: 1, x: 0 }}
-                          exit={{ opacity: 0, scale: 0.8, x: -20 }}
-                          transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                          type="button" 
-                          onClick={onMicClick}
-                          className="p-2.5 bg-slate-50 hover:bg-slate-100/90 text-slate-600 rounded-full active:scale-95 transition-all border-none bg-transparent shrink-0 cursor-pointer flex items-center justify-center"
-                          title="Search by voice"
+                  {isAiListening ? (
+                    <>
+                      {/* 15 custom animated dots representing Google Voice Equalizer pattern */}
+                      <div className="flex items-center gap-1 sm:gap-1.5 px-1 py-1 flex-1 overflow-hidden h-10">
+                        {Array.from({ length: 15 }).map((_, i) => (
+                          <motion.div
+                            key={i}
+                            animate={{
+                              scaleY: [0.8, 2.5, 0.8],
+                              opacity: [0.7, 1, 0.7]
+                            }}
+                            transition={{
+                              repeat: Infinity,
+                              duration: 0.9,
+                              delay: i * 0.05,
+                              ease: "easeInOut"
+                            }}
+                            className="w-2 h-6 rounded-full bg-blue-500"
+                          />
+                        ))}
+                      </div>
+                      
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        {/* Stop button (black square in a light-gray circle) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (recognitionRef.current) {
+                              try { recognitionRef.current.stop(); } catch(e){}
+                            }
+                            setIsAiListening(false);
+                          }}
+                          className="w-11 h-11 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center cursor-pointer border-none shrink-0"
+                          title="Stop listening"
                         >
-                          <Mic size={19} className="text-slate-600" />
-                        </motion.button>
-                      ) : (
-                        <motion.button
-                          key="send-landing"
-                          initial={{ opacity: 0, scale: 0.8, x: 20 }}
-                          animate={{ opacity: 1, scale: 1, x: 0 }}
-                          exit={{ opacity: 0, scale: 0.8, x: -20 }}
-                          transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                          <div className="w-3.5 h-3.5 bg-black rounded-xs" />
+                        </button>
+
+                        {/* Submit / up-arrow button (blue circle with white up arrow) */}
+                        <button
                           type="submit"
-                          className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full hover:shadow-lg active:scale-95 border-none cursor-pointer flex items-center justify-center shadow-[0_2px_8px_rgba(37,99,235,0.3)] duration-150"
+                          disabled={!query}
+                          className="w-11 h-11 rounded-full bg-blue-600 disabled:bg-blue-300 hover:bg-blue-700 text-white flex items-center justify-center cursor-pointer border-none shrink-0"
                           title="Send request"
                         >
                           <ArrowUp size={19} className="stroke-[2.5]" />
-                        </motion.button>
-                      )}
-                    </AnimatePresence>
-                  </div>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <button 
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-full font-black flex items-center justify-center shrink-0 w-10 h-10 cursor-pointer border-none"
+                        title="Add image"
+                      >
+                        <span className="text-xl leading-none">+</span>
+                      </button>
+                      <input 
+                        name="chatInput"
+                        type="text"
+                        value={chatInputText}
+                        onChange={(e) => setChatInputText(e.target.value)}
+                        placeholder="Ask anything"
+                        className="flex-1 w-full bg-transparent border-none outline-none font-sans text-slate-800 text-[17px] placeholder:text-slate-400 py-2 focus:ring-0 leading-normal"
+                      />
+                      
+                      <div className="flex items-center justify-center shrink-0 w-11 h-11 relative overflow-hidden">
+                        <AnimatePresence mode="wait">
+                          {chatInputText.trim().length === 0 ? (
+                            <motion.button
+                              key="voice-landing"
+                              initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                              animate={{ opacity: 1, scale: 1, x: 0 }}
+                              exit={{ opacity: 0, scale: 0.8, x: -20 }}
+                              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                              type="button" 
+                              onClick={toggleListening}
+                              className="p-2.5 bg-slate-50 hover:bg-slate-100/90 text-slate-600 rounded-full active:scale-95 transition-all border-none bg-transparent shrink-0 cursor-pointer flex items-center justify-center"
+                              title="Search by voice"
+                            >
+                              <Mic size={19} className="text-slate-600" />
+                            </motion.button>
+                          ) : (
+                            <motion.button
+                              key="send-landing"
+                              initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                              animate={{ opacity: 1, scale: 1, x: 0 }}
+                              exit={{ opacity: 0, scale: 0.8, x: -20 }}
+                              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                              type="submit"
+                              className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full hover:shadow-lg active:scale-95 border-none cursor-pointer flex items-center justify-center shadow-[0_2px_8px_rgba(37,99,235,0.3)] duration-150"
+                              title="Send request"
+                            >
+                              <ArrowUp size={19} className="stroke-[2.5]" />
+                            </motion.button>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </>
+                  )}
                 </form>
               </div>
             ) : (
@@ -4034,16 +4253,31 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                       <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/50 to-slate-100 rounded-full w-[85%]" />
                       <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/50 to-slate-100 rounded-full w-[60%]" />
                     </div>
+                  ) : aiError ? (
+                    <div className="py-8 px-6 border border-rose-200 bg-rose-50/60 rounded-2xl max-w-2xl animate-in fade-in duration-300 select-text">
+                      <div className="text-rose-600 font-bold mb-2 flex items-center gap-2">
+                        <AlertTriangle size={18} className="shrink-0" />
+                        <span>AI Search Error</span>
+                      </div>
+                      <p className="text-slate-700 text-[14.5px] leading-relaxed font-mono bg-white/80 p-3.5 rounded-xl border border-rose-100/50 select-text">
+                        {aiError}
+                      </p>
+                      <p className="text-slate-500 text-[11.5px] mt-2.5 font-medium">
+                        Please check your server configurations or API quotas if this continues.
+                      </p>
+                    </div>
                   ) : aiOverview ? (
                     <div>
-                      {/* Shimmer header status */}
-                      <div className="flex items-center justify-between mb-4.5 select-none border-b border-slate-100 pb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">
-                            {isEnglishHelp ? 'English Help Summary' : 'AI Overview'}
-                          </span>
+                      {/* Shimmer header status (Omitted inside AI mode tab to keep direct direct chat appearance) */}
+                      {activeTab !== 'ai' && (
+                        <div className="flex items-center justify-between mb-4.5 select-none border-b border-slate-100 pb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">
+                              {isEnglishHelp ? 'English Help Summary' : 'AI Overview'}
+                            </span>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                         {/* Markdown prose element */}
                         <div className="text-slate-800 text-[15.5px] font-normal leading-relaxed prose prose-slate max-w-none">
@@ -4062,10 +4296,10 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                             return (
                               <div className="space-y-6">
                                 <div 
-                                  className={`prose prose-slate prose-p:my-4 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-1.5 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-150 prose-th:p-2.5 prose-td:p-2.5 prose-td:border prose-td:border-slate-100 transition-all duration-300 overflow-hidden ${!isOverviewExpanded ? 'max-h-[300px] md:max-h-[450px]' : 'max-h-none'}`}
+                                  className={`prose prose-slate prose-p:my-4 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-1.5 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-150 prose-th:p-2.5 prose-td:p-2.5 prose-td:border prose-td:border-slate-100 transition-all duration-300 overflow-hidden ${activeTab === 'ai' || isOverviewExpanded ? 'max-h-none' : 'max-h-[300px] md:max-h-[450px]'}`}
                                   style={{ 
-                                    maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 85%, transparent 100%)' : 'none', 
-                                    WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 85%, transparent 100%)' : 'none' 
+                                    maskImage: activeTab === 'ai' || isOverviewExpanded ? 'none' : 'linear-gradient(to bottom, black 85%, transparent 100%)', 
+                                    WebkitMaskImage: activeTab === 'ai' || isOverviewExpanded ? 'none' : 'linear-gradient(to bottom, black 85%, transparent 100%)' 
                                   }}
                                 >
                                   <Markdown 
@@ -4139,17 +4373,19 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                                   </Markdown>
                                 </div>
 
-                                {/* Shimmer toggle button */}
-                                <div className="flex items-center justify-center mt-3 mb-1">
-                                  <button 
-                                    type="button"
-                                    onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
-                                    className="text-[12.5px] font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 px-5 py-1.5 bg-violet-50 hover:bg-violet-100 rounded-full transition-all active:scale-95 shadow-2xs border-none cursor-pointer"
-                                  >
-                                    {isOverviewExpanded ? 'Read less' : 'Read more'}
-                                    <ChevronRight size={13} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
-                                  </button>
-                                </div>
+                                {/* Shimmer toggle button (Omitted inside AI direct chat) */}
+                                {activeTab !== 'ai' && (
+                                  <div className="flex items-center justify-center mt-3 mb-1">
+                                    <button 
+                                      type="button"
+                                      onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
+                                      className="text-[12.5px] font-bold text-violet-600 hover:text-violet-700 flex items-center gap-1.5 px-5 py-1.5 bg-violet-50 hover:bg-violet-100 rounded-full transition-all active:scale-95 shadow-2xs border-none cursor-pointer"
+                                    >
+                                      {isOverviewExpanded ? 'Read less' : 'Read more'}
+                                      <ChevronRight size={13} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
+                                    </button>
+                                  </div>
+                                )}
 
                                 {/* Compact Scrolling Multimedia Images if any */}
                                 {displayImages.length > 0 && (
@@ -4206,7 +4442,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                             className={`p-1.5 hover:bg-slate-50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'up' ? 'text-green-600' : 'text-slate-450'}`}
                             title="Helpful"
                           >
-                            <ThumbsUp size={13.5} className={aiOverviewRating === 'up' ? 'fill-green-105' : ''} />
+                            <ThumbsUp size={13.5} className={aiOverviewRating === 'up' ? 'fill-green-100' : ''} />
                           </button>
                           
                           <button 
@@ -4215,17 +4451,31 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                             className={`p-1.5 hover:bg-slate-50 rounded-lg transition-all cursor-pointer border-none bg-transparent ${aiOverviewRating === 'down' ? 'text-red-500' : 'text-slate-450'}`}
                             title="Not helpful"
                           >
-                            <ThumbsDown size={13.5} className={aiOverviewRating === 'down' ? 'fill-red-105' : ''} />
+                            <ThumbsDown size={13.5} className={aiOverviewRating === 'down' ? 'fill-red-100' : ''} />
                           </button>
                         </div>
+                      </div>
+                    ) : geminiKeyMissing ? (
+                      <div className="py-10 px-6 text-center border border-amber-200 bg-amber-50/50 rounded-2xl max-w-xl mx-auto shadow-xs animate-in fade-in duration-300">
+                        <div className="text-amber-600 font-bold mb-2 flex items-center justify-center gap-2">
+                          <AlertTriangle size={18} className="shrink-0" />
+                          <span>Gemini API Key Missing</span>
+                        </div>
+                        <p className="text-slate-600 text-sm leading-relaxed max-w-sm mx-auto">
+                          The Gemini model is not configured. Please open your Settings menu and set your <code className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono text-xs">GEMINI_API_KEY</code> to enable high-quality AI search overviews.
+                        </p>
                       </div>
                     ) : aiRateLimited ? (
                       <div className="py-8 text-center text-slate-450 font-medium italic">
                         AI Overview is temporarily unavailable. Please try again soon.
                       </div>
+                    ) : activeTab === 'ai' ? (
+                      <div className="py-8 text-center text-slate-450 font-medium italic">
+                        Start your conversation with Scout AI by typing a question in the chat box.
+                      </div>
                     ) : (
                       <div className="py-8 text-center text-slate-450 font-medium italic">
-                        AI Mode is only generated for informational search queries. Try asking a question!
+                        AI Overview is only generated for informational search queries. Try asking a question!
                       </div>
                     )}
                   </div>
@@ -4261,8 +4511,15 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                 </div>
 
               {/* Chat-focused Interactive Capsule Input bar inside AI tab */}
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <AIConversationalInput onSearch={onSearch} setQuery={setQuery} onMicClick={onMicClick} />
+              <div className="sticky bottom-0 bg-white border-t border-slate-100 pt-4 pb-4 mt-auto z-10 w-full">
+                <AIConversationalInput 
+                  onSearch={onSearch} 
+                  setQuery={setQuery} 
+                  onMicClick={toggleListening}
+                  isAiListening={isAiListening}
+                  setIsAiListening={setIsAiListening}
+                  recognitionRef={recognitionRef}
+                />
               </div>
             </div>
             )}
@@ -4631,217 +4888,437 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
               </motion.div>
             )}
 
-            {/* B. Lyrics Query -> Render lyrics at the very top */}
-            {activeTab === 'all' && detectedIntent === 'lyrics' && lyrics && (
-              <LyricsSection lyrics={lyrics} />
-            )}
+            {/* A-F. Dynamic layout mapping based on query intent */}
+            {(() => {
+              const qLower = query ? query.toLowerCase() : '';
+              
+              const isTicket = qLower.includes('ticket') || qLower.includes('tickets') || qLower.includes('buy') || qLower.includes('booking') || qLower.includes('purchase');
+              const isSports = qLower.includes('world cup') || qLower.includes('football') || qLower.includes('soccer') || qLower.includes('basketball') || qLower.includes('tennis') || qLower.includes('cricket') || qLower.includes('match') || qLower.includes('premier league') || qLower.includes('la liga') || qLower.includes('fifa') || qLower.includes('sports') || qLower.includes('athletics') || qLower.includes('bakery') || qLower.includes('bakeries');
+              
+              const isImages = qLower.includes('image') || qLower.includes('images') || qLower.includes('picture') || qLower.includes('pictures') || qLower.includes('photo') || qLower.includes('photos') || qLower.includes('wallpaper') || qLower.includes('wallpapers') || qLower.includes('logo') || qLower.includes('logos') || qLower.includes('art') || qLower.includes('drawing') || qLower.includes('drawings') || qLower.includes('meme') || qLower.includes('memes') || qLower.includes('pic') || qLower.includes('pics') || qLower.startsWith('cute') || qLower.includes('kittens') || qLower.includes('cats');
+              
+              const isVideos = qLower.includes('video') || qLower.includes('videos') || qLower.includes('youtube') || qLower.includes('clip') || qLower.includes('clips') || qLower.includes('playing') || qLower.includes('song') || qLower.includes('songs') || qLower.includes('music') || qLower.includes('trailer') || qLower.includes('gameplay') || qLower.includes('stream') || qLower.includes('live') || qLower.includes('highlights') || qLower.includes('play') || qLower.includes('cute kittens playing') || qLower.includes('kitten playing') || qLower.includes('song');
 
-            {/* C. Holiday Query -> Render public holiday calendar at the very top */}
-            {activeTab === 'all' && detectedIntent === 'holiday' && holidays && (
-              <HolidaysSection holidays={holidays} onSearch={onSearch} setQuery={setQuery} />
-            )}
+              const isHowTo = qLower.startsWith('how to') || qLower.startsWith('steps to') || qLower.startsWith('guide to') || qLower.includes('steps') || qLower.includes('explain') || qLower.includes('tutorial') || qLower.includes('why') || qLower.includes('what is') || qLower.includes('how do i') || qLower.includes('how can i') || qLower.includes('how to');
 
-            {/* D. Movie Query -> Render movie info card at the very top */}
-            {activeTab === 'all' && detectedIntent === 'movie' && movie && (
-              <MovieSection movie={movie} />
-            )}
+              const blocks: Record<string, React.ReactNode> = {
+                dictionary: (activeTab === 'all' && dictionary) ? (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                    className="bg-white text-left rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 transition-all mb-6 max-w-full shadow-sm w-full"
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <div className="flex items-center gap-3 mb-1">
+                          <h2 className="text-2xl font-display font-bold text-slate-900">{dictionary.word}</h2>
+                          <span className="text-slate-400 font-medium italic text-base">{dictionary.phonetic}</span>
+                          {dictionary.audio && (
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                const audio = new Audio(dictionary.audio);
+                                audio.play().catch(console.error);
+                              }}
+                              className="p-1.5 hover:bg-slate-100 rounded-full text-blue-600 transition-colors active:scale-90 border-none bg-transparent cursor-pointer"
+                              title="Listen"
+                            >
+                              <Mic size={16} />
+                            </button>
+                          )}
+                        </div>
+                        <span className="inline-block px-3 py-1 bg-slate-100 rounded-full text-slate-500 text-[10px] font-bold uppercase tracking-wider">{dictionary.class}</span>
+                      </div>
+                      <div className="text-slate-200 font-display font-bold text-lg italic pr-1">Oxford</div>
+                    </div>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-slate-800 text-[15px] leading-relaxed mb-3 font-normal">
+                          {dictionary.definition}
+                        </p>
+                        {dictionary.example && (
+                          <p className="text-slate-550 italic pl-4 border-l-2 border-slate-200 font-medium font-sans">"{dictionary.example}"</p>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 font-mono">Synonyms</h4>
+                          <div className="flex flex-wrap gap-1.5 font-sans">
+                            {dictionary.synonyms?.map((s: string, i: number) => (
+                               <span key={i} className="text-blue-600 hover:underline cursor-pointer text-sm font-bold">{s}{i < dictionary.synonyms.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 font-mono">Antonyms</h4>
+                          <div className="flex flex-wrap gap-1.5 font-sans">
+                            {dictionary.antonyms?.map((s: string, i: number) => (
+                               <span key={i} className="text-slate-550 text-sm font-bold">{s}{i < dictionary.antonyms.length - 1 ? ',' : ''}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : null,
 
-            {/* Sports Query -> Render sports matches info card at the very top */}
-            {activeTab === 'all' && detectedIntent === 'sports' && sports && (
-              <SportsSection sports={sports} />
-            )}
-
-            {/* E. Person Query -> Render famous person card at the very top */}
-            {activeTab === 'all' && detectedIntent === 'person' && person && (
-              <PeopleSection person={person} />
-            )}
-
-            {/* F1. Clean, Beautiful Google SGE-style AI Overview Loader */}
-            {activeTab === 'all' && aiLoading && (
-              <div className="mb-6 py-4 animate-pulse">
-                <div className="flex items-center gap-2.5 mb-4 select-none">
-                  <div className="p-1.5 bg-slate-900 rounded-lg text-white">
-                    <Loader2 size={15} className="animate-spin text-white" />
-                  </div>
-                  <span className="text-[15px] font-semibold text-slate-800">
-                    {isEnglishHelp ? 'English Spelling Help' : 'AI Overview'}
-                  </span>
-                </div>
-                <div className="space-y-3.5 pl-0.5 max-w-[652px]">
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[95%]" />
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[90%]" />
-                  <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[65%]" />
-                </div>
-              </div>
-            )}
-
-            {/* Simple AI Overview Block for standard 'all' tab (restored back to how it was before) */}
-            {activeTab === 'all' && !aiLoading && aiOverview && !aiRateLimited && (
-              <div id="ai-overview-simple" className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
-                <div className="flex items-center justify-between mb-5 select-none">
-                  <div className="flex items-center gap-2 opacity-75">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-900">
-                      {isEnglishHelp ? 'English Help' : 'AI Overview'}
-                    </span>
-                  </div>
-                </div>
+                lyrics: (activeTab === 'all' && lyrics) ? <LyricsSection lyrics={lyrics} /> : null,
+                holiday: (activeTab === 'all' && holidays) ? <HolidaysSection holidays={holidays} onSearch={onSearch} setQuery={setQuery} /> : null,
+                movie: (activeTab === 'all' && movie) ? <MovieSection movie={movie} /> : null,
                 
-                <div className="relative">
-                    <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[260px] md:max-h-[480px]' : 'max-h-none'}`} 
-                         style={{ maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' }}>
-                      <Markdown 
-                        remarkPlugins={[remarkGfm]} 
-                        components={{
-                          img: ({ ...props }) => (
-                            <img 
-                              {...props} 
-                              className="w-full max-w-lg aspect-video object-cover rounded-3xl border border-slate-100 shadow-sm transition-transform hover:scale-[1.02] cursor-zoom-in" 
-                              referrerPolicy="no-referrer"
-                            />
+                sports: (activeTab === 'all' && sports) ? (
+                  <div className="mb-6 w-full">
+                    <SportsSection sports={sports} />
+                  </div>
+                ) : null,
+                
+                person: (activeTab === 'all' && person) ? <PeopleSection person={person} /> : null,
+
+                ai_overview: activeTab === 'all' ? (
+                  aiLoading ? (
+                    <div className="mb-6 py-4 animate-pulse w-full">
+                      <div className="flex items-center gap-2.5 mb-4 select-none">
+                        <div className="p-1.5 bg-slate-900 rounded-lg text-white">
+                          <Loader2 size={15} className="animate-spin text-white" />
+                        </div>
+                        <span className="text-[15px] font-semibold text-slate-800">
+                          {isEnglishHelp ? 'English Spelling Help' : 'AI Overview'}
+                        </span>
+                      </div>
+                      <div className="space-y-3.5 pl-0.5 max-w-[652px]">
+                        <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[95%]" />
+                        <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[90%]" />
+                        <div className="h-3.5 bg-gradient-to-r from-slate-100 via-slate-200/70 to-slate-100 rounded-full w-[65%]" />
+                      </div>
+                    </div>
+                  ) : (aiOverview && !aiRateLimited) ? (
+                    <div id="ai-overview-simple" className={`glass rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 mb-6 overflow-hidden shadow-none w-full ${isEnglishHelp ? 'border-none' : 'border border-white/40'}`}>
+                      <div className="flex items-center justify-between mb-5 select-none">
+                        <div className="flex items-center gap-2 opacity-75">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-900 font-mono">
+                            {isEnglishHelp ? 'English Help' : 'AI Overview'}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="relative">
+                          <div className={`text-slate-800 text-[16px] md:text-[17px] font-normal leading-relaxed prose prose-slate prose-p:my-5 prose-headings:font-black prose-headings:text-slate-900 prose-li:my-2 prose-table:border prose-table:border-slate-200 prose-th:bg-slate-100 prose-th:p-3 prose-td:p-3 prose-td:border prose-td:border-slate-100 prose-img:rounded-3xl prose-img:shadow-lg prose-img:my-8 prose-img:mx-auto prose-img:max-h-[400px] transition-all duration-500 overflow-hidden ${!isOverviewExpanded ? 'max-h-[260px] md:max-h-[480px]' : 'max-h-none'}`} 
+                               style={{ maskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none', WebkitMaskImage: !isOverviewExpanded ? 'linear-gradient(to bottom, black 80%, transparent 100%)' : 'none' }}>
+                            <Markdown 
+                              remarkPlugins={[remarkGfm]} 
+                              components={{
+                                img: ({ ...props }) => (
+                                  <img 
+                                    {...props} 
+                                    className="w-full max-w-lg aspect-video object-cover rounded-3xl border border-slate-100 shadow-sm transition-transform hover:scale-[1.02] cursor-zoom-in" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                )
+                              }}
+                            >
+                              {aiOverview.summary}
+                            </Markdown>
+                          </div>
+                          
+                          <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-4`}>
+                            <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
+                            <button 
+                              type="button"
+                              onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
+                              className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm cursor-pointer border-none pb-2 pt-2"
+                            >
+                              {isOverviewExpanded ? 'Read less' : 'Read more'}
+                              <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
+                            </button>
+                          </div>
+
+                          {isOverviewExpanded && aiOverview.sources && aiOverview.sources.length > 0 && (
+                            <div className="mt-6 border-t border-slate-100/80 pt-4 animate-in fade-in duration-300">
+                              <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3 select-none font-mono">
+                                Sources
+                              </div>
+                              <div className="flex gap-2.5 overflow-x-auto pb-3 snap-x scrollbar-none">
+                                {aiOverview.sources.map((source: any, i: number) => {
+                                  let hostname = 'link';
+                                  try {
+                                    hostname = new URL(source.url).hostname.replace('www.', '');
+                                  } catch (_) {}
+                                  return (
+                                    <a 
+                                      key={i} 
+                                      href={source.url} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      className="flex items-center gap-2 p-2 px-3 bg-slate-50/80 hover:bg-slate-100/80 border border-slate-100 rounded-xl transition-all shrink-0 snap-start max-w-[200px]"
+                                    >
+                                      <img 
+                                        src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
+                                        className="w-3.5 h-3.5 rounded-full shrink-0" 
+                                        referrerPolicy="no-referrer"
+                                        onError={(e: any) => { (e.target as any).style.display = 'none'; }}
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <h4 className="text-[12px] font-bold text-slate-755 truncate leading-snug">{source.title || 'Source'}</h4>
+                                        <span className="text-[10px] text-slate-400 truncate block">{hostname}</span>
+                                      </div>
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                    </div>
+                  ) : null
+                ) : null,
+
+                recipes: (activeTab === 'all' && recipes && recipes.length > 0) ? (
+                  <RecipeIntegrationBox recipes={recipes} onResultClick={onResultClick} onImageError={onImageError} />
+                ) : null,
+
+                apps: (appsData && appsData.length > 0) ? (
+                  <AppsBlock appsData={appsData} />
+                ) : null,
+
+                videos: (youtubeVideos && youtubeVideos.length > 0 && detectedIntent !== 'dictionary' && detectedIntent !== 'lyrics' && detectedIntent !== 'holiday') ? (
+                  <div className="mb-6 w-full">
+                    <VideoStrip youtubeVideos={youtubeVideos} loading={videosLoading} onMore={() => setActiveTab('videos')} query={query} />
+                  </div>
+                ) : null,
+
+                images: (cleanResults && cleanResults.length > 0) ? (
+                  <div className="mb-6 w-full">
+                    <ImageStrip query={query} results={cleanResults} onMore={() => setActiveTab('images')} onResultClick={onResultClick} onImageClick={(img: any) => setSelectedImage(img)} />
+                  </div>
+                ) : null,
+
+                how_to: (
+                  <div className="w-full">
+                    {isSemanticLoading && (
+                      <div className="my-6 max-w-[652px] w-full">
+                        <div className="border-t border-slate-100/80 my-5" />
+                        <StepByStepGuideSkeleton />
+                        <div className="border-t border-slate-100/80 my-5" />
+                      </div>
+                    )}
+                    {!isSemanticLoading && (howTo || (organicFaqs && organicFaqs.length > 0) || (faq && faq.length > 0)) && (
+                      <div className="my-6 max-w-[652px] w-full">
+                        {howTo ? (
+                          <>
+                            <div className="border-t border-slate-100/80 my-5" />
+                            <StepByStepGuide howTo={howTo} onResultClick={onResultClick} />
+                            <div className="border-t border-slate-100/80 my-5" />
+                          </>
+                        ) : (
+                          ((organicFaqs && organicFaqs.length > 0) || (faq && faq.length > 0)) && (
+                            <>
+                              <div className="border-t border-slate-100/80 my-5" />
+                              {organicFaqs && organicFaqs.length > 0 ? (
+                                <OrganicFaqBlock faqs={organicFaqs} onResultClick={onResultClick} />
+                              ) : (
+                                faq && faq.length > 0 && (
+                                  <FAQBlock faq={faq.slice(0, 3)} openFaqIndex={openFaqIndex} setOpenFaqIndex={setOpenFaqIndex} />
+                                )
+                              )}
+                              <div className="border-t border-slate-100/80 my-5" />
+                            </>
                           )
-                        }}
-                      >
-                        {aiOverview.summary}
-                      </Markdown>
-                    </div>
-                    
-                    <div className={`relative flex items-center justify-center ${!isOverviewExpanded ? 'mt-[-15px]' : 'mt-8'} mb-4`}>
-                      <div className="absolute inset-x-0 h-px bg-slate-100 z-0" />
-                      <button 
-                        onClick={() => setIsOverviewExpanded(!isOverviewExpanded)}
-                        className="relative z-10 text-[13px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-2 px-6 py-2 bg-[#e8edff] rounded-full hover:bg-[#dee5ff] transition-all active:scale-95 shadow-sm cursor-pointer border-none pb-2 pt-2"
-                      >
-                        {isOverviewExpanded ? 'Read less' : 'Read more'}
-                        <ChevronRight size={14} className={isOverviewExpanded ? '-rotate-90' : 'rotate-90'} />
-                      </button>
-                    </div>
-
-                    {/* Simple horizontally scrollable sources on one line, ONLY shown when expanded */}
-                    {isOverviewExpanded && aiOverview.sources && aiOverview.sources.length > 0 && (
-                      <div className="mt-6 border-t border-slate-100/80 pt-4 animate-in fade-in duration-300">
-                        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-3 select-none">
-                          Sources
-                        </div>
-                        <div className="flex gap-2.5 overflow-x-auto pb-3 snap-x scrollbar-none">
-                          {aiOverview.sources.map((source: any, i: number) => {
-                            let hostname = 'link';
-                            try {
-                              hostname = new URL(source.url).hostname.replace('www.', '');
-                            } catch (_) {}
-                            return (
-                              <a 
-                                key={i} 
-                                href={source.url} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                className="flex items-center gap-2 p-2 px-3 bg-slate-50/80 hover:bg-slate-100/80 border border-slate-100 rounded-xl transition-all shrink-0 snap-start max-w-[200px]"
-                              >
-                                <img 
-                                  src={`https://www.google.com/s2/favicons?domain=${hostname}&sz=32`} 
-                                  className="w-3.5 h-3.5 rounded-full shrink-0" 
-                                  referrerPolicy="no-referrer"
-                                  onError={(e: any) => { (e.target as any).style.display = 'none'; }}
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <h4 className="text-[12px] font-bold text-slate-755 truncate leading-snug">{source.title || 'Source'}</h4>
-                                  <span className="text-[10px] text-slate-400 truncate block">{hostname}</span>
-                                </div>
-                              </a>
-                            );
-                          })}
-                        </div>
+                        )}
                       </div>
                     )}
-                    {/* Removed Redundant Unreachable AI block to keep code clean and performant */}
                   </div>
-              </div>
-            )}
+                )
+              };
 
+              // Dynamic Layout Order Evaluator
+              const sequence = (() => {
+                if (detectedIntent === 'dictionary' && dictionary) return ['dictionary', 'ai_overview', 'organic', 'videos', 'images', 'how_to', 'recipes', 'sports'];
+                if (detectedIntent === 'lyrics' && lyrics) return ['lyrics', 'ai_overview', 'organic', 'videos', 'images', 'how_to', 'recipes', 'sports'];
+                if (detectedIntent === 'holiday' && holidays) return ['holiday', 'ai_overview', 'organic', 'videos', 'images', 'how_to', 'recipes', 'sports'];
+                if (detectedIntent === 'movie' && movie) return ['movie', 'ai_overview', 'organic', 'videos', 'images', 'how_to', 'recipes', 'sports'];
+                if (detectedIntent === 'sports' && sports) {
+                  if (isTicket) return ['organic', 'sports', 'videos', 'ai_overview', 'images', 'how_to', 'recipes'];
+                  return ['sports', 'videos', 'ai_overview', 'images', 'organic', 'how_to', 'recipes'];
+                }
+                if (detectedIntent === 'person' && person) return ['person', 'ai_overview', 'organic', 'videos', 'images', 'how_to', 'recipes', 'sports'];
 
-            {/* Removed Redundant Organic Faq Block from here for single clean FAQ control */}
+                if (isSports) {
+                  if (isTicket) return ['organic', 'sports', 'videos', 'ai_overview', 'images', 'how_to', 'recipes'];
+                  return ['sports', 'videos', 'ai_overview', 'images', 'organic', 'how_to', 'recipes'];
+                }
+                if (isImages) return ['images', 'ai_overview', 'organic', 'videos', 'how_to', 'recipes', 'sports'];
+                if (isVideos) return ['videos', 'ai_overview', 'organic', 'images', 'how_to', 'recipes', 'sports'];
+                if (isHowTo) return ['ai_overview', 'how_to', 'organic', 'videos', 'images', 'recipes', 'sports'];
 
-            {/* I. Dictionary, lyrics, holidays fallbacks (Render here if present but not matching primary intent) */}
-            {activeTab === 'all' && detectedIntent !== 'dictionary' && dictionary && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                className="bg-white text-left rounded-[24px] sm:rounded-[32px] p-4 sm:p-6 md:p-8 transition-all mb-6 max-w-full shadow-sm"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <div className="flex items-center gap-3 mb-1">
-                      <h2 className="text-2xl font-display font-bold text-slate-900">{dictionary.word}</h2>
-                      <span className="text-slate-400 font-medium italic text-base">{dictionary.phonetic}</span>
-                      {dictionary.audio && (
+                return ['ai_overview', 'how_to', 'apps', 'organic', 'videos', 'images', 'recipes', 'sports'];
+              })();
+
+              const finalSequence = [...sequence];
+              if (dictionary && !finalSequence.includes('dictionary')) finalSequence.unshift('dictionary');
+              if (lyrics && !finalSequence.includes('lyrics')) finalSequence.unshift('lyrics');
+              if (holidays && !finalSequence.includes('holiday')) finalSequence.unshift('holiday');
+              if (movie && !finalSequence.includes('movie')) finalSequence.unshift('movie');
+              if (person && !finalSequence.includes('person')) finalSequence.unshift('person');
+              if (sports && !finalSequence.includes('sports')) {
+                if (isTicket) {
+                  const idx = finalSequence.indexOf('organic');
+                  finalSequence.splice(idx === -1 ? 0 : idx + 1, 0, 'sports');
+                } else {
+                  finalSequence.unshift('sports');
+                }
+              }
+
+              return (
+                <div className="w-full flex flex-col items-start text-left">
+                  {isSafeSearchIntercepted ? (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 15 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      className="my-10 p-8 md:p-12 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center text-center max-w-2xl mx-auto w-full"
+                    >
+                      <div className="p-4 bg-amber-50 rounded-full text-amber-500 mb-5 border border-amber-100 flex items-center justify-center">
+                        <Shield size={36} className="stroke-[2.5]" />
+                      </div>
+                      <h3 className="text-xl md:text-2xl font-display font-black text-slate-800 tracking-tight mb-3">SafeSearch Filters Active</h3>
+                      <p className="text-slate-600 text-sm md:text-base leading-relaxed mb-8 max-w-md font-medium">
+                        We've filtered this search query because it contains terms flagged as unsafe or potentially explicit. Scout blocks adult, violent, and explicit links and images to ensure a safe environment.
+                      </p>
+                      <div className="flex flex-wrap gap-3 justify-center font-sans">
                         <button 
-                          onClick={() => {
-                            const audio = new Audio(dictionary.audio);
-                            audio.play().catch(console.error);
-                          }}
-                          className="p-1.5 hover:bg-slate-100 rounded-full text-blue-600 transition-colors active:scale-90"
-                          title="Listen"
+                          type="button"
+                          onClick={goHome}
+                          className="px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-full font-bold text-xs transition-all tracking-wider uppercase active:scale-95 cursor-pointer"
                         >
-                          <Mic size={16} />
+                          Go back home
                         </button>
-                      )}
-                    </div>
-                    <span className="inline-block px-3 py-1 bg-slate-100 rounded-full text-slate-500 text-[10px] font-bold uppercase tracking-wider">{dictionary.class}</span>
-                  </div>
-                  <div className="text-slate-200 font-display font-bold text-lg italic pr-1">Oxford</div>
-                </div>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-slate-800 text-[15px] leading-relaxed mb-3 font-normal">
-                      {dictionary.definition}
-                    </p>
-                    {dictionary.example && (
-                      <p className="text-slate-550 italic pl-4 border-l-2 border-slate-200 font-medium">"{dictionary.example}"</p>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Synonyms</h4>
-                      <div className="flex flex-wrap gap-1.5">
-                        {dictionary.synonyms?.map((s: string, i: number) => (
-                           <span key={i} className="text-blue-600 hover:underline cursor-pointer text-sm font-bold">{s}{i < dictionary.synonyms.length - 1 ? ',' : ''}</span>
-                        ))}
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setQuery("Cute kittens playing");
+                            setTimeout(() => onSearch("Cute kittens playing"), 100);
+                          }}
+                          className="px-5 py-2.5 bg-[#1a73e8] hover:bg-blue-700 text-white rounded-full font-bold text-xs transition-all tracking-wider shadow-sm uppercase active:scale-95 cursor-pointer hover:shadow-md border-none"
+                        >
+                          Try "Cute kittens playing"
+                        </button>
                       </div>
+                    </motion.div>
+                  ) : loading ? (
+                    <div className="space-y-6 w-full">
+                      {[1,2,3].map(i => <div key={i} className="animate-pulse space-y-3 p-6 bg-white rounded-3xl border border-slate-100"><div className="h-4 bg-slate-100 rounded w-1/4" /><div className="h-6 bg-slate-100 rounded w-3/4" /><div className="h-20 bg-slate-100 rounded w-full" /></div>)}
                     </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Antonyms</h4>
-                      <div className="flex flex-wrap gap-1.5">
-                        {dictionary.antonyms?.map((s: string, i: number) => (
-                           <span key={i} className="text-slate-550 text-sm font-bold">{s}{i < dictionary.antonyms.length - 1 ? ',' : ''}</span>
-                        ))}
-                      </div>
+                  ) : (
+                    <div className="space-y-6 w-full">
+                      {finalSequence.map((key) => {
+                        const element = key === 'organic' ? (
+                          filteredResults.length > 0 ? (
+                            <div className="space-y-12 md:space-y-10 w-full font-sans">
+                              {groupedResults.map((item: any, idx: number) => (
+                                <React.Fragment key={item.type === 'single' ? item.result.id : item.primary.id}>
+                                  {item.type === 'single' ? (
+                                    <div className="max-w-[652px] w-full">
+                                      <ResultCard res={item.result} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={cleanResults} onImageError={onImageError} />
+                                    </div>
+                                  ) : (
+                                    <div className="py-2 max-w-[652px] w-full">
+                                      <ResultCard res={item.primary} carouselImages={carouselImages} isImageUrl={isImageUrl} onResultClick={onResultClick} clickedUrls={clickedUrls} onVisualSearch={(img: string) => { setImageQuery(img); onSearch('Visual Search', 1, img); }} onImageClick={(img: any) => setSelectedImage(img)} allResults={cleanResults} onImageError={onImageError} />
+                                      {/* Sitelinks container */}
+                                      <div className="mt-2 w-full max-w-[652px]">
+                                        <div className="border-t border-slate-200/60 my-2" />
+                                        <div className="divide-y divide-slate-100 border-b border-slate-200/60 font-sans">
+                                          {item.secondaries.map((s: any) => {
+                                            const isSClicked = clickedUrls?.includes(s.url);
+                                            let cleanedSubTitle = s.title || 'Link';
+                                            const urlObj = (() => { try { return new URL(s.url); } catch { return null; } })();
+                                            const parentTitle = item.primary?.title || '';
+                                            const splitters = [' - ', ' | ', ' : ', ' — ', ' – '];
+                                            for (const spl of splitters) {
+                                              if (cleanedSubTitle.includes(spl)) cleanedSubTitle = cleanedSubTitle.split(spl)[0];
+                                            }
+                                            if (cleanedSubTitle.toLowerCase() === 'link' || cleanedSubTitle.toLowerCase() === parentTitle.toLowerCase() || cleanedSubTitle.length < 2) {
+                                              if (s.url.includes('signin') || s.url.includes('sign-in')) cleanedSubTitle = 'Sign In';
+                                              else if (s.url.includes('login') || s.url.includes('log-in')) cleanedSubTitle = 'Log In';
+                                              else if (s.url.includes('about')) cleanedSubTitle = 'About Us';
+                                              else if (s.url.includes('contact')) cleanedSubTitle = 'Contact Us';
+                                              else if (s.url.includes('doc')) cleanedSubTitle = 'Documentation';
+                                              else if (s.url.includes('pricing')) cleanedSubTitle = 'Pricing';
+                                              else if (s.url.includes('download')) cleanedSubTitle = 'Download';
+                                              else if (s.url.includes('faq')) cleanedSubTitle = 'FAQ';
+                                              else if (s.url.includes('github')) cleanedSubTitle = 'Source Code';
+                                              else cleanedSubTitle = 'About';
+                                            }
+                                            return (
+                                              <div key={s.id} className="group/sub hover:bg-slate-50 transition-colors">
+                                                <a 
+                                                  onClick={() => {
+                                                    const positionIndex = results ? results.findIndex((r: any) => r.id === s.id) : -1;
+                                                    const position = positionIndex !== -1 ? positionIndex + 1 : null;
+                                                    onResultClick?.(s.id, s.url, position);
+                                                  }} 
+                                                  href={s.url} target="_blank" rel="noreferrer" 
+                                                  className="flex items-center justify-between py-2 sm:py-3.5 px-2 gap-3"
+                                                >
+                                                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                    {(s.image || s.thumbnail) && (
+                                                      <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden shrink-0 border border-slate-100 bg-slate-50 flex items-center justify-center p-0.5">
+                                                        <img src={s.image || s.thumbnail} className="w-full h-full object-cover rounded-md" referrerPolicy="no-referrer" onError={(e: any) => { e.target.style.display = 'none'; }} />
+                                                      </div>
+                                                    )}
+                                                    <div className="min-w-0 flex-1">
+                                                      <span className="text-[14px] sm:text-[15px] font-sans font-medium text-slate-800 group-hover/sub:underline block truncate leading-tight">{cleanedSubTitle}</span>
+                                                      {s.snippet && <p className="text-[11.5px] sm:text-[12px] text-slate-450 line-clamp-1 truncate mt-0.5 leading-snug">{s.snippet}</p>}
+                                                    </div>
+                                                  </div>
+                                                  <div className="shrink-0 flex items-center justify-center">
+                                                    {isSClicked ? (
+                                                      <div className="w-[32px] h-[32px] rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-500 shadow-3xs font-black">
+                                                        <Clock size={14} className="text-slate-450 shrink-0" />
+                                                      </div>
+                                                    ) : (
+                                                      <div className="w-[32px] h-[32px] flex items-center justify-center text-slate-400">
+                                                        <ChevronRight size={16} className="text-slate-400 shrink-0" />
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </a>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <button onClick={() => { setQuery(`site:${item.primary.displayUrl}`); onSearch(`site:${item.primary.displayUrl}`); }} className="text-xs font-semibold text-slate-500 hover:text-blue-600 flex items-center gap-1.5 mt-3.5 px-3 py-1.5 hover:bg-slate-50 rounded-lg transition-all border border-slate-100 bg-transparent cursor-pointer">More results from {item.primary.displayUrl.replace('www.', '')} <ArrowRight size={12} /></button>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {idx < groupedResults.length - 1 && (
+                                    <div className="my-6">
+                                      <div className="hidden md:block border-t border-slate-100/80" />
+                                      <div className="md:hidden h-[8px] bg-slate-100/70 -mx-4" />
+                                    </div>
+                                  )}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="py-20 text-center text-slate-450 font-medium italic font-sans">No results found for your query.</div>
+                          )
+                        ) : blocks[key];
+
+                        if (!element) return null;
+                        return (
+                          <div key={key} className="w-full last:mb-0">
+                            {element}
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
+                  )}
                 </div>
-              </motion.div>
-            )}
+              );
+            })()}
 
-            {activeTab === 'all' && detectedIntent !== 'lyrics' && lyrics && (
-              <LyricsSection lyrics={lyrics} />
-            )}
 
-            {activeTab === 'all' && detectedIntent !== 'holiday' && holidays && (
-              <HolidaysSection holidays={holidays} onSearch={onSearch} setQuery={setQuery} />
-            )}
 
-            {activeTab === 'all' && detectedIntent !== 'movie' && movie && (
-              <MovieSection movie={movie} />
-            )}
 
-            {activeTab === 'all' && detectedIntent !== 'sports' && sports && (
-              <SportsSection sports={sports} />
-            )}
-
-            {activeTab === 'all' && detectedIntent !== 'person' && person && (
-              <PeopleSection person={person} />
-            )}
-
-            {activeTab === 'all' && recipes && recipes.length > 0 && (
-              <RecipeIntegrationBox recipes={recipes} onResultClick={onResultClick} onImageError={onImageError} />
-            )}
 
             {isSafeSearchIntercepted ? (
               <motion.div 
@@ -5010,11 +5487,30 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                                       href={s.url} 
                                       target="_blank" 
                                       rel="noreferrer" 
-                                      className="flex items-center justify-between py-3.5 px-2"
+                                      className="flex items-center justify-between py-2 sm:py-3.5 px-2 gap-3"
                                     >
-                                      <span className="text-[15px] sm:text-[16px] font-sans font-normal text-slate-800 group-hover/sub:underline">
-                                        {cleanedSubTitle}
-                                      </span>
+                                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                                        {(s.image || s.thumbnail) && (
+                                          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden shrink-0 border border-slate-100 bg-slate-50 flex items-center justify-center p-0.5">
+                                            <img 
+                                              src={s.image || s.thumbnail} 
+                                              className="w-full h-full object-cover rounded-md" 
+                                              referrerPolicy="no-referrer" 
+                                              onError={(e: any) => { e.target.style.display = 'none'; }}
+                                            />
+                                          </div>
+                                        )}
+                                        <div className="min-w-0 flex-1">
+                                          <span className="text-[14px] sm:text-[15px] font-sans font-medium text-slate-800 group-hover/sub:underline block truncate leading-tight">
+                                            {cleanedSubTitle}
+                                          </span>
+                                          {s.snippet && (
+                                            <p className="text-[11.5px] sm:text-[12px] text-slate-450 line-clamp-1 truncate mt-0.5 leading-snug">
+                                              {s.snippet}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
                                       
                                       <div className="shrink-0 flex items-center justify-center">
                                         {isSClicked ? (
@@ -5098,7 +5594,7 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
             ) : <div className="py-20 text-center text-slate-400 font-medium italic">No results found for your query.</div>}
 
             {/* Elegant Default Search Promotion Box at the bottom of the results */}
-            {!loading && (
+            {!loading && showDefaultPromo && !isPrivacyMode && (
               <div className="mt-12 mb-6 p-5 rounded-[24px] bg-slate-50 border border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 text-left">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-50 text-blue-600 rounded-xl shrink-0">
@@ -5106,16 +5602,29 @@ function ResultsView({ query, setQuery, onSearch, loading, results, error, aiOve
                   </div>
                   <div>
                     <h4 className="font-bold text-slate-800 text-[13.5px]">Make Scout your default search engine</h4>
-                    <p className="text-[12px] text-slate-500">Get instant AI highlights and smart tools on every search directly from your address bar.</p>
+                    <p className="text-[12px] text-slate-550">Get instant AI highlights and smart tools on every search directly from your address bar.</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsSearchEngineModalOpen(true)}
-                  className="px-4.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-full transition-colors shrink-0 shadow-2xs cursor-pointer"
-                >
-                  Get Started
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsSearchEngineModalOpen(true)}
+                    className="px-4.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-full transition-colors shrink-0 shadow-2xs cursor-pointer"
+                  >
+                    Get Started
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.setItem('scout_default_promo_dismissed', 'true');
+                      setShowDefaultPromo(false);
+                    }}
+                    className="p-1.5 hover:bg-slate-200/50 rounded-full text-slate-400 hover:text-slate-600 transition-all cursor-pointer border-none bg-transparent flex items-center justify-center shrink-0 w-8 h-8"
+                    title="Dismiss permanently"
+                  >
+                    <X size={14} className="stroke-[2.5]" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -5189,7 +5698,7 @@ function QuickSummary({ text }: { text: string }) {
       try {
         const prompt = `Summarize precisely in one short sentence (max 15 words): "${text}"`;
         const res = await generateContentViaProxy({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.5-flash",
           contents: [{ role: 'user', parts: [{ text: prompt }] }]
         });
         if (isMounted) setSummary(res.text || text);
@@ -6136,7 +6645,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           <span>Visited recently</span>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row gap-6 items-start">
+      <div className="flex flex-row gap-4 sm:gap-6 items-start">
         <div className="flex-1 min-w-0 w-full">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3 overflow-hidden">
@@ -6485,7 +6994,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
           )}
         </div>
         
-        {/* Main Side Image / Carousel */}
+        {/* Main Side Image / Carousel Side-By-Side (Google Mobile Layout style) */}
         {activeImage && (
           <div 
             onClick={() => {
@@ -6496,7 +7005,7 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
                 onImageClick?.(imgData);
               }
             }}
-            className="shrink-0 w-36 h-36 md:w-48 md:h-48 rounded-2xl overflow-hidden border border-slate-100 shadow-sm relative group/carousel mt-4 sm:mt-0 bg-slate-50 cursor-pointer flex items-center justify-center p-2.5"
+            className="shrink-0 w-20 h-20 xs:w-24 xs:h-24 sm:w-36 sm:h-36 md:w-48 md:h-48 rounded-xl sm:rounded-2xl overflow-hidden border border-slate-100 shadow-xs relative group/carousel bg-slate-50 cursor-pointer flex items-center justify-center p-1 sm:p-2.5"
           >
             <AnimatePresence mode="wait">
               <motion.img 
@@ -6517,24 +7026,26 @@ function ResultCard({ res, carouselImages, isImageUrl, onResultClick, clickedUrl
             {/* Play Button Overlay for Video Intent */}
             {res.layout_intent === 'VIDEO_PLAYER' && (
               <div className="absolute inset-0 bg-black/10 flex items-center justify-center transition-colors group-hover/carousel:bg-black/20">
-                <div className="p-3 bg-white/90 backdrop-blur-md rounded-full shadow-lg text-slate-800 transform scale-100 group-hover/carousel:scale-110 transition-transform">
-                  <Play size={16} fill="currentColor" />
+                <div className="p-1.5 sm:p-3 bg-white/90 backdrop-blur-md rounded-full shadow-lg text-slate-800 transform scale-100 group-hover/carousel:scale-110 transition-transform">
+                  <Play size={12} className="sm:hidden" fill="currentColor" />
+                  <Play size={16} className="hidden sm:block" fill="currentColor" />
                 </div>
               </div>
             )}
             
             <button 
               onClick={(e) => { e.stopPropagation(); onVisualSearch?.(activeImage); }}
-              className="absolute top-2 right-2 p-2 bg-black/40 backdrop-blur-md text-white rounded-full opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 shadow-lg"
+              className="absolute top-1 right-1 sm:top-2 sm:right-2 p-1.5 sm:p-2 bg-black/40 backdrop-blur-md text-white rounded-full opacity-0 group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 shadow-lg"
               title="Visual Search"
             >
-              <Camera size={14} />
+              <Camera size={10} className="sm:hidden" />
+              <Camera size={14} className="hidden sm:block" />
             </button>
 
             {domainImages.length > 1 && (
-              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full">
+              <div className="absolute bottom-1.5 sm:bottom-2 left-1/2 -translate-x-1/2 flex gap-0.5 sm:gap-1 px-1.5 sm:py-1 py-0.5 bg-black/20 backdrop-blur-sm rounded-full">
                 {domainImages.slice(0, 5).map((_, i) => (
-                  <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${currentImgIndex === i ? 'bg-white scale-125' : 'bg-white/40'}`} />
+                  <div key={i} className={`w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full transition-all ${currentImgIndex === i ? 'bg-white scale-125' : 'bg-white/40'}`} />
                 ))}
               </div>
             )}
@@ -7029,11 +7540,31 @@ function SearchEngineGuideModal({ isOpen, onClose }: { isOpen: boolean; onClose:
   );
 }
 
-function AIConversationalInput({ onSearch, setQuery, onMicClick }: { onSearch: any; setQuery: any; onMicClick: any }) {
+function AIConversationalInput({ 
+  onSearch, 
+  setQuery, 
+  onMicClick, 
+  isAiListening, 
+  setIsAiListening, 
+  recognitionRef 
+}: { 
+  onSearch: any; 
+  setQuery: any; 
+  onMicClick: any; 
+  isAiListening?: boolean; 
+  setIsAiListening?: any; 
+  recognitionRef?: any; 
+}) {
   const [text, setText] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAiListening) {
+      if (onSearch) {
+        onSearch(''); // will use any speech results or standard submission
+      }
+      return;
+    }
     if (!text.trim()) return;
     setQuery(text);
     onSearch(text);
@@ -7045,48 +7576,100 @@ function AIConversationalInput({ onSearch, setQuery, onMicClick }: { onSearch: a
   return (
     <form 
       onSubmit={handleSubmit} 
-      className="relative max-w-2xl mx-auto flex items-center bg-white border border-slate-200 rounded-[28px] pl-5 pr-2 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)] transition-all duration-200"
+      className="relative w-full max-w-2xl mx-auto flex items-center bg-white border border-slate-200 rounded-[28px] pl-5 pr-2 py-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.05)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_24px_rgba(0,0,0,0.08)] transition-all duration-200 min-h-[58px]"
     >
-      <input
-        type="text"
-        placeholder="Ask a follow-up or a new question..."
-        className="w-full bg-transparent border-none outline-none text-slate-800 text-[15.5px] px-1 py-1.5 focus:ring-0 leading-normal font-sans"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      
-      <div className="flex items-center justify-center shrink-0 w-11 h-11 relative overflow-hidden">
-        <AnimatePresence mode="wait">
-          {!hasTyped ? (
-            <motion.button
-              key="voice"
-              initial={{ opacity: 0, scale: 0.8, x: 20 }}
-              animate={{ opacity: 1, scale: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.8, x: -20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+      {isAiListening ? (
+        <div className="flex items-center justify-between w-full">
+          {/* Animated Equalizer Visualizer */}
+          <div className="flex items-center gap-1 sm:gap-1.5 px-1 py-1 flex-1 overflow-hidden h-8">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <motion.div
+                key={i}
+                animate={{
+                  scaleY: [0.9, 2.4, 0.9],
+                  opacity: [0.7, 1, 0.7]
+                }}
+                transition={{
+                  repeat: Infinity,
+                  duration: 0.85,
+                  delay: i * 0.04,
+                  ease: "easeInOut"
+                }}
+                className="w-1.5 h-4.5 rounded-full bg-blue-500"
+              />
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Action stop button */}
+            <button
               type="button"
-              onClick={onMicClick}
-              className="p-2.5 bg-slate-50 hover:bg-slate-100/90 text-slate-600 rounded-full active:scale-95 transition-all border-none bg-transparent cursor-pointer flex items-center justify-center"
-              title="Search by voice"
+              onClick={() => {
+                if (recognitionRef?.current) {
+                  try { recognitionRef.current.stop(); } catch(e){}
+                }
+                if (setIsAiListening) setIsAiListening(false);
+              }}
+              className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center cursor-pointer border-none"
+              title="Stop listening"
             >
-              <Mic size={19} className="text-slate-600" />
-            </motion.button>
-          ) : (
-            <motion.button
-              key="send"
-              initial={{ opacity: 0, scale: 0.8, x: 20 }}
-              animate={{ opacity: 1, scale: 1, x: 0 }}
-              exit={{ opacity: 0, scale: 0.8, x: -20 }}
-              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              <div className="w-3 h-3 bg-black rounded-xs" />
+            </button>
+            
+            {/* Action send button */}
+            <button
               type="submit"
-              className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full hover:shadow-lg active:scale-95 border-none cursor-pointer flex items-center justify-center shadow-[0_2px_8px_rgba(37,99,235,0.3)] duration-150"
-              title="Send legacy"
+              className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center cursor-pointer border-none"
+              title="Send"
             >
-              <ArrowUp size={19} className="stroke-[2.5]" />
-            </motion.button>
-          )}
-        </AnimatePresence>
-      </div>
+              <ArrowUp size={18} className="stroke-[2.5]" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <input
+            type="text"
+            placeholder="Ask a follow-up or a new question..."
+            className="w-full bg-transparent border-none outline-none text-slate-800 text-[15.5px] px-1 py-1.5 focus:ring-0 leading-normal font-sans"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          
+          <div className="flex items-center justify-center shrink-0 w-11 h-11 relative overflow-hidden">
+            <AnimatePresence mode="wait">
+              {!hasTyped ? (
+                <motion.button
+                  key="voice"
+                  initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, x: -20 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                  type="button"
+                  onClick={onMicClick}
+                  className="p-2.5 bg-slate-50 hover:bg-slate-100/90 text-slate-600 rounded-full active:scale-95 transition-all border-none bg-transparent cursor-pointer flex items-center justify-center"
+                  title="Search by voice"
+                >
+                  <Mic size={19} className="text-slate-600" />
+                </motion.button>
+              ) : (
+                <motion.button
+                  key="send"
+                  initial={{ opacity: 0, scale: 0.8, x: 20 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, x: -20 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                  type="submit"
+                  className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full hover:shadow-lg active:scale-95 border-none cursor-pointer flex items-center justify-center shadow-[0_2px_8px_rgba(37,99,235,0.3)] duration-150"
+                  title="Send message"
+                >
+                  <ArrowUp size={19} className="stroke-[2.5]" />
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
+        </>
+      )}
     </form>
   );
 }

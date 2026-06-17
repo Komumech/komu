@@ -552,7 +552,7 @@ Return a valid JSON object matching this exact schema:
 If "${targetQuery}" is clearly NOT a movie or TV show, set "isSuccess" to false and empty other fields. Output ONLY valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -1539,7 +1539,7 @@ async function detectAdvancedIntent(query: string) {
 
   try {
     const geminiPromise = ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: `Search query: "${query}"\n\nClassify if this query is a specific company, business, notable brand, organization, product/software, celebrity, historical figure, geographic place, or general knowledge concept that typically warrants an information card/knowledge panel on Scout. Respond strictly with JSON following this schema:\n{\n  "is_entity": boolean,\n  "entity_name": string (canonical display name of the entity, or null if not an entity),\n  "entity_type": string (short category representation, or null)\n}`,
       config: {
         responseMimeType: "application/json",
@@ -1844,12 +1844,20 @@ function mapZillizToPineconeMatch(entity: any) {
   }
 
   const url = entity.url || entity.entity?.url || entity.properties?.url || entity.metadata?.url || "";
-  const image = entity.image || entity.entity?.image || entity.properties?.image || entity.metadata?.image || "";
+  const image = entity.image || entity.entity?.image || entity.properties?.image || entity.metadata?.image ||
+                entity.thumbnail || entity.entity?.thumbnail || entity.properties?.thumbnail || entity.metadata?.thumbnail ||
+                entity.imageUrl || entity.entity?.imageUrl || entity.properties?.imageUrl || entity.metadata?.imageUrl ||
+                entity.entity?.image_url || entity.properties?.image_url || entity.metadata?.image_url ||
+                entity.ogImage || entity.entity?.ogImage || entity.properties?.ogImage ||
+                entity.og_image || entity.entity?.og_image || entity.properties?.og_image || "";
   const domain = entity.domain || entity.entity?.domain || entity.properties?.domain || entity.metadata?.domain || "";
   const displayUrl = entity.displayUrl || entity.entity?.displayUrl || entity.properties?.displayUrl || entity.metadata?.displayUrl || "";
   const date = entity.date || entity.entity?.date || entity.properties?.date || entity.metadata?.date || "";
   const boost = typeof entity.boost === 'number' ? entity.boost : (typeof entity.entity?.boost === 'number' ? entity.entity.boost : 0.0);
-  const is_image = entity.is_image || entity.entity?.is_image || false;
+  let is_image = entity.is_image || entity.entity?.is_image || entity.properties?.is_image || entity.metadata?.is_image || false;
+  if (!is_image && image) {
+    is_image = true;
+  }
   const isEnglish = typeof entity.isEnglish === 'boolean' ? entity.isEnglish : (typeof entity.entity?.isEnglish === 'boolean' ? entity.entity.isEnglish : true);
 
   const alt = entity.alt || entity.alt_text || entity.altText || entity.image_alt || entity.caption || 
@@ -2413,6 +2421,19 @@ const BUSINESS_PROFILES: Record<string, {
     mapPreviewImage: "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=400",
     claimed: true,
     location: { latitude: 37.4849, longitude: -122.1482 }
+  },
+  bakery: {
+    name: "Daily Crumb Bakery",
+    category: "Artisan Sourdough Bakery | Lagos, Nigeria",
+    rating: 4.9,
+    reviewsCount: "248",
+    address: "Daily Crumb Artisan Bakery, Lagos, Nigeria",
+    hours: "Open now · Closes 6:00 PM",
+    phone: "+234 812 345 6789",
+    website: "https://dailycrumb.netlify.app",
+    mapPreviewImage: "https://images.unsplash.com/photo-1549931319-a545dcf3bc73?auto=format&fit=crop&q=80&w=400",
+    claimed: true,
+    location: { latitude: 6.5244, longitude: 3.3792 }
   }
 };
 
@@ -2464,7 +2485,7 @@ Return strictly a JSON object:
   "longitude": number
 }`;
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -2831,7 +2852,7 @@ Respond strictly with a single JSON object matching this schema:
 }`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -2930,6 +2951,12 @@ async function getDynamicBusinessAndApps(query: string, latitude?: number, longi
   const siteMatch = cleanQuery.match(/site:\s*([a-zA-Z0-9.-]+)/i);
   if (siteMatch) {
     cleanQuery = cleanQuery.replace(/site:\s*[a-zA-Z0-9.-]+/i, '').trim();
+  }
+
+  // Handle local bakery intents immediately
+  if (cleanQuery.includes('bakery') || cleanQuery.includes('dailycrumb') || cleanQuery.includes('daily crumb')) {
+    const profile = BUSINESS_PROFILES['bakery'];
+    return { businessProfile: profile, apps: null };
   }
 
   const isNavigational = /direction|route|navigate|map to|way to|get to|drive to|walk to|how do i get/i.test(cleanQuery);
@@ -3221,7 +3248,7 @@ Return a valid JSON object matching this exact schema:
 Only output the valid JSON object, no wrappers or markdown formatting block other than JSON itself.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -3272,7 +3299,7 @@ function checkContentSafety(text: string): boolean {
   // Also check direct substring matches for safety
   const unsafeSubstrings = [
     'sexy', 'porn', 'bestiality', 'sextaboo', 'xvideos', 'pornhub', 'hentai', 'naked', 
-    'vagina', 'clitoris', 'dick', 'asshole', 'milf', 'anal', 'fuck', 'nude', 
+    'vagina', 'clitoris', 'asshole', 'milf', 'anal_', 'fuck', 'nude', 
     'pussy', 'blowjob', 'camgirl', 'redtube', 'youporn', 'chaturbate', 'playboy', 
     'onlyfans'
   ];
@@ -3398,7 +3425,7 @@ Always return a valid JSON object matching this schema:
 If the query is NOT actually searching for a song or song lyrics, or if you are unable to find the actual song/lyrics, set "isSuccess" to false and empty strings for other fields. Only return the JSON.`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.5-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json"
@@ -3451,7 +3478,7 @@ Always return a valid JSON object matching this schema:
 Ensure dates are historically and astronomically correct for 2026/specified year. Only return valid JSON.`;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.5-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json"
@@ -3618,7 +3645,8 @@ Ensure dates are historically and astronomically correct for 2026/specified year
     let intentRes = { matches: [] };
     let vRes = { matches: [] };
     let zillizHits: any[] = [];
-    const optimalTopK = type === 'images' ? 60 : (page === 1 ? 40 : 80);
+    const optimalTopK = type === 'images' ? 350 : (page === 1 ? 40 : 80);
+    const zillizLimit = type === 'images' ? 500 : optimalTopK;
 
     if (pineconeConfigured && index) {
       // Searcher 1: Intent Matcher Namespace Query (super lightweight, topK: 3)
@@ -3656,7 +3684,7 @@ Ensure dates are historically and astronomically correct for 2026/specified year
       }).catch(() => ({ matches: [] }));
 
       // Searcher 3: Parallel Zilliz Index Searcher
-      const zillizSearchPromise = queryZilliz(activeVector, optimalTopK);
+      const zillizSearchPromise = queryZilliz(activeVector, zillizLimit);
 
       // Execute optimized searchers in parallel over the network for ultra-low latency with 1800ms fail-safe timeouts
       const [iRes, valRes, zHits] = await Promise.all([
@@ -3702,7 +3730,12 @@ Ensure dates are historically and astronomically correct for 2026/specified year
       const url = match.metadata?.url || '';
 
       if (!url || url === '#' || url === '') return false;
-      if (title.toLowerCase().includes('zilliz document') || title.toLowerCase() === 'unknown') return false;
+      if (title.toLowerCase().includes('zilliz document') || title.toLowerCase() === 'unknown') {
+        const hasImg = !!(match.metadata?.image || match.metadata?.thumbnail || match.metadata?.ogImage || match.metadata?.imageUrl || match.metadata?.is_image);
+        if (type !== 'images' || !hasImg) {
+          return false;
+        }
+      }
       if (snippet.toLowerCase().includes('no description available')) return false;
 
       const cleanUrl = url.toLowerCase().trim().replace(/\/+$/, '');
@@ -4325,6 +4358,7 @@ Ensure dates are historically and astronomically correct for 2026/specified year
         if (!hasKeywordMatch && type === 'images') {
           const potentialAltFields = [
             r.alt, r.alt_text, r.altText, r.image_alt, r.caption, r.description,
+            r.title, r.snippet, r.url,
             r.card_details ? String(r.card_details) : ''
           ];
           hasKeywordMatch = queryTerms.some(term =>
@@ -4332,7 +4366,8 @@ Ensure dates are historically and astronomically correct for 2026/specified year
           );
         }
         
-        const isHighlyConfidentSemanticMatch = (r.score || 0) >= 0.77;
+        const semanticThreshold = type === 'images' ? 0.35 : 0.77;
+        const isHighlyConfidentSemanticMatch = (r.score || 0) >= semanticThreshold;
         const isVectorZero = !vector || vector.every(x => x === 0);
         
         if (isVectorZero) {
@@ -4340,10 +4375,14 @@ Ensure dates are historically and astronomically correct for 2026/specified year
           // In this case, we require a keyword match to serve a document.
           if (!hasKeywordMatch) return false;
         } else {
-          // Even with non-zero vector, if similarity is weak (< 0.77) and we have absolute 0 keyword matching,
+          // Even with non-zero vector, if similarity is weak and we have absolute 0 keyword matching,
           // throw the generic document out as irrelevant database noise.
           if (!hasKeywordMatch && !isHighlyConfidentSemanticMatch) {
-            return false;
+            if (type === 'images' && (r.score || 0) >= 0.30 && (r.image || r.thumbnail || r.ogImage || r.imageUrl)) {
+              // Permit fallback image match
+            } else {
+              return false;
+            }
           }
         }
       }
@@ -4901,7 +4940,7 @@ If the query is not process-oriented (e.g., asking about price, cost, calculatio
 Make sure all JSON keys are correct. Do NOT output anything other than raw, parsing-ready JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -4997,7 +5036,7 @@ Return a valid JSON object matching this schema:
 Ensure the episode titles, counts, and descriptions correspond to the actual real-world episodic listing for this season. Output only valid JSON.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -5099,14 +5138,22 @@ app.post('/api/ai/generate', async (req, res) => {
       return res.status(503).json({ error: "Gemini API Key is not configured on the server." });
     }
     const response = await ai.models.generateContent({
-      model: model || "gemini-3.5-flash",
+      model: model || "gemini-2.5-flash",
       contents,
       config
     });
     res.json({ text: response.text });
   } catch (err: any) {
     console.error("❌ Backend Gemini proxy error:", err);
-    res.status(500).json({ error: err.message || "Failed to generate content via backend Gemini proxy" });
+    let statusCode = 500;
+    if (err.status && typeof err.status === 'number') {
+      statusCode = err.status;
+    } else if (err.statusCode && typeof err.statusCode === 'number') {
+      statusCode = err.statusCode;
+    } else if (err.message && err.message.includes('429')) {
+      statusCode = 429;
+    }
+    res.status(statusCode).json({ error: err.message || "Failed to generate content via backend Gemini proxy", status: statusCode });
   }
 });
 
