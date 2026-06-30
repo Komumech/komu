@@ -1,54 +1,70 @@
-# Scope: Sparse Neural Search Engine
+# Scope: A Super-Lightweight Neural Search Engine
 
-An ultra-lightweight, production-grade search engine designed around biological neural pathways. Instead of relying on expensive, heavy geometric vector databases that demand massive RAM footprints, Scope leverages sparse concept encoding to achieve AI-level semantic understanding within a highly efficient, edge-cached inverted index.
+A search engine built to work a bit like biological brain pathways, keeping things fast and cheap.
 
-## 🧠 Architecture Overview
-
-Scope treats the search process similarly to synaptic pathways in the human brain. Rather than mapping text into continuous float coordinate spaces, the engine uses a multi-stage, high-efficiency pipeline:
-
-1. **Targeted Crawling:** High-value, curated documentation fields are parsed down to their core structural content.
-2. **Sparse Concept Transformation:** The raw text content is passed through the `BGE-M3` model, expanding semantic intents and converting text into specific **Concept IDs** (neurons) and **Weights** (synaptic strength).
-3. **Index Serialization:** The raw source text is discarded to preserve storage space. The numeric concept IDs and weights are serialized into a highly compressed, flat-binary **SQLite** database.
-4. **Edge Deployment:** The compiled index database is hosted on **Cloudflare R2**. When a user executes a query, serverless functions use optimized HTTP range requests to read binary segments from the index at ultra-low latency.
-
-## 🛠️ Repository Ecosystem
-
-To maintain clean module boundaries, the codebase is separated into two decoupled pipelines:
-* **Core Engine Interface (This Repo):** Manages the frontend UI, query processing, serverless API execution, and live dynamic ranking.
-* **[Scope Crawler Pipeline](REPLACE_WITH_YOUR_CRAWLER_REPO_LINK):** Handles targeted web scraping, cleaning, tokenization, batch model inference, and index generation.
+I decided to build this because I wanted to try a completely different approach to search, and honestly, because I had to. Standard semantic search relies on massive, heavy vector databases that hog a ton of RAM. Since I'm building this on free tiers and don't have funding for expensive database servers, I had to find a workaround. Scope maps text into simple **Concept IDs** and **Weights** instead of giant coordinate graphs. Everything is stored in a highly compressed, edge-cached SQLite database. This completely cuts out the heavy hosting bills while keeping search queries incredibly fast.
 
 ---
 
-## 💾 Database Schema Optimization
+## 🖥️ Interface Preview
 
-The core matching architecture utilizes two optimized data layers inside SQLite to scale millions of records over free-tier object storage:
+![Scope Landing Page](scope-landing.png)
+*Figure 1: The clean and simple search home screen.*
 
-### 1. Inverted Concept Index (`concept_index`)
-Maps individual numeric conceptual components directly to document identifiers, allowing the engine to completely bypass standard vector graph searching.
-* `concept_id` (Integer, Indexed) — The unique abstract language concept token.
-* `site_id` (Integer) — Relational pointer to the indexed resource.
-* `weight` (Real) — Structural model significance score.
-* `interaction_multiplier` (Real) — Dynamic bias variable updated continuously via user click-stream loops to simulate synaptic reinforcement.
+![Scope Search Results](scope-results.png)
+*Figure 2: The results layout showing ranked matches and page descriptions.*
 
-### 2. Document Metadata Store (`site_metadata`)
-A lightweight lookup layer queried only *after* the primary ranking phase to serve the final user interface.
-* `id` (Integer, Primary Key)
-* `url` (Text)
-* `title` (Text)
-* `snippet` (Text) — Highly refined 300-character descriptive preview.
+![Scope Engine Diagnostics](scope-diagnostics.png)
+*Figure 3: A peek under the hood at how Concept IDs and weights get processed.*
 
 ---
 
-## ⚡ Core Features & Algorithmic Shifting
+## 🧠 How It Works
 
-* **No Keyword Overhead:** Traditional engines require an independent keyword index (like BM25) paired awkwardly with a vector model. Because `BGE-M3` tokenizes explicit words alongside abstract synonyms within the same 250,000-token vocabulary, keyword matching and semantic search run natively inside a single unified table lookup.
-* **Synaptic Plasticity:** Search pathways are dynamically reinforced. When users consistently engage with a specific search result, its `interaction_multiplier` increments, adjusting the global ranking weights natively based on communal intent.
-* **Real-Time Freshness Multiplier:** Integrates an in-memory traffic cache layer to identify trending query spikes. When a topic trends, the engine injects a time-decay freshness function to dynamically boost newly crawled documentation pages to the top of the search stack.
+Scope handles searching a lot like how signals travel through a brain. Instead of turning words into long lists of decimal points, the engine follows a simple four-step pipeline:
 
-## 🚀 Technical Requirements & Stack
+1. **Smart Crawling:** It grabs high-quality documentation pages and strips out the clutter to leave just the core text.
+2. **Concept Matching:** The raw text runs through the `BGE-M3` model, which figures out the actual meaning behind the words and breaks them down into specific **Concept IDs** (like neurons) and **Weights** (how important that concept is).
+3. **Saving the Index:** The original messy text is thrown away to save space. Only the numeric concept IDs and weights are packed into a tiny, flat-binary **SQLite** database file.
+4. **Running on the Edge:** That index file sits on **Cloudflare R2** storage. When someone searches for something, quick serverless functions pull just the exact slices of the database they need, keeping response times ultra-low.
 
-* **Language Model:** BGE-M3 Sparse Vector Output
-* **Database Engine:** SQLite + FTS5 Extension
-* **Edge Infra:** Cloudflare R2 Cloud Object Storage
-* **Backend Run:** Serverless Node.js / Python
+## 🛠️ The Repositories
 
+To keep things tidy, the project is split into two separate parts:
+* **The Core UI (This Repo):** Handles the frontend, processes search queries, runs the serverless API, and ranks results on the fly.
+* **The Crawler (https://github.com/Komumech/scope-crawl):** Does the heavy lifting of scraping the web, cleaning the text, and generating the database files.
+
+---
+
+## 💾 Database Setup
+
+The database uses two simple tables inside SQLite to scale up easily without breaking free-tier limits:
+
+### 1. The Concept Index (`concept_index`)
+This connects specific concept numbers directly to the web pages they belong to. It lets the engine skip heavy vector graph math entirely.
+* `concept_id` — The number representing a specific idea or word.
+* `site_id` — A pointer to the web page.
+* `weight` — How important this concept is to the page.
+* `interaction_multiplier` — A small boost score that goes up automatically when users click a link, making popular results naturally climb higher over time.
+
+### 2. The Metadata Store (`site_metadata`)
+A lightweight table that only gets queried at the very end to grab the text shown on the screen.
+* `id` — The page ID.
+* `url` — The web address.
+* `title` — The page title.
+* `snippet` — A quick 300-character description of what's on the page.
+
+---
+
+## ⚡ Key Features
+
+* **No Extra Keyword Tables:** Normal search engines have to awkwardly glue keyword search and AI search together. Because of how `BGE-M3` works, it handles regular exact-word matches and deep conceptual matches inside the exact same table lookup.
+* **User-Driven Re-ranking:** The search paths adapt. If people constantly click a specific result for a query, its multiplier ticks up, and the engine naturally pushes it to the top for the next person.
+* **Freshness Boost:** It keeps a tiny temporary cache to spot trending topics. If a specific keyword suddenly gets a traffic spike, the engine temporarily gives newly crawled pages a boost so you see the newest docs first.
+
+## 🚀 Tech Stack
+
+* **AI Model:** BGE-M3 (Sparse Vector Output)
+* **Database:** SQLite (with FTS5 extension)
+* **Hosting:** Cloudflare R2 Object Storage
+* **Backend:** Serverless Node.js / Python
