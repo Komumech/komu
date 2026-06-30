@@ -1,27 +1,27 @@
-# Scope: A Super-Lightweight Neural Search Engine
+# Scout: A Super-Lightweight Neural Search Engine
 
 A search engine built to work a bit like biological brain pathways, keeping things fast and cheap.
 
-I decided to build this because I wanted to try a completely different approach to search, and honestly, because I had to. Standard semantic search relies on massive, heavy vector databases that hog a ton of RAM. Since I'm building this on free tiers and don't have funding for expensive database servers, I had to find a workaround. Scope maps text into simple **Concept IDs** and **Weights** instead of giant coordinate graphs. Everything is stored in a highly compressed, edge-cached SQLite database. This completely cuts out the heavy hosting bills while keeping search queries incredibly fast.
+I decided to build this using a sparse neural approach because I wanted to try a completely different approach to search, and honestly, because I had to. Standard semantic search relies on massive, heavy vector databases that hog a ton of RAM. Since I'm building this on free tiers and don't have funding for expensive database servers, I had to find a workaround. Scout maps text into simple **Concept IDs** and **Weights** instead of giant coordinate graphs. Everything is stored in a highly compressed, edge-cached SQLite database. This completely cuts out the heavy hosting bills while keeping search queries incredibly fast.
 
 ---
 
 ## 🖥️ Interface Preview
 
-![Scope Landing Page](scope-landing.png)
+![Scout Landing Page](scout-landing.png)
 *Figure 1: The clean and simple search home screen.*
 
-![Scope Search Results](scope-results.png)
+![Scout Search Results](scout-results.png)
 *Figure 2: The results layout showing ranked matches and page descriptions.*
 
-![Scope Engine Diagnostics](scope-diagnostics.png)
+![Scout Engine Diagnostics](scout-diagnostics.png)
 *Figure 3: A peek under the hood at how Concept IDs and weights get processed.*
 
 ---
 
 ## 🧠 How It Works
 
-Scope handles searching a lot like how signals travel through a brain. Instead of turning words into long lists of decimal points, the engine follows a simple four-step pipeline:
+Scout handles searching a lot like how signals travel through a brain. Instead of turning words into long lists of decimal points, the engine follows a simple four-step pipeline:
 
 1. **Smart Crawling:** It grabs high-quality documentation pages and strips out the clutter to leave just the core text.
 2. **Concept Matching:** The raw text runs through the `BGE-M3` model, which figures out the actual meaning behind the words and breaks them down into specific **Concept IDs** (like neurons) and **Weights** (how important that concept is).
@@ -32,7 +32,7 @@ Scope handles searching a lot like how signals travel through a brain. Instead o
 
 To keep things tidy, the project is split into two separate parts:
 * **The Core UI (This Repo):** Handles the frontend, processes search queries, runs the serverless API, and ranks results on the fly.
-* **The Crawler (https://github.com/Komumech/scope-crawl):** Does the heavy lifting of scraping the web, cleaning the text, and generating the database files.
+* **The Crawler (https://github.com/Komumech/scout-crawl):** Does the heavy lifting of scraping the web, cleaning the text, and generating the database files.
 
 ---
 
@@ -68,3 +68,4 @@ A lightweight table that only gets queried at the very end to grab the text show
 * **Database:** SQLite (with FTS5 extension)
 * **Hosting:** Cloudflare R2 Object Storage
 * **Backend:** Serverless Node.js / Python
+
